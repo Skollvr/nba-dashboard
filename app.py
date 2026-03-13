@@ -45,7 +45,7 @@ SORT_OPTIONS = {
 }
 
 ROLE_OPTIONS = ["Todos", "Titular provável", "Reserva"]
-VIEW_OPTIONS = ["Desktop", "Mobile"]
+VIEW_OPTIONS = ["Cards", "Tabela"]
 
 
 def get_season_string(target_date: date) -> str:
@@ -1177,27 +1177,38 @@ def render_team_section(
         unsafe_allow_html=True,
     )
 
-    if view_mode == "Mobile":
+   if view_mode == "Cards":
+    st.markdown(
+        '<div class="section-note">Visual em cards com foto, leitura rápida e detalhamento por jogador.</div>',
+        unsafe_allow_html=True,
+    )
+    render_player_cards_grid(filtered_df)
+else:
+    summary_df, detail_df = build_display_dataframes(filtered_df)
+
+    quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
+
+    with quick_tab:
         st.markdown(
-            '<div class="section-note">Modo mobile: cards por jogador com foto e leitura rápida dos números que mais importam.</div>',
+            '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, tendência e papel do jogador.</div>',
             unsafe_allow_html=True,
         )
-        render_mobile_player_cards(filtered_df)
-    else:
-        summary_df, detail_df = build_display_dataframes(filtered_df)
+        st.dataframe(
+            style_table(summary_df, quick_view=True),
+            use_container_width=True,
+            hide_index=True,
+        )
 
-        quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
-
-        with quick_tab:
-            st.markdown(
-                '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, tendência e papel do jogador.</div>',
-                unsafe_allow_html=True,
-            )
-            st.dataframe(
-                style_table(summary_df, quick_view=True),
-                use_container_width=True,
-                hide_index=True,
-            )
+    with detail_tab:
+        st.markdown(
+            '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST e PRA no mesmo lugar.</div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(
+            style_table(detail_df, quick_view=False),
+            use_container_width=True,
+            hide_index=True,
+        )
 
         with detail_tab:
             st.markdown(
@@ -1308,6 +1319,23 @@ def main() -> None:
         [selected_game["away_team_name"], selected_game["home_team_name"]]
     )
 
+def render_player_cards_grid(filtered_df: pd.DataFrame) -> None:
+    cols_per_row = 2
+
+    rows = [
+        filtered_df.iloc[i:i + cols_per_row]
+        for i in range(0, len(filtered_df), cols_per_row)
+    ]
+
+    for row_df in rows:
+        cols = st.columns(cols_per_row)
+
+        for col_idx in range(cols_per_row):
+            with cols[col_idx]:
+                if col_idx < len(row_df):
+                    render_mobile_player_card(row_df.iloc[col_idx])
+
+    
     with tab1:
         render_team_section(
             team_name=selected_game["away_team_name"],
