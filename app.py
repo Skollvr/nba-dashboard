@@ -1042,20 +1042,25 @@ def render_mobile_badges(role: str, trend: str) -> None:
     )
 
 def render_mobile_detail_metric(title: str, temp_val: float, l5_val: float, l10_val: float) -> None:
-    st.markdown(f"**{title}**")
-    c1, c2, c3 = st.columns(3)
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
 
-    with c1:
-        st.caption("Temp")
-        st.markdown(f"### {format_number(temp_val)}")
+        c1, c2, c3 = st.columns(3)
 
-    with c2:
-        st.caption("L5")
-        st.markdown(f"### {format_number(l5_val)}")
+        with c1:
+            with st.container(border=True):
+                st.caption("Temp")
+                st.markdown(f"### {format_number(temp_val)}")
 
-    with c3:
-        st.caption("L10")
-        st.markdown(f"### {format_number(l10_val)}")
+        with c2:
+            with st.container(border=True):
+                st.caption("L5")
+                st.markdown(f"### {format_number(l5_val)}")
+
+        with c3:
+            with st.container(border=True):
+                st.caption("L10")
+                st.markdown(f"### {format_number(l10_val)}")
 
 
 def render_mobile_player_card(row: pd.Series) -> None:
@@ -1088,36 +1093,37 @@ def render_mobile_player_card(row: pd.Series) -> None:
             st.metric("REB L10", format_number(row["L10_REB"]))
 
         with st.expander("Ver detalhamento completo"):
-            render_mobile_detail_metric(
-                "PRA",
-                row["SEASON_PRA"],
-                row["L5_PRA"],
-                row["L10_PRA"],
-            )
-            st.divider()
+            top_a, top_b = st.columns(2)
+            with top_a:
+                render_mobile_detail_metric(
+                    "PRA",
+                    row["SEASON_PRA"],
+                    row["L5_PRA"],
+                    row["L10_PRA"],
+                )
+            with top_b:
+                render_mobile_detail_metric(
+                    "PTS",
+                    row["SEASON_PTS"],
+                    row["L5_PTS"],
+                    row["L10_PTS"],
+                )
 
-            render_mobile_detail_metric(
-                "PTS",
-                row["SEASON_PTS"],
-                row["L5_PTS"],
-                row["L10_PTS"],
-            )
-            st.divider()
-
-            render_mobile_detail_metric(
-                "REB",
-                row["SEASON_REB"],
-                row["L5_REB"],
-                row["L10_REB"],
-            )
-            st.divider()
-
-            render_mobile_detail_metric(
-                "AST",
-                row["SEASON_AST"],
-                row["L5_AST"],
-                row["L10_AST"],
-            )
+            bottom_a, bottom_b = st.columns(2)
+            with bottom_a:
+                render_mobile_detail_metric(
+                    "REB",
+                    row["SEASON_REB"],
+                    row["L5_REB"],
+                    row["L10_REB"],
+                )
+            with bottom_b:
+                render_mobile_detail_metric(
+                    "AST",
+                    row["SEASON_AST"],
+                    row["L5_AST"],
+                    row["L10_AST"],
+                )
 
 
 def render_mobile_player_cards(filtered_df: pd.DataFrame) -> None:
