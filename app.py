@@ -1120,19 +1120,25 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         defaults = team_df.copy()
         defaults["HIT_RATE_L10"] = 0.0
         defaults["HIT_RATE_L10_TEXT"] = "-"
+        defaults["PTS_HIT_RATE_L10"] = 0.0
+        defaults["PTS_HIT_RATE_L10_TEXT"] = "-"
+        defaults["REB_HIT_RATE_L10"] = 0.0
+        defaults["REB_HIT_RATE_L10_TEXT"] = "-"
+        defaults["AST_HIT_RATE_L10"] = 0.0
+        defaults["AST_HIT_RATE_L10_TEXT"] = "-"
         defaults["VOL_L10"] = 0.0
         defaults["VOL_CLASS"] = "-"
         defaults["FORM_SIGNAL"] = "→ Estável"
         return defaults
 
-    threshold_map = team_df.set_index("PLAYER_ID")["SEASON_PRA"].to_dict()
+    threshold_map = team_df.set_index("PLAYER_ID")[["SEASON_PRA", "SEASON_PTS", "SEASON_REB", "SEASON_AST"]].to_dict("index")
     metrics = []
 
     for player_id, player_logs in team_logs.groupby("PLAYER_ID"):
         recent_logs = player_logs.sort_values("GAME_DATE", ascending=False).copy()
         recent10 = recent_logs.head(10).copy()
         sample_size = len(recent10)
-        threshold = float(threshold_map.get(player_id, 0.0))
+        thresholds = threshold_map.get(player_id, {})
 
         if sample_size == 0:
             metrics.append(
@@ -1140,6 +1146,12 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
                     "PLAYER_ID": player_id,
                     "HIT_RATE_L10": 0.0,
                     "HIT_RATE_L10_TEXT": "-",
+                    "PTS_HIT_RATE_L10": 0.0,
+                    "PTS_HIT_RATE_L10_TEXT": "-",
+                    "REB_HIT_RATE_L10": 0.0,
+                    "REB_HIT_RATE_L10_TEXT": "-",
+                    "AST_HIT_RATE_L10": 0.0,
+                    "AST_HIT_RATE_L10_TEXT": "-",
                     "VOL_L10": 0.0,
                     "VOL_CLASS": "-",
                     "FORM_SIGNAL": "→ Estável",
@@ -1147,8 +1159,20 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
             )
             continue
 
-        hit_count = int((recent10["PRA"] >= threshold).sum()) if threshold > 0 else 0
-        hit_rate = float(hit_count / sample_size)
+        pra_threshold = float(thresholds.get("SEASON_PRA", 0.0))
+        pts_threshold = float(thresholds.get("SEASON_PTS", 0.0))
+        reb_threshold = float(thresholds.get("SEASON_REB", 0.0))
+        ast_threshold = float(thresholds.get("SEASON_AST", 0.0))
+
+        hit_count_pra = int((recent10["PRA"] >= pra_threshold).sum()) if pra_threshold > 0 else 0
+        hit_count_pts = int((recent10["PTS"] >= pts_threshold).sum()) if pts_threshold > 0 else 0
+        hit_count_reb = int((recent10["REB"] >= reb_threshold).sum()) if reb_threshold > 0 else 0
+        hit_count_ast = int((recent10["AST"] >= ast_threshold).sum()) if ast_threshold > 0 else 0
+
+        hit_rate_pra = float(hit_count_pra / sample_size)
+        hit_rate_pts = float(hit_count_pts / sample_size)
+        hit_rate_reb = float(hit_count_reb / sample_size)
+        hit_rate_ast = float(hit_count_ast / sample_size)
         volatility = float(recent10["PRA"].std(ddof=0)) if sample_size > 1 else 0.0
 
         ordered = recent10.sort_values("GAME_DATE")
@@ -1160,8 +1184,14 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         metrics.append(
             {
                 "PLAYER_ID": player_id,
-                "HIT_RATE_L10": hit_rate,
-                "HIT_RATE_L10_TEXT": format_ratio_text(hit_count, sample_size),
+                "HIT_RATE_L10": hit_rate_pra,
+                "HIT_RATE_L10_TEXT": format_ratio_text(hit_count_pra, sample_size),
+                "PTS_HIT_RATE_L10": hit_rate_pts,
+                "PTS_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_pts, sample_size),
+                "REB_HIT_RATE_L10": hit_rate_reb,
+                "REB_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_reb, sample_size),
+                "AST_HIT_RATE_L10": hit_rate_ast,
+                "AST_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_ast, sample_size),
                 "VOL_L10": volatility,
                 "VOL_CLASS": classify_volatility(volatility),
                 "FORM_SIGNAL": classify_form_signal(slope),
@@ -1171,11 +1201,25 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
     metrics_df = pd.DataFrame(metrics)
     enriched = team_df.merge(metrics_df, on="PLAYER_ID", how="left")
 
-    enriched["HIT_RATE_L10"] = pd.to_numeric(enriched["HIT_RATE_L10"], errors="coerce").fillna(0.0)
-    enriched["HIT_RATE_L10_TEXT"] = enriched["HIT_RATE_L10_TEXT"].fillna("-")
-    enriched["VOL_L10"] = pd.to_numeric(enriched["VOL_L10"], errors="coerce").fillna(0.0)
-    enriched["VOL_CLASS"] = enriched["VOL_CLASS"].fillna("-")
-    enriched["FORM_SIGNAL"] = enriched["FORM_SIGNAL"].fillna("→ Estável")
+    defaults_map = {
+        "HIT_RATE_L10": 0.0,
+        "HIT_RATE_L10_TEXT": "-",
+        "PTS_HIT_RATE_L10": 0.0,
+        "PTS_HIT_RATE_L10_TEXT": "-",
+        "REB_HIT_RATE_L10": 0.0,
+        "REB_HIT_RATE_L10_TEXT": "-",
+        "AST_HIT_RATE_L10": 0.0,
+        "AST_HIT_RATE_L10_TEXT": "-",
+        "VOL_L10": 0.0,
+        "VOL_CLASS": "-",
+        "FORM_SIGNAL": "→ Estável",
+    }
+    for col, default in defaults_map.items():
+        if isinstance(default, float):
+            enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(default)
+        else:
+            enriched[col] = enriched[col].fillna(default)
+
     return enriched
 
 
@@ -2064,23 +2108,27 @@ def render_player_support_tiles(row: pd.Series) -> None:
     elif row["MATCHUP_LABEL"] == "Difícil":
         matchup_class = "quick-stat quick-stat-down"
 
+    pts_hit = row.get("PTS_HIT_RATE_L10_TEXT", "-")
+    reb_hit = row.get("REB_HIT_RATE_L10_TEXT", "-")
+    ast_hit = row.get("AST_HIT_RATE_L10_TEXT", "-")
+
     st.markdown(
         f"""
         <div class="player-quick-grid">
             <div class="quick-stat">
                 <div class="quick-stat-label">PTS L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_PTS'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PTS'])} • L5 {format_number(row['L5_PTS'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PTS'])} • L5 {format_number(row['L5_PTS'])} • Hit {pts_hit}</div>
             </div>
             <div class="quick-stat">
                 <div class="quick-stat-label">REB L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_REB'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_REB'])} • L5 {format_number(row['L5_REB'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_REB'])} • L5 {format_number(row['L5_REB'])} • Hit {reb_hit}</div>
             </div>
             <div class="quick-stat">
                 <div class="quick-stat-label">AST L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_AST'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_AST'])} • L5 {format_number(row['L5_AST'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_AST'])} • L5 {format_number(row['L5_AST'])} • Hit {ast_hit}</div>
             </div>
             <div class="{matchup_class}">
                 <div class="quick-stat-label">Matchup</div>
