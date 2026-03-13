@@ -25,19 +25,16 @@ TEAM_LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/primary/L/logo.svg"
 PLAYER_HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png"
 
 SORT_OPTIONS = {
-    "PRA L5": "L5_PRA",
     "PRA L10": "L10_PRA",
-    "PRA temporada": "SEASON_PRA",
-    "Δ PRA L5 vs Temp": "DELTA_PRA_L5",
     "Δ PRA L10 vs Temp": "DELTA_PRA_L10",
-    "PTS L5": "L5_PTS",
+    "PRA L5": "L5_PRA",
+    "Δ PRA L5 vs Temp": "DELTA_PRA_L5",
     "PTS L10": "L10_PTS",
-    "PTS temporada": "SEASON_PTS",
-    "REB L5": "L5_REB",
     "REB L10": "L10_REB",
-    "REB temporada": "SEASON_REB",
-    "AST L5": "L5_AST",
     "AST L10": "L10_AST",
+    "PRA temporada": "SEASON_PRA",
+    "PTS temporada": "SEASON_PTS",
+    "REB temporada": "SEASON_REB",
     "AST temporada": "SEASON_AST",
     "Minutos por jogo": "SEASON_MIN",
     "Jogos na temporada": "SEASON_GP",
@@ -46,6 +43,7 @@ SORT_OPTIONS = {
 
 ROLE_OPTIONS = ["Todos", "Titular provável", "Reserva"]
 VIEW_OPTIONS = ["Cards", "Tabela"]
+CHART_OPTIONS = ["Compacto", "Completo"]
 
 
 def get_season_string(target_date: date) -> str:
@@ -81,23 +79,19 @@ def format_signed_number(value, decimals: int = 1) -> str:
         return "-"
 
 
-def get_opponent_label(matchup: str) -> str:
+def get_matchup_parts(matchup: str) -> tuple[str, str]:
     if not isinstance(matchup, str) or matchup.strip() == "":
-        return ""
+        return "", ""
 
     cleaned = matchup.replace("vs.", "vs").strip()
     parts = cleaned.split()
 
     if len(parts) < 3:
-        return ""
+        return "", ""
 
     venue = "vs" if "vs" in parts else "@"
     opponent_abbr = parts[-1].strip().upper()
-
-    opponent_team = TEAM_ABBR_LOOKUP.get(opponent_abbr, {})
-    opponent_name = opponent_team.get("nickname") or opponent_team.get("full_name") or opponent_abbr
-
-    return f"{venue} {opponent_name}"
+    return venue, opponent_abbr
 
 
 def inject_css() -> None:
@@ -383,12 +377,10 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     if "POSITION" not in roster.columns:
         roster["POSITION"] = ""
 
-    if season_stats.empty:
-        season_view = pd.DataFrame(
-            columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST"]
-        )
-    else:
-        season_view = season_stats.rename(
+    season_view = (
+        pd.DataFrame(columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST"])
+        if season_stats.empty
+        else season_stats.rename(
             columns={
                 "GP": "SEASON_GP",
                 "MIN": "SEASON_MIN",
@@ -397,13 +389,12 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
                 "AST": "SEASON_AST",
             }
         )
+    )
 
-    if last5_stats.empty:
-        last5_view = pd.DataFrame(
-            columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST"]
-        )
-    else:
-        last5_view = last5_stats.rename(
+    last5_view = (
+        pd.DataFrame(columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST"])
+        if last5_stats.empty
+        else last5_stats.rename(
             columns={
                 "GP": "L5_GP",
                 "MIN": "L5_MIN",
@@ -412,13 +403,12 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
                 "AST": "L5_AST",
             }
         )
+    )
 
-    if last10_stats.empty:
-        last10_view = pd.DataFrame(
-            columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST"]
-        )
-    else:
-        last10_view = last10_stats.rename(
+    last10_view = (
+        pd.DataFrame(columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST"])
+        if last10_stats.empty
+        else last10_stats.rename(
             columns={
                 "GP": "L10_GP",
                 "MIN": "L10_MIN",
@@ -427,6 +417,7 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
                 "AST": "L10_AST",
             }
         )
+    )
 
     team_df = roster.merge(
         season_view[["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST"]],
@@ -472,18 +463,18 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     team_df["DELTA_PRA_L5"] = team_df["L5_PRA"] - team_df["SEASON_PRA"]
     team_df["DELTA_PRA_L10"] = team_df["L10_PRA"] - team_df["SEASON_PRA"]
 
-    def classify_form(delta_pra_l5: float) -> str:
-        if delta_pra_l5 >= 3.0:
+    def classify_form(delta_pra_l10: float) -> str:
+        if delta_pra_l10 >= 3.0:
             return "🔥 Forte"
-        if delta_pra_l5 >= 1.0:
+        if delta_pra_l10 >= 1.0:
             return "⬆️ Boa"
-        if delta_pra_l5 <= -3.0:
+        if delta_pra_l10 <= -3.0:
             return "🥶 Queda"
-        if delta_pra_l5 <= -1.0:
+        if delta_pra_l10 <= -1.0:
             return "⬇️ Fraca"
         return "➖ Neutra"
 
-    team_df["TREND"] = team_df["DELTA_PRA_L5"].apply(classify_form)
+    team_df["TREND"] = team_df["DELTA_PRA_L10"].apply(classify_form)
 
     team_df["ROLE"] = "Reserva"
     starter_pool = team_df.sort_values(
@@ -743,10 +734,6 @@ def build_summary_cards_data(
     home_filtered = apply_filters(home_df, min_games, min_minutes, role_filter).copy()
 
     combined = pd.concat([away_filtered, home_filtered], ignore_index=True)
-
-    if combined.empty:
-        return combined
-
     return combined
 
 
@@ -782,42 +769,42 @@ def render_summary_cards(
         st.info("Nenhum jogador passou pelos filtros atuais para montar os cards.")
         return
 
-    best_pra = combined.sort_values("L5_PRA", ascending=False).iloc[0]
-    best_delta = combined.sort_values("DELTA_PRA_L5", ascending=False).iloc[0]
-    best_pts = combined.sort_values("L5_PTS", ascending=False).iloc[0]
-    best_reb = combined.sort_values("L5_REB", ascending=False).iloc[0]
-    best_ast = combined.sort_values("L5_AST", ascending=False).iloc[0]
+    best_pra = combined.sort_values("L10_PRA", ascending=False).iloc[0]
+    best_delta = combined.sort_values("DELTA_PRA_L10", ascending=False).iloc[0]
+    best_pts = combined.sort_values("L10_PTS", ascending=False).iloc[0]
+    best_reb = combined.sort_values("L10_REB", ascending=False).iloc[0]
+    best_ast = combined.sort_values("L10_AST", ascending=False).iloc[0]
 
     cols = st.columns(5)
 
     cards = [
         (
-            "PRA L5 líder",
-            format_number(best_pra["L5_PRA"]),
+            "PRA L10 líder",
+            format_number(best_pra["L10_PRA"]),
             f'{best_pra["PLAYER"]} • {best_pra["TEAM_NAME"]}',
             f'Temporada: {format_number(best_pra["SEASON_PRA"])}',
         ),
         (
-            "Maior alta L5",
-            format_signed_number(best_delta["DELTA_PRA_L5"]),
+            "Maior alta L10",
+            format_signed_number(best_delta["DELTA_PRA_L10"]),
             f'{best_delta["PLAYER"]} • {best_delta["TEAM_NAME"]}',
-            f'PRA L5: {format_number(best_delta["L5_PRA"])}',
+            f'PRA L10: {format_number(best_delta["L10_PRA"])}',
         ),
         (
-            "Pontos L5",
-            format_number(best_pts["L5_PTS"]),
+            "Pontos L10",
+            format_number(best_pts["L10_PTS"]),
             f'{best_pts["PLAYER"]} • {best_pts["TEAM_NAME"]}',
             f'Temporada: {format_number(best_pts["SEASON_PTS"])}',
         ),
         (
-            "Rebotes L5",
-            format_number(best_reb["L5_REB"]),
+            "Rebotes L10",
+            format_number(best_reb["L10_REB"]),
             f'{best_reb["PLAYER"]} • {best_reb["TEAM_NAME"]}',
             f'Temporada: {format_number(best_reb["SEASON_REB"])}',
         ),
         (
-            "Assistências L5",
-            format_number(best_ast["L5_AST"]),
+            "Assistências L10",
+            format_number(best_ast["L10_AST"]),
             f'{best_ast["PLAYER"]} • {best_ast["TEAM_NAME"]}',
             f'Temporada: {format_number(best_ast["SEASON_AST"])}',
         ),
@@ -835,22 +822,8 @@ def render_summary_cards(
                 unsafe_allow_html=True,
             )
 
-def get_matchup_parts(matchup: str) -> tuple[str, str]:
-    if not isinstance(matchup, str) or matchup.strip() == "":
-        return "", ""
 
-    cleaned = matchup.replace("vs.", "vs").strip()
-    parts = cleaned.split()
-
-    if len(parts) < 3:
-        return "", ""
-
-    venue = "vs" if "vs" in parts else "@"
-    opponent_abbr = parts[-1].strip().upper()
-    return venue, opponent_abbr
-
-
-def render_player_chart(player_name: str, player_id: int, season: str, view_mode: str) -> None:
+def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str) -> None:
     log = get_player_log(player_id, season)
 
     if log.empty:
@@ -888,30 +861,33 @@ def render_player_chart(player_name: str, player_id: int, season: str, view_mode
         axis=1,
     )
 
-    top_left, top_right = st.columns([1, 5])
+    top_left, top_right = st.columns([1, 6])
 
     with top_left:
-        st.image(get_player_headshot_url(int(player_id)), width=78)
+        st.image(get_player_headshot_url(int(player_id)), width=82)
 
     with top_right:
         st.markdown(f"### Últimos jogos — {player_name}")
-        st.caption("No mobile, o gráfico mostra os últimos 5 jogos em barras. No desktop, mantém a visão de 10 jogos.")
+        if chart_mode == "Compacto":
+            st.caption("Visual compacto: barras, últimos 5 jogos e uma métrica por vez.")
+        else:
+            st.caption("Visual completo: linhas, últimos 10 jogos.")
 
-    if view_mode == "Mobile":
+    if chart_mode == "Compacto":
         metric = st.radio(
             "Métrica do gráfico",
             ["PRA", "PTS", "REB", "AST"],
             horizontal=True,
-            key=f"metric_chart_{player_id}_{view_mode}",
+            key=f"metric_chart_{player_id}_{chart_mode}",
         )
 
-        recent_mobile = recent.tail(5).copy()
+        recent_view = recent.tail(5).copy()
 
         fig = go.Figure(
             go.Bar(
-                x=recent_mobile["SHORT_LABEL"],
-                y=recent_mobile[metric],
-                text=recent_mobile[metric].round(1),
+                x=recent_view["SHORT_LABEL"],
+                y=recent_view[metric],
+                text=recent_view[metric].round(1),
                 textposition="outside",
                 marker=dict(color="#4ade80"),
                 hovertemplate=f"{metric}: %{{y:.1f}}<extra></extra>",
@@ -921,7 +897,7 @@ def render_player_chart(player_name: str, player_id: int, season: str, view_mode
         fig.update_layout(
             template="plotly_dark",
             height=360,
-            margin=dict(l=20, r=20, t=20, b=20),
+            margin=dict(l=20, r=20, t=10, b=20),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(15,23,42,0.35)",
             showlegend=False,
@@ -942,20 +918,19 @@ def render_player_chart(player_name: str, player_id: int, season: str, view_mode
         )
 
         st.plotly_chart(fig, use_container_width=True)
-
         st.caption(
-            f"{metric} • Temp: {recent[metric].mean():.1f} | L5: {recent_mobile[metric].mean():.1f}"
+            f"{metric} • Temp: {recent[metric].mean():.1f} | L5: {recent_view[metric].mean():.1f}"
         )
 
     else:
-        recent_desktop = recent.tail(10).copy()
+        recent_view = recent.tail(10).copy()
 
         fig = go.Figure()
 
         fig.add_trace(
             go.Scatter(
-                x=recent_desktop["SHORT_LABEL"],
-                y=recent_desktop["PRA"],
+                x=recent_view["SHORT_LABEL"],
+                y=recent_view["PRA"],
                 mode="lines+markers",
                 name="PRA",
                 line=dict(width=4, color="#8b5cf6"),
@@ -964,8 +939,8 @@ def render_player_chart(player_name: str, player_id: int, season: str, view_mode
         )
         fig.add_trace(
             go.Scatter(
-                x=recent_desktop["SHORT_LABEL"],
-                y=recent_desktop["PTS"],
+                x=recent_view["SHORT_LABEL"],
+                y=recent_view["PTS"],
                 mode="lines+markers",
                 name="PTS",
                 line=dict(width=2.2, color="#38bdf8"),
@@ -975,8 +950,8 @@ def render_player_chart(player_name: str, player_id: int, season: str, view_mode
         )
         fig.add_trace(
             go.Scatter(
-                x=recent_desktop["SHORT_LABEL"],
-                y=recent_desktop["REB"],
+                x=recent_view["SHORT_LABEL"],
+                y=recent_view["REB"],
                 mode="lines+markers",
                 name="REB",
                 line=dict(width=2.2, color="#34d399"),
@@ -986,8 +961,8 @@ def render_player_chart(player_name: str, player_id: int, season: str, view_mode
         )
         fig.add_trace(
             go.Scatter(
-                x=recent_desktop["SHORT_LABEL"],
-                y=recent_desktop["AST"],
+                x=recent_view["SHORT_LABEL"],
+                y=recent_view["AST"],
                 mode="lines+markers",
                 name="AST",
                 line=dict(width=2.2, color="#f59e0b"),
@@ -1021,7 +996,7 @@ def render_player_chart(player_name: str, player_id: int, season: str, view_mode
         st.plotly_chart(fig, use_container_width=True)
 
 
-def render_mobile_badges(role: str, trend: str) -> None:
+def render_badges(role: str, trend: str) -> None:
     role_class = "badge-starter" if role == "Titular provável" else "badge-bench"
 
     if trend in ["🔥 Forte", "⬆️ Boa"]:
@@ -1041,10 +1016,10 @@ def render_mobile_badges(role: str, trend: str) -> None:
         unsafe_allow_html=True,
     )
 
-def render_mobile_detail_metric(title: str, temp_val: float, l5_val: float, l10_val: float) -> None:
+
+def render_detail_metric_boxes(title: str, temp_val: float, l5_val: float, l10_val: float) -> None:
     with st.container(border=True):
         st.markdown(f"**{title}**")
-
         c1, c2, c3 = st.columns(3)
 
         with c1:
@@ -1063,7 +1038,7 @@ def render_mobile_detail_metric(title: str, temp_val: float, l5_val: float, l10_
                 st.markdown(f"### {format_number(l10_val)}")
 
 
-def render_mobile_player_card(row: pd.Series) -> None:
+def render_player_card(row: pd.Series) -> None:
     with st.container(border=True):
         top_left, top_right = st.columns([1, 4])
 
@@ -1076,7 +1051,7 @@ def render_mobile_player_card(row: pd.Series) -> None:
             st.caption(
                 f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}"
             )
-            render_mobile_badges(row["ROLE"], row["TREND"])
+            render_badges(row["ROLE"], row["TREND"])
 
         r1c1, r1c2, r1c3 = st.columns(3)
         with r1c1:
@@ -1095,14 +1070,14 @@ def render_mobile_player_card(row: pd.Series) -> None:
         with st.expander("Ver detalhamento completo"):
             top_a, top_b = st.columns(2)
             with top_a:
-                render_mobile_detail_metric(
+                render_detail_metric_boxes(
                     "PRA",
                     row["SEASON_PRA"],
                     row["L5_PRA"],
                     row["L10_PRA"],
                 )
             with top_b:
-                render_mobile_detail_metric(
+                render_detail_metric_boxes(
                     "PTS",
                     row["SEASON_PTS"],
                     row["L5_PTS"],
@@ -1111,14 +1086,14 @@ def render_mobile_player_card(row: pd.Series) -> None:
 
             bottom_a, bottom_b = st.columns(2)
             with bottom_a:
-                render_mobile_detail_metric(
+                render_detail_metric_boxes(
                     "REB",
                     row["SEASON_REB"],
                     row["L5_REB"],
                     row["L10_REB"],
                 )
             with bottom_b:
-                render_mobile_detail_metric(
+                render_detail_metric_boxes(
                     "AST",
                     row["SEASON_AST"],
                     row["L5_AST"],
@@ -1126,25 +1101,19 @@ def render_mobile_player_card(row: pd.Series) -> None:
                 )
 
 
-def render_mobile_player_cards(filtered_df: pd.DataFrame) -> None:
-    for _, row in filtered_df.iterrows():
-        render_mobile_player_card(row)
-        st.write("")
-def render_player_cards_grid(filtered_df: pd.DataFrame) -> None:
-    cols_per_row = 2
-
+def render_player_cards_grid(filtered_df: pd.DataFrame, cards_per_row: int = 2) -> None:
     rows = [
-        filtered_df.iloc[i:i + cols_per_row]
-        for i in range(0, len(filtered_df), cols_per_row)
+        filtered_df.iloc[i:i + cards_per_row]
+        for i in range(0, len(filtered_df), cards_per_row)
     ]
 
     for row_df in rows:
-        cols = st.columns(cols_per_row)
+        cols = st.columns(cards_per_row)
 
-        for col_idx in range(cols_per_row):
+        for col_idx in range(cards_per_row):
             with cols[col_idx]:
                 if col_idx < len(row_df):
-                    render_mobile_player_card(row_df.iloc[col_idx])
+                    render_player_card(row_df.iloc[col_idx])
 
 
 def render_team_section(
@@ -1157,6 +1126,8 @@ def render_team_section(
     sort_label: str,
     ascending: bool,
     view_mode: str,
+    chart_mode: str,
+    cards_per_row: int,
 ) -> None:
     st.subheader(team_name)
 
@@ -1194,10 +1165,10 @@ def render_team_section(
 
     if view_mode == "Cards":
         st.markdown(
-            '<div class="section-note">Visual em cards com foto, leitura rápida e detalhamento por jogador.</div>',
+            '<div class="section-note">Cards com foto, leitura rápida em L10 e detalhamento em mini caixas.</div>',
             unsafe_allow_html=True,
         )
-        render_player_cards_grid(filtered_df)
+        render_player_cards_grid(filtered_df, cards_per_row=cards_per_row)
     else:
         summary_df, detail_df = build_display_dataframes(filtered_df)
 
@@ -1229,20 +1200,20 @@ def render_team_section(
     player_name = st.selectbox(
         f"Ver gráfico de jogador — {team_name}",
         options["PLAYER"].tolist(),
-        key=f"player_select_{team_name}_{view_mode}",
+        key=f"player_select_{team_name}_{view_mode}_{chart_mode}",
     )
     selected_player_id = int(
         options.loc[options["PLAYER"] == player_name, "PLAYER_ID"].iloc[0]
     )
+    render_player_chart(player_name, selected_player_id, season, chart_mode)
 
-    render_player_chart(player_name, selected_player_id, season, view_mode)
 
 def main() -> None:
     inject_css()
 
     st.markdown('<div class="main-title">NBA Dashboard MVP</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com visual desktop ou cards mobile.</div>',
+        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com cards ou tabela, sem sofrer à toa.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1253,6 +1224,8 @@ def main() -> None:
         st.divider()
         st.subheader("Visualização")
         view_mode = st.radio("Modo de exibição", VIEW_OPTIONS, index=0)
+        chart_mode = st.radio("Modo do gráfico", CHART_OPTIONS, index=0)
+        cards_per_row = st.select_slider("Cards por linha", options=[1, 2], value=2)
 
         st.divider()
         st.subheader("Filtros")
@@ -1263,7 +1236,7 @@ def main() -> None:
         st.divider()
         st.subheader("Ordenação")
         sort_labels = list(SORT_OPTIONS.keys())
-        default_sort_index = sort_labels.index("PRA L5")
+        default_sort_index = sort_labels.index("PRA L10")
         sort_label = st.selectbox(
             "Ordenar jogadores por",
             options=sort_labels,
@@ -1323,23 +1296,6 @@ def main() -> None:
         [selected_game["away_team_name"], selected_game["home_team_name"]]
     )
 
-def render_player_cards_grid(filtered_df: pd.DataFrame) -> None:
-    cols_per_row = 2
-
-    rows = [
-        filtered_df.iloc[i:i + cols_per_row]
-        for i in range(0, len(filtered_df), cols_per_row)
-    ]
-
-    for row_df in rows:
-        cols = st.columns(cols_per_row)
-
-        for col_idx in range(cols_per_row):
-            with cols[col_idx]:
-                if col_idx < len(row_df):
-                    render_mobile_player_card(row_df.iloc[col_idx])
-
-    
     with tab1:
         render_team_section(
             team_name=selected_game["away_team_name"],
@@ -1351,6 +1307,8 @@ def render_player_cards_grid(filtered_df: pd.DataFrame) -> None:
             sort_label=sort_label,
             ascending=ascending,
             view_mode=view_mode,
+            chart_mode=chart_mode,
+            cards_per_row=cards_per_row,
         )
 
     with tab2:
@@ -1364,6 +1322,8 @@ def render_player_cards_grid(filtered_df: pd.DataFrame) -> None:
             sort_label=sort_label,
             ascending=ascending,
             view_mode=view_mode,
+            chart_mode=chart_mode,
+            cards_per_row=cards_per_row,
         )
 
     st.markdown(
