@@ -1130,6 +1130,21 @@ def render_mobile_player_cards(filtered_df: pd.DataFrame) -> None:
     for _, row in filtered_df.iterrows():
         render_mobile_player_card(row)
         st.write("")
+def render_player_cards_grid(filtered_df: pd.DataFrame) -> None:
+    cols_per_row = 2
+
+    rows = [
+        filtered_df.iloc[i:i + cols_per_row]
+        for i in range(0, len(filtered_df), cols_per_row)
+    ]
+
+    for row_df in rows:
+        cols = st.columns(cols_per_row)
+
+        for col_idx in range(cols_per_row):
+            with cols[col_idx]:
+                if col_idx < len(row_df):
+                    render_mobile_player_card(row_df.iloc[col_idx])
 
 
 def render_team_section(
@@ -1177,38 +1192,27 @@ def render_team_section(
         unsafe_allow_html=True,
     )
 
-   if view_mode == "Cards":
-    st.markdown(
-        '<div class="section-note">Visual em cards com foto, leitura rápida e detalhamento por jogador.</div>',
-        unsafe_allow_html=True,
-    )
-    render_player_cards_grid(filtered_df)
-else:
-    summary_df, detail_df = build_display_dataframes(filtered_df)
-
-    quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
-
-    with quick_tab:
+    if view_mode == "Cards":
         st.markdown(
-            '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, tendência e papel do jogador.</div>',
+            '<div class="section-note">Visual em cards com foto, leitura rápida e detalhamento por jogador.</div>',
             unsafe_allow_html=True,
         )
-        st.dataframe(
-            style_table(summary_df, quick_view=True),
-            use_container_width=True,
-            hide_index=True,
-        )
+        render_player_cards_grid(filtered_df)
+    else:
+        summary_df, detail_df = build_display_dataframes(filtered_df)
 
-    with detail_tab:
-        st.markdown(
-            '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST e PRA no mesmo lugar.</div>',
-            unsafe_allow_html=True,
-        )
-        st.dataframe(
-            style_table(detail_df, quick_view=False),
-            use_container_width=True,
-            hide_index=True,
-        )
+        quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
+
+        with quick_tab:
+            st.markdown(
+                '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, tendência e papel do jogador.</div>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                style_table(summary_df, quick_view=True),
+                use_container_width=True,
+                hide_index=True,
+            )
 
         with detail_tab:
             st.markdown(
@@ -1230,8 +1234,8 @@ else:
     selected_player_id = int(
         options.loc[options["PLAYER"] == player_name, "PLAYER_ID"].iloc[0]
     )
-    render_player_chart(player_name, selected_player_id, season, view_mode)
 
+    render_player_chart(player_name, selected_player_id, season, view_mode)
 
 def main() -> None:
     inject_css()
