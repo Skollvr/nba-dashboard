@@ -58,7 +58,7 @@ def inject_css() -> None:
         """
         <style>
         .block-container {
-            padding-top: 1.4rem;
+            padding-top: 1.2rem;
             padding-bottom: 2rem;
         }
         .main-title {
@@ -68,14 +68,14 @@ def inject_css() -> None:
         }
         .subtitle {
             color: #94a3b8;
-            margin-bottom: 1.2rem;
+            margin-bottom: 1.1rem;
         }
         .game-card {
             background: linear-gradient(135deg, rgba(29,78,216,.22), rgba(124,58,237,.18));
             border: 1px solid rgba(148,163,184,.16);
             border-radius: 18px;
             padding: 1rem 1.1rem;
-            margin-bottom: 0.8rem;
+            margin-bottom: 0.9rem;
         }
         .team-name {
             font-size: 1.15rem;
@@ -111,6 +111,11 @@ def inject_css() -> None:
             font-size: 0.85rem;
             margin-right: 0.35rem;
             margin-bottom: 0.35rem;
+        }
+        .section-note {
+            color: #cbd5e1;
+            font-size: 0.92rem;
+            margin-bottom: 0.55rem;
         }
         </style>
         """,
@@ -425,14 +430,26 @@ def filter_and_sort_team_df(
     return filtered.reset_index(drop=True)
 
 
-def format_team_display_df(team_df: pd.DataFrame) -> pd.DataFrame:
+def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     display_df = team_df.copy()
 
     display_df["Jogador"] = display_df["PLAYER"]
     display_df["Pos"] = display_df["POSITION"].replace("", "-")
-    display_df["Papel"] = display_df["ROLE"]
+    display_df["Papel"] = display_df["ROLE"].map(
+        {
+            "Titular provável": "⭐ Titular provável",
+            "Reserva": "🪑 Reserva",
+        }
+    )
     display_df["GP"] = display_df["SEASON_GP"].round(0).astype(int)
     display_df["MIN"] = display_df["SEASON_MIN"].round(1)
+
+    display_df["PRA Temp"] = display_df["SEASON_PRA"].round(1)
+    display_df["PRA L5"] = display_df["L5_PRA"].round(1)
+    display_df["PRA L10"] = display_df["L10_PRA"].round(1)
+    display_df["Δ PRA L5"] = display_df["DELTA_PRA_L5"].round(1)
+    display_df["Δ PRA L10"] = display_df["DELTA_PRA_L10"].round(1)
+    display_df["Trend"] = display_df["TREND"]
 
     display_df["PTS Temp"] = display_df["SEASON_PTS"].round(1)
     display_df["PTS L5"] = display_df["L5_PTS"].round(1)
@@ -446,15 +463,22 @@ def format_team_display_df(team_df: pd.DataFrame) -> pd.DataFrame:
     display_df["AST L5"] = display_df["L5_AST"].round(1)
     display_df["AST L10"] = display_df["L10_AST"].round(1)
 
-    display_df["PRA Temp"] = display_df["SEASON_PRA"].round(1)
-    display_df["PRA L5"] = display_df["L5_PRA"].round(1)
-    display_df["PRA L10"] = display_df["L10_PRA"].round(1)
+    summary_df = display_df[
+        [
+            "Jogador",
+            "Papel",
+            "GP",
+            "MIN",
+            "PRA Temp",
+            "PRA L5",
+            "PRA L10",
+            "Δ PRA L5",
+            "Δ PRA L10",
+            "Trend",
+        ]
+    ].copy()
 
-    display_df["Δ PRA L5"] = display_df["DELTA_PRA_L5"].round(1)
-    display_df["Δ PRA L10"] = display_df["DELTA_PRA_L10"].round(1)
-    display_df["Trend"] = display_df["TREND"]
-
-    return display_df[
+    detail_df = display_df[
         [
             "Jogador",
             "Pos",
@@ -478,6 +502,78 @@ def format_team_display_df(team_df: pd.DataFrame) -> pd.DataFrame:
             "Trend",
         ]
     ].copy()
+
+    return summary_df, detail_df
+
+
+def color_delta(val) -> str:
+    try:
+        value = float(val)
+    except (TypeError, ValueError):
+        return ""
+
+    if value >= 3:
+        return "background-color: rgba(34,197,94,0.35); color: #dcfce7; font-weight: 700;"
+    if value >= 1:
+        return "background-color: rgba(34,197,94,0.18); color: #bbf7d0; font-weight: 600;"
+    if value <= -3:
+        return "background-color: rgba(239,68,68,0.35); color: #fee2e2; font-weight: 700;"
+    if value <= -1:
+        return "background-color: rgba(239,68,68,0.18); color: #fecaca; font-weight: 600;"
+    return "color: #cbd5e1;"
+
+
+def color_trend(val) -> str:
+    mapping = {
+        "🔥 Forte": "background-color: rgba(249,115,22,0.28); color: #ffedd5; font-weight: 700;",
+        "⬆️ Boa": "background-color: rgba(34,197,94,0.20); color: #dcfce7; font-weight: 700;",
+        "➖ Neutra": "background-color: rgba(148,163,184,0.16); color: #e2e8f0; font-weight: 600;",
+        "⬇️ Fraca": "background-color: rgba(234,179,8,0.18); color: #fef9c3; font-weight: 700;",
+        "🥶 Queda": "background-color: rgba(59,130,246,0.22); color: #dbeafe; font-weight: 700;",
+    }
+    return mapping.get(val, "")
+
+
+def color_role(val) -> str:
+    if "Titular" in str(val):
+        return "background-color: rgba(168,85,247,0.22); color: #f3e8ff; font-weight: 700;"
+    if "Reserva" in str(val):
+        return "background-color: rgba(100,116,139,0.18); color: #e2e8f0; font-weight: 600;"
+    return ""
+
+
+def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
+    styler = df.style.format(na_rep="-")
+
+    pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10"] if c in df.columns]
+    delta_cols = [c for c in ["Δ PRA L5", "Δ PRA L10"] if c in df.columns]
+    center_cols = [c for c in ["Papel", "GP", "MIN", "Trend"] if c in df.columns]
+
+    if pra_cols:
+        styler = styler.background_gradient(cmap="Purples", subset=pra_cols)
+
+    if delta_cols:
+        styler = styler.map(color_delta, subset=delta_cols)
+
+    if "Trend" in df.columns:
+        styler = styler.map(color_trend, subset=["Trend"])
+
+    if "Papel" in df.columns:
+        styler = styler.map(color_role, subset=["Papel"])
+
+    if "Jogador" in df.columns:
+        styler = styler.set_properties(subset=["Jogador"], **{"font-weight": "700"})
+
+    if center_cols:
+        styler = styler.set_properties(subset=center_cols, **{"text-align": "center"})
+
+    if quick_view:
+        styler = styler.set_properties(
+            subset=[c for c in ["PRA Temp", "PRA L5", "PRA L10", "Δ PRA L5", "Δ PRA L10"] if c in df.columns],
+            **{"font-weight": "650"}
+        )
+
+    return styler
 
 
 def render_game_card(game_row: pd.Series) -> None:
@@ -515,10 +611,20 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
     fig.add_trace(
         go.Scatter(
             x=recent["GAME_DATE"],
+            y=recent["PRA"],
+            mode="lines+markers",
+            name="PRA",
+            line=dict(width=4, dash="dot"),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=recent["GAME_DATE"],
             y=recent["PTS"],
             mode="lines+markers",
             name="PTS",
-            line=dict(width=3),
+            line=dict(width=2.5),
+            opacity=0.85,
         )
     )
     fig.add_trace(
@@ -527,7 +633,8 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
             y=recent["REB"],
             mode="lines+markers",
             name="REB",
-            line=dict(width=3),
+            line=dict(width=2.5),
+            opacity=0.85,
         )
     )
     fig.add_trace(
@@ -536,16 +643,8 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
             y=recent["AST"],
             mode="lines+markers",
             name="AST",
-            line=dict(width=3),
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=recent["GAME_DATE"],
-            y=recent["PRA"],
-            mode="lines+markers",
-            name="PRA",
-            line=dict(width=3, dash="dot"),
+            line=dict(width=2.5),
+            opacity=0.85,
         )
     )
 
@@ -599,21 +698,39 @@ def render_team_section(
     st.markdown(
         f"""
         <div class="info-pill">Jogadores exibidos: {len(filtered_df)}</div>
-        <div class="info-pill">Filtro GP mínimo: {min_games}</div>
-        <div class="info-pill">Filtro MIN mínimo: {min_minutes}</div>
+        <div class="info-pill">GP mínimo: {min_games}</div>
+        <div class="info-pill">MIN mínimo: {min_minutes}</div>
         <div class="info-pill">Papel: {role_filter}</div>
         <div class="info-pill">Ordenação: {sort_label}</div>
         """,
         unsafe_allow_html=True,
     )
 
-    display_df = format_team_display_df(filtered_df)
+    summary_df, detail_df = build_display_dataframes(filtered_df)
 
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-    )
+    quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
+
+    with quick_tab:
+        st.markdown(
+            '<div class="section-note">Aqui o foco é no que bate mais rápido no olho: PRA, tendência e papel do jogador.</div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(
+            style_table(summary_df, quick_view=True),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with detail_tab:
+        st.markdown(
+            '<div class="section-note">Aqui entra a parte mais nerdola: PTS, REB, AST, além do PRA completo.</div>',
+            unsafe_allow_html=True,
+        )
+        st.dataframe(
+            style_table(detail_df, quick_view=False),
+            use_container_width=True,
+            hide_index=True,
+        )
 
     options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
     player_name = st.selectbox(
@@ -632,7 +749,7 @@ def main() -> None:
 
     st.markdown('<div class="main-title">NBA Dashboard MVP</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com temporada, últimos 5 jogos e últimos 10 jogos.</div>',
+        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com leitura rápida e detalhamento completo.</div>',
         unsafe_allow_html=True,
     )
 
@@ -729,7 +846,7 @@ def main() -> None:
     st.markdown(
         """
         <div class="small-note">
-        Nota: "Titular provável" neste MVP significa os 5 jogadores do time com mais minutos por jogo na temporada.
+        Nota: "Titular provável" neste MVP significa os 5 jogadores com mais minutos por jogo na temporada.
         É um atalho útil para análise, não a escalação oficial confirmada do jogo.
         </div>
         """,
