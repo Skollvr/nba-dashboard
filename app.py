@@ -1,14 +1,18 @@
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 from nba_api.stats.endpoints import (
+    boxscoretraditionalv2,
     commonteamroster,
     leaguedashplayerstats,
     playergamelog,
+    playergamelogs,
     scoreboardv2,
+    teamgamelog,
 )
 from nba_api.stats.static import teams
 
@@ -92,6 +96,62 @@ def get_matchup_parts(matchup: str) -> tuple[str, str]:
     venue = "vs" if "vs" in parts else "@"
     opponent_abbr = parts[-1].strip().upper()
     return venue, opponent_abbr
+
+
+def normalize_position_group(position: str) -> str:
+    pos = str(position or "").upper().strip()
+    if not pos:
+        return "F"
+
+    primary = pos.split("-")[0].strip()
+    if primary in {"G", "F", "C"}:
+        return primary
+
+    if "G" in pos:
+        return "G"
+    if "F" in pos:
+        return "F"
+    if "C" in pos:
+        return "C"
+    return "F"
+
+
+def format_ratio_text(numerator: int, denominator: int) -> str:
+    if denominator <= 0:
+        return "-"
+    return f"{int(numerator)}/{int(denominator)}"
+
+
+def classify_volatility(volatility: float) -> str:
+    if volatility <= 4.5:
+        return "Baixa"
+    if volatility <= 7.5:
+        return "Média"
+    return "Alta"
+
+
+def classify_form_signal(slope: float) -> str:
+    if slope >= 1.0:
+        return "↗ Em alta"
+    if slope <= -1.0:
+        return "↘ Em queda"
+    return "→ Estável"
+
+
+def classify_matchup_tier(diff_value: float) -> str:
+    if diff_value >= 2.5:
+        return "Favorável"
+    if diff_value <= -2.5:
+        return "Difícil"
+    return "Neutro"
+
+
+def get_matchup_chip_class(label: str) -> str:
+    if label == "Favorável":
+        return "matchup-good"
+    if label == "Difícil":
+        return "matchup-bad"
+    return "matchup-neutral"
 
 
 def inject_css() -> None:
@@ -236,6 +296,33 @@ def inject_css() -> None:
             color: #e2e8f0;
             border: 1px solid rgba(148,163,184,0.14);
         }
+        .player-headline-card {
+            background: linear-gradient(180deg, rgba(76,29,149,0.36), rgba(15,23,42,0.92));
+            border: 1px solid rgba(167,139,250,0.22);
+            border-radius: 18px;
+            padding: 0.8rem 0.9rem;
+            margin-top: 0.25rem;
+            margin-bottom: 0.25rem;
+        }
+        .player-headline-label {
+            color: #c4b5fd;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.15rem;
+        }
+        .player-headline-value {
+            color: #f8fafc;
+            font-size: 1.85rem;
+            font-weight: 900;
+            line-height: 1;
+            margin-bottom: 0.35rem;
+        }
+        .player-headline-sub {
+            color: #e2e8f0;
+            font-size: 0.86rem;
+            line-height: 1.35;
+        }
         .player-quick-grid {
             display: grid;
             grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -362,6 +449,75 @@ def inject_css() -> None:
             font-size: 1rem;
             font-weight: 800;
             line-height: 1.05;
+        }
+        .hero-shell {
+            background: linear-gradient(180deg, rgba(30,41,59,0.92), rgba(15,23,42,0.92));
+            border: 1px solid rgba(148,163,184,.14);
+            border-radius: 18px;
+            padding: 0.95rem 1rem;
+            margin-top: 0.75rem;
+            margin-bottom: 0.35rem;
+        }
+        .hero-kicker {
+            color: #94a3b8;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.3rem;
+        }
+        .hero-value-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .hero-main-value {
+            color: #f8fafc;
+            font-size: 2rem;
+            font-weight: 800;
+            line-height: 1;
+        }
+        .hero-main-label {
+            color: #cbd5e1;
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+        .hero-subline {
+            color: #cbd5e1;
+            font-size: 0.83rem;
+            margin-top: 0.45rem;
+            line-height: 1.35;
+        }
+        .hero-note {
+            color: #94a3b8;
+            font-size: 0.82rem;
+            margin-top: 0.38rem;
+            line-height: 1.35;
+        }
+        .matchup-chip {
+            display: inline-block;
+            padding: 0.28rem 0.54rem;
+            border-radius: 999px;
+            font-size: 0.73rem;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            margin-top: 0.55rem;
+        }
+        .matchup-good {
+            background: rgba(34,197,94,0.12);
+            color: #dcfce7;
+            border: 1px solid rgba(34,197,94,0.16);
+        }
+        .matchup-neutral {
+            background: rgba(148,163,184,0.10);
+            color: #e2e8f0;
+            border: 1px solid rgba(148,163,184,0.14);
+        }
+        .matchup-bad {
+            background: rgba(239,68,68,0.12);
+            color: #fee2e2;
+            border: 1px solid rgba(239,68,68,0.16);
         }
         @media (max-width: 1200px) {
             .player-quick-grid {
@@ -505,6 +661,305 @@ def get_player_log(player_id: int, season: str) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
+    response = playergamelogs.PlayerGameLogs(
+        team_id_nullable=team_id,
+        season_nullable=season,
+        season_type_nullable="Regular Season",
+        timeout=30,
+    )
+    frames = response.get_data_frames()
+    if not frames:
+        return pd.DataFrame()
+
+    df = frames[0].copy()
+    if df.empty:
+        return df
+
+    df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
+    for col in ["PTS", "REB", "AST", "MIN"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
+    return df.sort_values(["PLAYER_ID", "GAME_DATE"], ascending=[True, False])
+
+
+@st.cache_data(ttl=7200, show_spinner=False)
+def get_position_opponent_profile(season: str, opponent_team_id: int, position_group: str) -> dict:
+    def fetch(position_value: str, opponent_value: int) -> pd.DataFrame:
+        response = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=season,
+            season_type_all_star="Regular Season",
+            per_mode_detailed="PerGame",
+            measure_type_detailed_defense="Base",
+            last_n_games=0,
+            month=0,
+            opponent_team_id=opponent_value,
+            pace_adjust="N",
+            plus_minus="N",
+            rank="N",
+            period=0,
+            team_id_nullable="",
+            player_position_abbreviation_nullable=position_value,
+            timeout=30,
+        )
+        frames = response.get_data_frames()
+        if not frames:
+            return pd.DataFrame()
+        return frames[0].copy()
+
+    def weighted_profile(df: pd.DataFrame) -> dict:
+        if df.empty or "GP" not in df.columns:
+            return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "PRA": 0.0, "GP": 0.0}
+
+        work_df = df.copy()
+        for col in ["GP", "PTS", "REB", "AST"]:
+            work_df[col] = pd.to_numeric(work_df[col], errors="coerce").fillna(0.0)
+
+        total_gp = float(work_df["GP"].sum())
+        if total_gp <= 0:
+            return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "PRA": 0.0, "GP": 0.0}
+
+        pts = float((work_df["PTS"] * work_df["GP"]).sum() / total_gp)
+        reb = float((work_df["REB"] * work_df["GP"]).sum() / total_gp)
+        ast = float((work_df["AST"] * work_df["GP"]).sum() / total_gp)
+        return {"PTS": pts, "REB": reb, "AST": ast, "PRA": pts + reb + ast, "GP": total_gp}
+
+    opp_profile = weighted_profile(fetch(position_group, opponent_team_id))
+    league_profile = weighted_profile(fetch(position_group, 0))
+    matchup_diff = opp_profile["PRA"] - league_profile["PRA"]
+
+    return {
+        "POSITION_GROUP": position_group,
+        "OPP_PTS_ALLOWED": opp_profile["PTS"],
+        "OPP_REB_ALLOWED": opp_profile["REB"],
+        "OPP_AST_ALLOWED": opp_profile["AST"],
+        "OPP_PRA_ALLOWED": opp_profile["PRA"],
+        "LEAGUE_PRA_BASELINE": league_profile["PRA"],
+        "MATCHUP_DIFF": matchup_diff,
+        "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
+    }
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_team_game_log(team_id: int, season: str) -> pd.DataFrame:
+    response = teamgamelog.TeamGameLog(
+        team_id=team_id,
+        season=season,
+        season_type_all_star="Regular Season",
+        timeout=30,
+    )
+    frames = response.get_data_frames()
+    if not frames:
+        return pd.DataFrame()
+
+    df = frames[0].copy()
+    if df.empty:
+        return df
+
+    date_col = "GAME_DATE" if "GAME_DATE" in df.columns else "Game_Date"
+    if date_col in df.columns:
+        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+        df = df.sort_values(date_col, ascending=False)
+
+    return df
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_boxscore_player_stats(game_id: str) -> pd.DataFrame:
+    response = boxscoretraditionalv2.BoxScoreTraditionalV2(
+        game_id=game_id,
+        timeout=30,
+    )
+    frames = response.get_data_frames()
+    if not frames:
+        return pd.DataFrame()
+
+    target_df = pd.DataFrame()
+    for frame in frames:
+        if {"PLAYER_ID", "TEAM_ID"}.issubset(frame.columns):
+            target_df = frame.copy()
+            break
+
+    if target_df.empty:
+        return target_df
+
+    keep_cols = [
+        col
+        for col in ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "START_POSITION", "MIN", "PTS", "REB", "AST"]
+        if col in target_df.columns
+    ]
+    return target_df[keep_cols].copy()
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_opponent_defense_profile(team_id: int, season: str, last_n_games: int = 7) -> pd.DataFrame:
+    games = get_team_game_log(team_id, season)
+    if games.empty:
+        return pd.DataFrame(
+            columns=[
+                "POSITION_GROUP",
+                "PTS_ALLOWED",
+                "REB_ALLOWED",
+                "AST_ALLOWED",
+                "PRA_ALLOWED",
+                "SAMPLE",
+                "MATCHUP_DELTA",
+                "MATCHUP_LABEL",
+            ]
+        )
+
+    game_id_col = "Game_ID" if "Game_ID" in games.columns else "GAME_ID"
+    recent_game_ids = games[game_id_col].astype(str).head(last_n_games).tolist()
+
+    roster_cache: dict[int, pd.DataFrame] = {}
+    all_rows = []
+
+    for game_id in recent_game_ids:
+        box_df = get_boxscore_player_stats(game_id)
+        if box_df.empty or "TEAM_ID" not in box_df.columns:
+            continue
+
+        opponent_rows = box_df[box_df["TEAM_ID"] != team_id].copy()
+        if opponent_rows.empty:
+            continue
+
+        for opp_team_id in opponent_rows["TEAM_ID"].dropna().unique().tolist():
+            team_rows = opponent_rows[opponent_rows["TEAM_ID"] == opp_team_id].copy()
+            if team_rows.empty:
+                continue
+
+            opp_team_id = int(opp_team_id)
+            if opp_team_id not in roster_cache:
+                roster = get_team_roster(opp_team_id, season)
+                if roster.empty:
+                    roster_cache[opp_team_id] = pd.DataFrame(columns=["PLAYER_ID", "POSITION"])
+                else:
+                    roster_cache[opp_team_id] = roster[[c for c in ["PLAYER_ID", "POSITION"] if c in roster.columns]].copy()
+
+            roster_view = roster_cache[opp_team_id]
+            if not roster_view.empty:
+                team_rows = team_rows.merge(roster_view, on="PLAYER_ID", how="left")
+            else:
+                team_rows["POSITION"] = ""
+
+            start_position_series = (
+                team_rows["START_POSITION"] if "START_POSITION" in team_rows.columns else pd.Series("", index=team_rows.index)
+            )
+            team_rows["POSITION_RAW"] = team_rows["POSITION"].fillna("")
+            team_rows.loc[team_rows["POSITION_RAW"].eq(""), "POSITION_RAW"] = start_position_series.fillna("")
+            team_rows["POSITION_GROUP"] = team_rows["POSITION_RAW"].apply(normalize_position_group)
+
+            for metric in ["PTS", "REB", "AST"]:
+                if metric not in team_rows.columns:
+                    team_rows[metric] = 0.0
+                team_rows[metric] = pd.to_numeric(team_rows[metric], errors="coerce").fillna(0.0)
+
+            team_rows["PRA"] = team_rows["PTS"] + team_rows["REB"] + team_rows["AST"]
+            team_rows = team_rows[team_rows["POSITION_GROUP"] != "UTIL"].copy()
+
+            if not team_rows.empty:
+                all_rows.append(team_rows[["POSITION_GROUP", "PTS", "REB", "AST", "PRA"]])
+
+    if not all_rows:
+        return pd.DataFrame(
+            columns=[
+                "POSITION_GROUP",
+                "PTS_ALLOWED",
+                "REB_ALLOWED",
+                "AST_ALLOWED",
+                "PRA_ALLOWED",
+                "SAMPLE",
+                "MATCHUP_DELTA",
+                "MATCHUP_LABEL",
+            ]
+        )
+
+    profile = pd.concat(all_rows, ignore_index=True)
+    grouped = (
+        profile.groupby("POSITION_GROUP", as_index=False)
+        .agg(
+            PTS_ALLOWED=("PTS", "mean"),
+            REB_ALLOWED=("REB", "mean"),
+            AST_ALLOWED=("AST", "mean"),
+            PRA_ALLOWED=("PRA", "mean"),
+            SAMPLE=("PRA", "count"),
+        )
+    )
+
+    overall_pra = grouped["PRA_ALLOWED"].mean() if not grouped.empty else 0.0
+    grouped["MATCHUP_DELTA"] = grouped["PRA_ALLOWED"] - overall_pra
+
+    def classify_matchup(delta: float) -> str:
+        if delta >= 1.5:
+            return "Favorável"
+        if delta <= -1.5:
+            return "Difícil"
+        return "Neutro"
+
+    grouped["MATCHUP_LABEL"] = grouped["MATCHUP_DELTA"].apply(classify_matchup)
+    return grouped
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_player_recent_profile(player_id: int, season: str) -> dict:
+    log = get_player_log(player_id, season)
+    if log.empty:
+        return {
+            "PRA_VALUES_L10": [],
+            "LAST5_MEAN": 0.0,
+            "PREV5_MEAN": 0.0,
+            "TREND_DELTA": 0.0,
+            "TREND_LABEL": "Estável",
+            "TREND_ICON": "→",
+            "VOLATILITY_STD": 0.0,
+            "VOLATILITY_LABEL": "Sem base",
+        }
+
+    recent10 = log.head(10).copy()
+    for metric in ["PTS", "REB", "AST"]:
+        recent10[metric] = pd.to_numeric(recent10[metric], errors="coerce").fillna(0.0)
+    recent10["PRA"] = recent10["PTS"] + recent10["REB"] + recent10["AST"]
+
+    recent5 = recent10.head(5)
+    prev5 = recent10.iloc[5:10].copy()
+
+    last5_mean = float(recent5["PRA"].mean()) if not recent5.empty else 0.0
+    prev5_mean = float(prev5["PRA"].mean()) if not prev5.empty else last5_mean
+    trend_delta = last5_mean - prev5_mean
+
+    if trend_delta >= 2.0:
+        trend_label = "Subindo"
+        trend_icon = "↑"
+    elif trend_delta <= -2.0:
+        trend_label = "Caindo"
+        trend_icon = "↓"
+    else:
+        trend_label = "Estável"
+        trend_icon = "→"
+
+    volatility_std = float(recent10["PRA"].std(ddof=0)) if len(recent10) > 1 else 0.0
+    if len(recent10) < 4:
+        volatility_label = "Sem base"
+    elif volatility_std <= 4.0:
+        volatility_label = "Baixa"
+    elif volatility_std <= 7.0:
+        volatility_label = "Média"
+    else:
+        volatility_label = "Alta"
+
+    return {
+        "PRA_VALUES_L10": recent10["PRA"].round(1).tolist(),
+        "LAST5_MEAN": last5_mean,
+        "PREV5_MEAN": prev5_mean,
+        "TREND_DELTA": trend_delta,
+        "TREND_LABEL": trend_label,
+        "TREND_ICON": trend_icon,
+        "VOLATILITY_STD": volatility_std,
+        "VOLATILITY_LABEL": volatility_label,
+    }
+
+
 def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     roster = get_team_roster(team_id, season)
     season_stats = get_league_player_stats(season, last_n_games=0)
@@ -619,6 +1074,8 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
 
     team_df["TREND"] = team_df["DELTA_PRA_L10"].apply(classify_form)
 
+    team_df["POSITION_GROUP"] = team_df["POSITION"].apply(normalize_position_group)
+
     team_df["ROLE"] = "Reserva"
     starter_pool = team_df.sort_values(
         by=["SEASON_MIN", "SEASON_GP", "PLAYER"],
@@ -632,6 +1089,7 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
             "PLAYER_ID",
             "PLAYER",
             "POSITION",
+            "POSITION_GROUP",
             "ROLE",
             "SEASON_GP",
             "SEASON_MIN",
@@ -654,6 +1112,120 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     ].copy()
 
 
+def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.DataFrame:
+    if team_df.empty:
+        return team_df
+
+    if team_logs.empty:
+        defaults = team_df.copy()
+        defaults["HIT_RATE_L10"] = 0.0
+        defaults["HIT_RATE_L10_TEXT"] = "-"
+        defaults["VOL_L10"] = 0.0
+        defaults["VOL_CLASS"] = "-"
+        defaults["FORM_SIGNAL"] = "→ Estável"
+        return defaults
+
+    threshold_map = team_df.set_index("PLAYER_ID")["SEASON_PRA"].to_dict()
+    metrics = []
+
+    for player_id, player_logs in team_logs.groupby("PLAYER_ID"):
+        recent_logs = player_logs.sort_values("GAME_DATE", ascending=False).copy()
+        recent10 = recent_logs.head(10).copy()
+        sample_size = len(recent10)
+        threshold = float(threshold_map.get(player_id, 0.0))
+
+        if sample_size == 0:
+            metrics.append(
+                {
+                    "PLAYER_ID": player_id,
+                    "HIT_RATE_L10": 0.0,
+                    "HIT_RATE_L10_TEXT": "-",
+                    "VOL_L10": 0.0,
+                    "VOL_CLASS": "-",
+                    "FORM_SIGNAL": "→ Estável",
+                }
+            )
+            continue
+
+        hit_count = int((recent10["PRA"] >= threshold).sum()) if threshold > 0 else 0
+        hit_rate = float(hit_count / sample_size)
+        volatility = float(recent10["PRA"].std(ddof=0)) if sample_size > 1 else 0.0
+
+        ordered = recent10.sort_values("GAME_DATE")
+        if len(ordered) >= 3:
+            slope = float(np.polyfit(range(len(ordered)), ordered["PRA"], 1)[0])
+        else:
+            slope = 0.0
+
+        metrics.append(
+            {
+                "PLAYER_ID": player_id,
+                "HIT_RATE_L10": hit_rate,
+                "HIT_RATE_L10_TEXT": format_ratio_text(hit_count, sample_size),
+                "VOL_L10": volatility,
+                "VOL_CLASS": classify_volatility(volatility),
+                "FORM_SIGNAL": classify_form_signal(slope),
+            }
+        )
+
+    metrics_df = pd.DataFrame(metrics)
+    enriched = team_df.merge(metrics_df, on="PLAYER_ID", how="left")
+
+    enriched["HIT_RATE_L10"] = pd.to_numeric(enriched["HIT_RATE_L10"], errors="coerce").fillna(0.0)
+    enriched["HIT_RATE_L10_TEXT"] = enriched["HIT_RATE_L10_TEXT"].fillna("-")
+    enriched["VOL_L10"] = pd.to_numeric(enriched["VOL_L10"], errors="coerce").fillna(0.0)
+    enriched["VOL_CLASS"] = enriched["VOL_CLASS"].fillna("-")
+    enriched["FORM_SIGNAL"] = enriched["FORM_SIGNAL"].fillna("→ Estável")
+    return enriched
+
+
+def enrich_team_with_context(
+    team_df: pd.DataFrame,
+    team_id: int,
+    opponent_team_id: int,
+    opponent_team_name: str,
+    season: str,
+) -> pd.DataFrame:
+    if team_df.empty:
+        return team_df
+
+    team_logs = get_team_player_logs(team_id, season)
+    enriched = build_form_context(team_df, team_logs)
+
+    matchup_rows = [
+        get_position_opponent_profile(season, opponent_team_id, position_group)
+        for position_group in ["G", "F", "C"]
+    ]
+    matchup_df = pd.DataFrame(matchup_rows)
+
+    if matchup_df.empty:
+        enriched["OPP_TEAM_NAME"] = opponent_team_name
+        enriched["OPP_PTS_ALLOWED"] = 0.0
+        enriched["OPP_REB_ALLOWED"] = 0.0
+        enriched["OPP_AST_ALLOWED"] = 0.0
+        enriched["OPP_PRA_ALLOWED"] = 0.0
+        enriched["LEAGUE_PRA_BASELINE"] = 0.0
+        enriched["MATCHUP_DIFF"] = 0.0
+        enriched["MATCHUP_LABEL"] = "Neutro"
+        return enriched
+
+    enriched = enriched.merge(matchup_df, on="POSITION_GROUP", how="left")
+    enriched["OPP_TEAM_NAME"] = opponent_team_name
+
+    for col in [
+        "OPP_PTS_ALLOWED",
+        "OPP_REB_ALLOWED",
+        "OPP_AST_ALLOWED",
+        "OPP_PRA_ALLOWED",
+        "LEAGUE_PRA_BASELINE",
+        "MATCHUP_DIFF",
+    ]:
+        enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
+
+    enriched["MATCHUP_LABEL"] = enriched["MATCHUP_LABEL"].fillna("Neutro")
+    return enriched
+
+
 def apply_filters(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str) -> pd.DataFrame:
     filtered = team_df[
         (team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)
@@ -663,6 +1235,59 @@ def apply_filters(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_
         filtered = filtered[filtered["ROLE"] == role_filter].copy()
 
     return filtered
+
+
+def enrich_filtered_team_df(
+    filtered_df: pd.DataFrame,
+    season: str,
+    opponent_team_id: int,
+    opponent_name: str,
+) -> pd.DataFrame:
+    if filtered_df.empty:
+        return filtered_df
+
+    defense_profile = get_opponent_defense_profile(opponent_team_id, season, last_n_games=7)
+    defense_lookup = {
+        row["POSITION_GROUP"]: row.to_dict()
+        for _, row in defense_profile.iterrows()
+    }
+
+    enriched_rows = []
+    for _, row in filtered_df.iterrows():
+        item = row.to_dict()
+        position_group = normalize_position_group(item.get("POSITION", ""))
+        recent_profile = get_player_recent_profile(int(item["PLAYER_ID"]), season)
+
+        pra_values = [float(v) for v in recent_profile.get("PRA_VALUES_L10", [])]
+        sample_size = len(pra_values)
+        hit_count = sum(value >= float(item["SEASON_PRA"]) for value in pra_values)
+        hit_rate = (hit_count / sample_size * 100) if sample_size else 0.0
+
+        item["POSITION_GROUP"] = position_group
+        item["TREND_RECENT_LABEL"] = recent_profile.get("TREND_LABEL", "Estável")
+        item["TREND_RECENT_ICON"] = recent_profile.get("TREND_ICON", "→")
+        item["TREND_RECENT_DELTA"] = recent_profile.get("TREND_DELTA", 0.0)
+        item["TREND_RECENT_DISPLAY"] = f'{item["TREND_RECENT_ICON"]} {item["TREND_RECENT_LABEL"]}'
+        item["VOLATILITY_STD_L10"] = recent_profile.get("VOLATILITY_STD", 0.0)
+        item["VOLATILITY_LABEL"] = recent_profile.get("VOLATILITY_LABEL", "Sem base")
+        item["PRA_HIT_RATE_TEMP"] = hit_rate
+        item["PRA_HIT_COUNT_TEMP"] = hit_count
+        item["PRA_HIT_SAMPLE"] = sample_size
+        item["HIT_RATE_TEXT"] = f"{hit_count}/{sample_size}" if sample_size else "-"
+
+        matchup = defense_lookup.get(position_group)
+        item["MATCHUP_OPPONENT_NAME"] = opponent_name
+        item["MATCHUP_PTS_ALLOWED"] = float(matchup["PTS_ALLOWED"]) if matchup else 0.0
+        item["MATCHUP_REB_ALLOWED"] = float(matchup["REB_ALLOWED"]) if matchup else 0.0
+        item["MATCHUP_AST_ALLOWED"] = float(matchup["AST_ALLOWED"]) if matchup else 0.0
+        item["MATCHUP_PRA_ALLOWED"] = float(matchup["PRA_ALLOWED"]) if matchup else 0.0
+        item["MATCHUP_SAMPLE"] = int(matchup["SAMPLE"]) if matchup else 0
+        item["MATCHUP_DELTA"] = float(matchup["MATCHUP_DELTA"]) if matchup else 0.0
+        item["MATCHUP_LABEL"] = matchup["MATCHUP_LABEL"] if matchup else "Sem base"
+
+        enriched_rows.append(item)
+
+    return pd.DataFrame(enriched_rows)
 
 
 def filter_and_sort_team_df(
@@ -723,6 +1348,13 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     display_df["AST L5"] = display_df["L5_AST"]
     display_df["AST L10"] = display_df["L10_AST"]
 
+    display_df["Matchup"] = display_df["MATCHUP_LABEL"]
+    display_df["Hit L10"] = display_df["HIT_RATE_L10_TEXT"]
+    display_df["Sinal"] = display_df["FORM_SIGNAL"]
+    display_df["Vol L10"] = display_df["VOL_CLASS"]
+    display_df["PRA adv pos"] = display_df["OPP_PRA_ALLOWED"]
+    display_df["Liga pos"] = display_df["LEAGUE_PRA_BASELINE"]
+
     summary_df = display_df[
         [
             "Jogador",
@@ -730,10 +1362,12 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
             "GP",
             "MIN",
             "PRA Temp",
-            "PRA L5",
             "PRA L10",
-            "Δ PRA L5",
             "Δ PRA L10",
+            "Matchup",
+            "Hit L10",
+            "Vol L10",
+            "Sinal",
             "Trend",
         ]
     ].copy()
@@ -759,6 +1393,12 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
             "PRA L10",
             "Δ PRA L5",
             "Δ PRA L10",
+            "PRA adv pos",
+            "Liga pos",
+            "Matchup",
+            "Hit L10",
+            "Vol L10",
+            "Sinal",
             "Trend",
         ]
     ].copy()
@@ -799,19 +1439,53 @@ def style_pra(val) -> str:
     return "background-color: rgba(139,92,246,0.10); color: #f5f3ff; font-weight: 700;"
 
 
+def style_matchup(val) -> str:
+    if "Favorável" in str(val):
+        return "background-color: rgba(34,197,94,0.10); color: #dcfce7; font-weight: 700;"
+    if "Difícil" in str(val):
+        return "background-color: rgba(239,68,68,0.10); color: #fee2e2; font-weight: 700;"
+    return "background-color: rgba(148,163,184,0.10); color: #e2e8f0; font-weight: 600;"
+
+
+def style_signal(val) -> str:
+    if "↗" in str(val):
+        return "color: #86efac; font-weight: 700;"
+    if "↘" in str(val):
+        return "color: #fca5a5; font-weight: 700;"
+    return "color: #e2e8f0; font-weight: 600;"
+
+
+def style_volatility(val) -> str:
+    if "Baixa" in str(val):
+        return "color: #86efac; font-weight: 700;"
+    if "Alta" in str(val):
+        return "color: #fca5a5; font-weight: 700;"
+    return "color: #fcd34d; font-weight: 700;"
+
+
 def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
     format_map = {}
+    text_cols = {
+        "Jogador",
+        "Pos",
+        "Papel",
+        "Trend",
+        "Matchup",
+        "Hit L10",
+        "Vol L10",
+        "Sinal",
+    }
     for col in df.columns:
         if col == "GP":
             format_map[col] = "{:.0f}"
-        elif col not in ["Jogador", "Pos", "Papel", "Trend"]:
+        elif col not in text_cols:
             format_map[col] = "{:.1f}"
 
     styler = df.style.format(format_map, na_rep="-")
 
-    pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10"] if c in df.columns]
+    pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10", "PRA adv pos", "Liga pos"] if c in df.columns]
     delta_cols = [c for c in ["Δ PRA L5", "Δ PRA L10"] if c in df.columns]
-    center_cols = [c for c in ["Papel", "GP", "MIN", "Trend"] if c in df.columns]
+    center_cols = [c for c in ["Papel", "GP", "MIN", "Trend", "Matchup", "Hit L10", "Vol L10", "Sinal"] if c in df.columns]
 
     if pra_cols:
         styler = styler.map(style_pra, subset=pra_cols)
@@ -825,6 +1499,15 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
     if "Papel" in df.columns:
         styler = styler.map(style_role, subset=["Papel"])
 
+    if "Matchup" in df.columns:
+        styler = styler.map(style_matchup, subset=["Matchup"])
+
+    if "Sinal" in df.columns:
+        styler = styler.map(style_signal, subset=["Sinal"])
+
+    if "Vol L10" in df.columns:
+        styler = styler.map(style_volatility, subset=["Vol L10"])
+
     if "Jogador" in df.columns:
         styler = styler.set_properties(subset=["Jogador"], **{"font-weight": "700"})
 
@@ -832,7 +1515,7 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
         styler = styler.set_properties(subset=center_cols, **{"text-align": "center"})
 
     if quick_view:
-        quick_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10", "Δ PRA L5", "Δ PRA L10"] if c in df.columns]
+        quick_cols = [c for c in ["PRA Temp", "PRA L10", "Δ PRA L10"] if c in df.columns]
         styler = styler.set_properties(subset=quick_cols, **{"font-weight": "700"})
 
     return styler
@@ -934,9 +1617,9 @@ def render_summary_cards(
 
     best_pra = combined.sort_values("L10_PRA", ascending=False).iloc[0]
     best_delta = combined.sort_values("DELTA_PRA_L10", ascending=False).iloc[0]
-    best_pts = combined.sort_values("L10_PTS", ascending=False).iloc[0]
-    best_reb = combined.sort_values("L10_REB", ascending=False).iloc[0]
-    best_ast = combined.sort_values("L10_AST", ascending=False).iloc[0]
+    best_matchup = combined.sort_values(["MATCHUP_DIFF", "L10_PRA"], ascending=[False, False]).iloc[0]
+    best_consistency = combined.sort_values(["HIT_RATE_L10", "VOL_L10", "L10_PRA"], ascending=[False, True, False]).iloc[0]
+    best_signal = combined.sort_values(["L10_PRA", "HIT_RATE_L10"], ascending=[False, False]).iloc[0]
 
     cols = st.columns(5)
 
@@ -947,8 +1630,8 @@ def render_summary_cards(
             f'{best_pra["PLAYER"]} • {best_pra["TEAM_NAME"]}',
             "Temp",
             format_number(best_pra["SEASON_PRA"]),
-            "Δ L10",
-            format_signed_number(best_pra["DELTA_PRA_L10"]),
+            "Hit L10",
+            best_pra["HIT_RATE_L10_TEXT"],
         ),
         (
             "Maior alta L10",
@@ -956,35 +1639,35 @@ def render_summary_cards(
             f'{best_delta["PLAYER"]} • {best_delta["TEAM_NAME"]}',
             "PRA L10",
             format_number(best_delta["L10_PRA"]),
-            "Temp",
-            format_number(best_delta["SEASON_PRA"]),
+            "Sinal",
+            best_delta["FORM_SIGNAL"],
         ),
         (
-            "Pontos L10",
-            format_number(best_pts["L10_PTS"]),
-            f'{best_pts["PLAYER"]} • {best_pts["TEAM_NAME"]}',
-            "Temp",
-            format_number(best_pts["SEASON_PTS"]),
-            "Δ L10",
-            format_signed_number(best_pts["L10_PTS"] - best_pts["SEASON_PTS"]),
+            "Melhor matchup",
+            best_matchup["MATCHUP_LABEL"],
+            f'{best_matchup["PLAYER"]} • {best_matchup["TEAM_NAME"]}',
+            "PRA ced.",
+            format_number(best_matchup["OPP_PRA_ALLOWED"]),
+            "Liga",
+            format_number(best_matchup["LEAGUE_PRA_BASELINE"]),
         ),
         (
-            "Rebotes L10",
-            format_number(best_reb["L10_REB"]),
-            f'{best_reb["PLAYER"]} • {best_reb["TEAM_NAME"]}',
-            "Temp",
-            format_number(best_reb["SEASON_REB"]),
-            "Δ L10",
-            format_signed_number(best_reb["L10_REB"] - best_reb["SEASON_REB"]),
+            "Mais consistente",
+            best_consistency["HIT_RATE_L10_TEXT"],
+            f'{best_consistency["PLAYER"]} • {best_consistency["TEAM_NAME"]}',
+            "Vol",
+            best_consistency["VOL_CLASS"],
+            "PRA L10",
+            format_number(best_consistency["L10_PRA"]),
         ),
         (
-            "Assistências L10",
-            format_number(best_ast["L10_AST"]),
-            f'{best_ast["PLAYER"]} • {best_ast["TEAM_NAME"]}',
-            "Temp",
-            format_number(best_ast["SEASON_AST"]),
+            "Melhor forma",
+            best_signal["FORM_SIGNAL"],
+            f'{best_signal["PLAYER"]} • {best_signal["TEAM_NAME"]}',
             "Δ L10",
-            format_signed_number(best_ast["L10_AST"] - best_ast["SEASON_AST"]),
+            format_signed_number(best_signal["DELTA_PRA_L10"]),
+            "Hit L10",
+            best_signal["HIT_RATE_L10_TEXT"],
         ),
     ]
 
@@ -1177,21 +1860,37 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
         st.plotly_chart(fig, use_container_width=True)
 
 
-def render_badges(role: str, trend: str) -> None:
+def render_badges(role: str, momentum: str, volatility: str, matchup: str) -> None:
     role_class = "badge-starter" if role == "Titular provável" else "badge-bench"
 
-    if trend in ["🔥 Forte", "⬆️ Boa"]:
-        trend_class = "badge-good"
-    elif trend in ["🥶 Queda", "⬇️ Fraca"]:
-        trend_class = "badge-bad"
+    if str(momentum).startswith("↑"):
+        momentum_class = "badge-good"
+    elif str(momentum).startswith("↓"):
+        momentum_class = "badge-bad"
     else:
-        trend_class = "badge-neutral"
+        momentum_class = "badge-neutral"
+
+    if volatility == "Baixa":
+        volatility_class = "badge-good"
+    elif volatility == "Alta":
+        volatility_class = "badge-bad"
+    else:
+        volatility_class = "badge-neutral"
+
+    if matchup == "Favorável":
+        matchup_class = "badge-good"
+    elif matchup == "Difícil":
+        matchup_class = "badge-bad"
+    else:
+        matchup_class = "badge-neutral"
 
     st.markdown(
         f"""
         <div class="badge-row">
             <span class="badge {role_class}">{role}</span>
-            <span class="badge {trend_class}">{trend}</span>
+            <span class="badge {momentum_class}">{momentum}</span>
+            <span class="badge {volatility_class}">Vol {volatility}</span>
+            <span class="badge {matchup_class}">Matchup {matchup}</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1245,26 +1944,37 @@ def render_detail_metric_box_html(title: str, temp_val: float, l5_val: float, l1
     """
 
 
+def render_player_headline_html(row: pd.Series) -> str:
+    return f"""
+    <div class="player-headline-card">
+        <div class="player-headline-label">Leitura principal</div>
+        <div class="player-headline-value">{format_number(row['L10_PRA'])} PRA</div>
+        <div class="player-headline-sub">
+            Temp {format_number(row['SEASON_PRA'])} • Δ L10 {format_signed_number(row['DELTA_PRA_L10'])}
+            • Hit Temp {row['HIT_RATE_TEXT']} ({int(round(row['PRA_HIT_RATE_TEMP'])) if row['PRA_HIT_SAMPLE'] else 0}%)
+        </div>
+    </div>
+    """
+
+
 def render_player_highlight_tiles(row: pd.Series) -> None:
-    delta_class = "quick-stat"
-    if float(row["DELTA_PRA_L10"]) > 0.3:
-        delta_class = "quick-stat quick-stat-up"
-    elif float(row["DELTA_PRA_L10"]) < -0.3:
-        delta_class = "quick-stat quick-stat-down"
+    hit_class = "quick-stat quick-stat-primary"
+    matchup_class = "quick-stat"
+    if row["MATCHUP_LABEL"] == "Favorável":
+        matchup_class = "quick-stat quick-stat-up"
+    elif row["MATCHUP_LABEL"] == "Difícil":
+        matchup_class = "quick-stat quick-stat-down"
+
+    matchup_value = format_number(row["MATCHUP_PRA_ALLOWED"]) if row["MATCHUP_SAMPLE"] > 0 else "-"
+    matchup_meta = (
+        f'{row["MATCHUP_OPPONENT_NAME"]} vs {row["POSITION_GROUP"]} • amostra {int(row["MATCHUP_SAMPLE"])}'
+        if row["MATCHUP_SAMPLE"] > 0
+        else f'{row["MATCHUP_OPPONENT_NAME"]} • sem base suficiente'
+    )
 
     st.markdown(
         f"""
         <div class="player-quick-grid">
-            <div class="quick-stat quick-stat-primary">
-                <div class="quick-stat-label">PRA L10</div>
-                <div class="quick-stat-value">{format_number(row['L10_PRA'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PRA'])} • L5 {format_number(row['L5_PRA'])}</div>
-            </div>
-            <div class="{delta_class}">
-                <div class="quick-stat-label">Δ PRA L10</div>
-                <div class="quick-stat-value">{format_signed_number(row['DELTA_PRA_L10'])}</div>
-                <div class="quick-stat-meta">Comparado à média da temporada</div>
-            </div>
             <div class="quick-stat">
                 <div class="quick-stat-label">PTS L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_PTS'])}</div>
@@ -1280,10 +1990,121 @@ def render_player_highlight_tiles(row: pd.Series) -> None:
                 <div class="quick-stat-value">{format_number(row['L10_AST'])}</div>
                 <div class="quick-stat-meta">Temp {format_number(row['SEASON_AST'])}</div>
             </div>
+            <div class="{hit_class}">
+                <div class="quick-stat-label">Hit Temp PRA</div>
+                <div class="quick-stat-value">{row['HIT_RATE_TEXT']}</div>
+                <div class="quick-stat-meta">{int(round(row['PRA_HIT_RATE_TEMP'])) if row['PRA_HIT_SAMPLE'] else 0}% dos últimos jogos</div>
+            </div>
+            <div class="{matchup_class}">
+                <div class="quick-stat-label">PRA cedido</div>
+                <div class="quick-stat-value">{matchup_value}</div>
+                <div class="quick-stat-meta">{matchup_meta}</div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_player_hero_summary(row: pd.Series) -> None:
+    matchup_class = get_matchup_chip_class(row["MATCHUP_LABEL"])
+
+    st.markdown(
+        f"""
+        <div class="hero-shell">
+            <div class="hero-kicker">Leitura em 3 segundos</div>
+            <div class="hero-value-row">
+                <div>
+                    <div class="hero-main-value">{format_number(row['L10_PRA'])}</div>
+                    <div class="hero-main-label">PRA nos últimos 10</div>
+                </div>
+                <span class="matchup-chip {matchup_class}">{row['MATCHUP_LABEL']} vs {row['POSITION_GROUP']}</span>
+            </div>
+            <div class="hero-subline">
+                Δ vs temp {format_signed_number(row['DELTA_PRA_L10'])} • Hit rate {row['HIT_RATE_L10_TEXT']} • Vol {row['VOL_CLASS']} • {row['FORM_SIGNAL']}
+            </div>
+            <div class="hero-note">
+                {row['OPP_TEAM_NAME']} cede {format_number(row['OPP_PRA_ALLOWED'])} PRA para {row['POSITION_GROUP']} • liga {format_number(row['LEAGUE_PRA_BASELINE'])}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_player_support_tiles(row: pd.Series) -> None:
+    matchup_class = "quick-stat"
+    if row["MATCHUP_LABEL"] == "Favorável":
+        matchup_class = "quick-stat quick-stat-up"
+    elif row["MATCHUP_LABEL"] == "Difícil":
+        matchup_class = "quick-stat quick-stat-down"
+
+    st.markdown(
+        f"""
+        <div class="player-quick-grid">
+            <div class="quick-stat">
+                <div class="quick-stat-label">PTS L10</div>
+                <div class="quick-stat-value">{format_number(row['L10_PTS'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PTS'])} • L5 {format_number(row['L5_PTS'])}</div>
+            </div>
+            <div class="quick-stat">
+                <div class="quick-stat-label">REB L10</div>
+                <div class="quick-stat-value">{format_number(row['L10_REB'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_REB'])} • L5 {format_number(row['L5_REB'])}</div>
+            </div>
+            <div class="quick-stat">
+                <div class="quick-stat-label">AST L10</div>
+                <div class="quick-stat-value">{format_number(row['L10_AST'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_AST'])} • L5 {format_number(row['L5_AST'])}</div>
+            </div>
+            <div class="{matchup_class}">
+                <div class="quick-stat-label">Matchup</div>
+                <div class="quick-stat-value">{row['MATCHUP_LABEL']}</div>
+                <div class="quick-stat-meta">PRA cedido {format_number(row['OPP_PRA_ALLOWED'])} • diff {format_signed_number(row['MATCHUP_DIFF'])}</div>
+            </div>
+            <div class="quick-stat quick-stat-primary">
+                <div class="quick-stat-label">Consistência</div>
+                <div class="quick-stat-value">{row['HIT_RATE_L10_TEXT']}</div>
+                <div class="quick-stat-meta">Vol {row['VOL_CLASS']} • {row['FORM_SIGNAL']}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_matchup_detail_box_html(row: pd.Series) -> str:
+    matchup_class = get_matchup_chip_class(row["MATCHUP_LABEL"])
+
+    return f"""
+    <div class="detail-box">
+        <div class="detail-box-top">
+            <div class="detail-box-title">Contexto do adversário</div>
+            <div class="delta-pill-row">
+                <span class="matchup-chip {matchup_class}" style="margin-top:0;">{row['MATCHUP_LABEL']}</span>
+            </div>
+        </div>
+        <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+            <div class="detail-mini">
+                <div class="detail-mini-label">PTS ced.</div>
+                <div class="detail-mini-value">{format_number(row['OPP_PTS_ALLOWED'])}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">REB ced.</div>
+                <div class="detail-mini-value">{format_number(row['OPP_REB_ALLOWED'])}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">AST ced.</div>
+                <div class="detail-mini-value">{format_number(row['OPP_AST_ALLOWED'])}</div>
+            </div>
+            <div class="detail-mini detail-mini-highlight">
+                <div class="detail-mini-label">PRA ced.</div>
+                <div class="detail-mini-value">{format_number(row['OPP_PRA_ALLOWED'])}</div>
+            </div>
+        </div>
+        <div class="hero-note" style="margin-top:0.65rem;">{row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']} • liga {format_number(row['LEAGUE_PRA_BASELINE'])} • diferença {format_signed_number(row['MATCHUP_DIFF'])}</div>
+    </div>
+    """
 
 
 def render_player_card(row: pd.Series) -> None:
@@ -1299,9 +2120,16 @@ def render_player_card(row: pd.Series) -> None:
             st.caption(
                 f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}"
             )
-            render_badges(row["ROLE"], row["TREND"])
+            st.markdown(render_player_headline_html(row), unsafe_allow_html=True)
+            render_badges(
+                row["ROLE"],
+                row["TREND_RECENT_DISPLAY"],
+                row["VOLATILITY_LABEL"],
+                row["MATCHUP_LABEL"],
+            )
 
-        render_player_highlight_tiles(row)
+        render_player_hero_summary(row)
+        render_player_support_tiles(row)
 
         with st.expander("Ver detalhamento completo"):
             detail_items = [
@@ -1321,6 +2149,11 @@ def render_player_card(row: pd.Series) -> None:
                         render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
                         unsafe_allow_html=True,
                     )
+
+            st.markdown(
+                render_matchup_detail_box_html(row),
+                unsafe_allow_html=True,
+            )
 
 
 def render_player_cards_grid(filtered_df: pd.DataFrame, cards_per_row: int = 2) -> None:
@@ -1342,6 +2175,8 @@ def render_team_section(
     team_name: str,
     team_df: pd.DataFrame,
     season: str,
+    opponent_team_id: int,
+    opponent_name: str,
     min_games: int,
     min_minutes: int,
     role_filter: str,
@@ -1373,32 +2208,41 @@ def render_team_section(
         )
         return
 
+    with st.spinner("Montando matchup, tendência real e consistência dos cards..."):
+        enriched_df = enrich_filtered_team_df(
+            filtered_df=filtered_df,
+            season=season,
+            opponent_team_id=opponent_team_id,
+            opponent_name=opponent_name,
+        )
+
     st.markdown(
         f"""
-        <div class="info-pill">Jogadores exibidos: {len(filtered_df)}</div>
+        <div class="info-pill">Jogadores exibidos: {len(enriched_df)}</div>
         <div class="info-pill">GP mínimo: {min_games}</div>
         <div class="info-pill">MIN mínimo: {min_minutes}</div>
         <div class="info-pill">Papel: {role_filter}</div>
         <div class="info-pill">Ordenação: {sort_label}</div>
         <div class="info-pill">Visualização: {view_mode}</div>
+        <div class="info-pill">Adversário: {opponent_name}</div>
         """,
         unsafe_allow_html=True,
     )
 
     if view_mode == "Cards":
         st.markdown(
-            '<div class="section-note">Cards com leitura rápida em L10 e detalhamento em mini caixas com deltas para L5 e L10.</div>',
+            '<div class="section-note">Agora os cards trazem leitura principal de PRA, hit rate vs temporada, tendência dos últimos 5 contra os 5 anteriores e matchup defensivo por posição.</div>',
             unsafe_allow_html=True,
         )
-        render_player_cards_grid(filtered_df, cards_per_row=cards_per_row)
+        render_player_cards_grid(enriched_df, cards_per_row=cards_per_row)
     else:
-        summary_df, detail_df = build_display_dataframes(filtered_df)
+        summary_df, detail_df = build_display_dataframes(enriched_df)
 
         quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
 
         with quick_tab:
             st.markdown(
-                '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, tendência e papel do jogador.</div>',
+                '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, hit rate, volatilidade e matchup.</div>',
                 unsafe_allow_html=True,
             )
             st.dataframe(
@@ -1409,7 +2253,7 @@ def render_team_section(
 
         with detail_tab:
             st.markdown(
-                '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST e PRA no mesmo lugar.</div>',
+                '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST, PRA e os novos sinais de consistência.</div>',
                 unsafe_allow_html=True,
             )
             st.dataframe(
@@ -1418,7 +2262,7 @@ def render_team_section(
                 hide_index=True,
             )
 
-    options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
+    options = enriched_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
     player_name = st.selectbox(
         f"Ver gráfico de jogador — {team_name}",
         options["PLAYER"].tolist(),
@@ -1502,6 +2346,21 @@ def main() -> None:
         st.exception(exc)
         return
 
+    away_df = enrich_team_with_context(
+        team_df=away_df,
+        team_id=int(selected_game["VISITOR_TEAM_ID"]),
+        opponent_team_id=int(selected_game["HOME_TEAM_ID"]),
+        opponent_team_name=selected_game["home_team_name"],
+        season=season,
+    )
+    home_df = enrich_team_with_context(
+        team_df=home_df,
+        team_id=int(selected_game["HOME_TEAM_ID"]),
+        opponent_team_id=int(selected_game["VISITOR_TEAM_ID"]),
+        opponent_team_name=selected_game["away_team_name"],
+        season=season,
+    )
+
     away_df["TEAM_NAME"] = selected_game["away_team_name"]
     home_df["TEAM_NAME"] = selected_game["home_team_name"]
 
@@ -1523,6 +2382,8 @@ def main() -> None:
             team_name=selected_game["away_team_name"],
             team_df=away_df,
             season=season,
+            opponent_team_id=int(selected_game["HOME_TEAM_ID"]),
+            opponent_name=selected_game["home_team_name"],
             min_games=min_games,
             min_minutes=min_minutes,
             role_filter=role_filter,
@@ -1538,6 +2399,8 @@ def main() -> None:
             team_name=selected_game["home_team_name"],
             team_df=home_df,
             season=season,
+            opponent_team_id=int(selected_game["VISITOR_TEAM_ID"]),
+            opponent_name=selected_game["away_team_name"],
             min_games=min_games,
             min_minutes=min_minutes,
             role_filter=role_filter,
