@@ -1060,6 +1060,73 @@ def get_delta_css_class(value: float) -> str:
         return "delta-neg"
     return "delta-neu"
 
+def build_mobile_card_html(row: pd.Series) -> str:
+    role_class = get_role_css_class(row["ROLE"])
+    trend_class = get_trend_css_class(row["TREND"])
+    delta_l5_class = get_delta_css_class(float(row["DELTA_PRA_L5"]))
+    delta_l10_class = get_delta_css_class(float(row["DELTA_PRA_L10"]))
+    player_id = int(row["PLAYER_ID"])
+    position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+
+    return f"""
+<div class="mobile-player-card">
+    <div class="mobile-player-top">
+        <div class="avatar-wrap">
+            <img
+                src="{get_player_headshot_url(player_id)}"
+                class="player-avatar"
+            />
+        </div>
+
+        <div style="flex:1;">
+            <div class="mobile-player-name">{row["PLAYER"]}</div>
+            <div class="mobile-player-meta">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])}</div>
+
+            <div class="badge-row">
+                <span class="role-badge {role_class}">{row["ROLE"]}</span>
+                <span class="trend-badge {trend_class}">{row["TREND"]}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="mobile-grid">
+        <div class="mobile-stat">
+            <div class="mobile-stat-label">PRA Temp</div>
+            <div class="mobile-stat-value">{format_number(row["SEASON_PRA"])}</div>
+        </div>
+        <div class="mobile-stat">
+            <div class="mobile-stat-label">PRA L5</div>
+            <div class="mobile-stat-value">{format_number(row["L5_PRA"])}</div>
+        </div>
+        <div class="mobile-stat">
+            <div class="mobile-stat-label">PRA L10</div>
+            <div class="mobile-stat-value">{format_number(row["L10_PRA"])}</div>
+        </div>
+        <div class="mobile-stat">
+            <div class="mobile-stat-label">Δ PRA L5</div>
+            <div class="mobile-stat-value {delta_l5_class}">{format_number(row["DELTA_PRA_L5"])}</div>
+        </div>
+        <div class="mobile-stat">
+            <div class="mobile-stat-label">Δ PRA L10</div>
+            <div class="mobile-stat-value {delta_l10_class}">{format_number(row["DELTA_PRA_L10"])}</div>
+        </div>
+    </div>
+
+    <div class="mobile-details-line">
+        <strong>PTS</strong> T/L5/L10: {format_number(row["SEASON_PTS"])} / {format_number(row["L5_PTS"])} / {format_number(row["L10_PTS"])}
+    </div>
+    <div class="mobile-details-line">
+        <strong>REB</strong> T/L5/L10: {format_number(row["SEASON_REB"])} / {format_number(row["L5_REB"])} / {format_number(row["L10_REB"])}
+    </div>
+    <div class="mobile-details-line">
+        <strong>AST</strong> T/L5/L10: {format_number(row["SEASON_AST"])} / {format_number(row["L5_AST"])} / {format_number(row["L10_AST"])}
+    </div>
+    <div class="mobile-details-muted">
+        Card mobile: leitura rápida sem te obrigar a fazer pinça mental em tabela apertada.
+    </div>
+</div>
+"""
+
 
 def render_mobile_player_cards(filtered_df: pd.DataFrame) -> None:
     for _, row in filtered_df.iterrows():
