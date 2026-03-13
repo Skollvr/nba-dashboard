@@ -880,13 +880,33 @@ def build_summary_cards_data(
     return combined
 
 
-def render_single_card(title: str, value: str, meta: str, extra: str = "") -> str:
+def render_single_card(
+    title: str,
+    value: str,
+    meta: str,
+    left_label: str,
+    left_value: str,
+    right_label: str,
+    right_value: str,
+    right_highlight: bool = True,
+) -> str:
+    right_class = "detail-mini detail-mini-highlight" if right_highlight else "detail-mini"
+
     return f"""
     <div class="summary-card">
         <div class="summary-label">{title}</div>
         <div class="summary-value">{value}</div>
         <div class="summary-meta">{meta}</div>
-        <div class="summary-extra">{extra}</div>
+        <div class="detail-mini-grid" style="margin-top:0.75rem; grid-template-columns: repeat(2, minmax(0, 1fr));">
+            <div class="detail-mini">
+                <div class="detail-mini-label">{left_label}</div>
+                <div class="detail-mini-value">{left_value}</div>
+            </div>
+            <div class="{right_class}">
+                <div class="detail-mini-label">{right_label}</div>
+                <div class="detail-mini-value">{right_value}</div>
+            </div>
+        </div>
     </div>
     """
 
@@ -925,31 +945,46 @@ def render_summary_cards(
             "PRA L10 líder",
             format_number(best_pra["L10_PRA"]),
             f'{best_pra["PLAYER"]} • {best_pra["TEAM_NAME"]}',
-            f'Temporada: {format_number(best_pra["SEASON_PRA"])}',
+            "Temp",
+            format_number(best_pra["SEASON_PRA"]),
+            "Δ L10",
+            format_signed_number(best_pra["DELTA_PRA_L10"]),
         ),
         (
             "Maior alta L10",
             format_signed_number(best_delta["DELTA_PRA_L10"]),
             f'{best_delta["PLAYER"]} • {best_delta["TEAM_NAME"]}',
-            f'PRA L10: {format_number(best_delta["L10_PRA"])}',
+            "PRA L10",
+            format_number(best_delta["L10_PRA"]),
+            "Temp",
+            format_number(best_delta["SEASON_PRA"]),
         ),
         (
             "Pontos L10",
             format_number(best_pts["L10_PTS"]),
             f'{best_pts["PLAYER"]} • {best_pts["TEAM_NAME"]}',
-            f'Temporada: {format_number(best_pts["SEASON_PTS"])}',
+            "Temp",
+            format_number(best_pts["SEASON_PTS"]),
+            "Δ L10",
+            format_signed_number(best_pts["L10_PTS"] - best_pts["SEASON_PTS"]),
         ),
         (
             "Rebotes L10",
             format_number(best_reb["L10_REB"]),
             f'{best_reb["PLAYER"]} • {best_reb["TEAM_NAME"]}',
-            f'Temporada: {format_number(best_reb["SEASON_REB"])}',
+            "Temp",
+            format_number(best_reb["SEASON_REB"]),
+            "Δ L10",
+            format_signed_number(best_reb["L10_REB"] - best_reb["SEASON_REB"]),
         ),
         (
             "Assistências L10",
             format_number(best_ast["L10_AST"]),
             f'{best_ast["PLAYER"]} • {best_ast["TEAM_NAME"]}',
-            f'Temporada: {format_number(best_ast["SEASON_AST"])}',
+            "Temp",
+            format_number(best_ast["SEASON_AST"]),
+            "Δ L10",
+            format_signed_number(best_ast["L10_AST"] - best_ast["SEASON_AST"]),
         ),
     ]
 
@@ -960,7 +995,10 @@ def render_summary_cards(
                     title=card[0],
                     value=card[1],
                     meta=card[2],
-                    extra=card[3],
+                    left_label=card[3],
+                    left_value=card[4],
+                    right_label=card[5],
+                    right_value=card[6],
                 ),
                 unsafe_allow_html=True,
             )
@@ -1266,17 +1304,23 @@ def render_player_card(row: pd.Series) -> None:
         render_player_highlight_tiles(row)
 
         with st.expander("Ver detalhamento completo"):
-            st.markdown(
-                f"""
-                <div class="detail-grid">
-                    {render_detail_metric_box_html('PRA', row['SEASON_PRA'], row['L5_PRA'], row['L10_PRA'])}
-                    {render_detail_metric_box_html('PTS', row['SEASON_PTS'], row['L5_PTS'], row['L10_PTS'])}
-                    {render_detail_metric_box_html('REB', row['SEASON_REB'], row['L5_REB'], row['L10_REB'])}
-                    {render_detail_metric_box_html('AST', row['SEASON_AST'], row['L5_AST'], row['L10_AST'])}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+            detail_items = [
+                ("PRA", row["SEASON_PRA"], row["L5_PRA"], row["L10_PRA"]),
+                ("PTS", row["SEASON_PTS"], row["L5_PTS"], row["L10_PTS"]),
+                ("REB", row["SEASON_REB"], row["L5_REB"], row["L10_REB"]),
+                ("AST", row["SEASON_AST"], row["L5_AST"], row["L10_AST"]),
+            ]
+
+            first_row = st.columns(2)
+            second_row = st.columns(2)
+            all_cols = [*first_row, *second_row]
+
+            for col, item in zip(all_cols, detail_items):
+                with col:
+                    st.markdown(
+                        render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                        unsafe_allow_html=True,
+                    )
 
 
 def render_player_cards_grid(filtered_df: pd.DataFrame, cards_per_row: int = 2) -> None:
