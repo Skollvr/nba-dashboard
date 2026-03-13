@@ -1883,9 +1883,9 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
 def render_badges(role: str, momentum: str, volatility: str, matchup: str) -> None:
     role_class = "badge-starter" if role == "Titular provável" else "badge-bench"
 
-    if str(momentum).startswith("↑"):
+    if str(momentum).startswith("↗") or str(momentum).startswith("↑"):
         momentum_class = "badge-good"
-    elif str(momentum).startswith("↓"):
+    elif str(momentum).startswith("↘") or str(momentum).startswith("↓"):
         momentum_class = "badge-bad"
     else:
         momentum_class = "badge-neutral"
@@ -1965,13 +1965,18 @@ def render_detail_metric_box_html(title: str, temp_val: float, l5_val: float, l1
 
 
 def render_player_headline_html(row: pd.Series) -> str:
+    hit_rate_pct = int(round(float(row.get("HIT_RATE_L10", 0.0)) * 100))
+    hit_rate_text = row.get("HIT_RATE_L10_TEXT", "-")
+    form_signal = row.get("FORM_SIGNAL", "→ Estável")
+    vol_class = row.get("VOL_CLASS", "-")
+
     return f"""
     <div class="player-headline-card">
         <div class="player-headline-label">Leitura principal</div>
         <div class="player-headline-value">{format_number(row['L10_PRA'])} PRA</div>
         <div class="player-headline-sub">
             Temp {format_number(row['SEASON_PRA'])} • Δ L10 {format_signed_number(row['DELTA_PRA_L10'])}
-            • Hit Temp {row['HIT_RATE_TEXT']} ({int(round(row['PRA_HIT_RATE_TEMP'])) if row['PRA_HIT_SAMPLE'] else 0}%)
+            • Hit L10 {hit_rate_text} ({hit_rate_pct}%) • Vol {vol_class} • {form_signal}
         </div>
     </div>
     """
@@ -2143,9 +2148,9 @@ def render_player_card(row: pd.Series) -> None:
             st.markdown(render_player_headline_html(row), unsafe_allow_html=True)
             render_badges(
                 row["ROLE"],
-                row["TREND_RECENT_DISPLAY"],
-                row["VOLATILITY_LABEL"],
-                row["MATCHUP_LABEL"],
+                row.get("FORM_SIGNAL", "→ Estável"),
+                row.get("VOL_CLASS", "-"),
+                row.get("MATCHUP_LABEL", "Neutro"),
             )
 
         render_player_hero_summary(row)
