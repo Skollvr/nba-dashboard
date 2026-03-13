@@ -1,4 +1,5 @@
 from datetime import date
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -18,6 +19,21 @@ st.set_page_config(
 )
 
 TEAM_LOOKUP = {team["id"]: team for team in teams.get_teams()}
+
+SORT_OPTIONS = {
+    "PRA L10": "L10_PRA",
+    "PRA temporada": "SEASON_PRA",
+    "Δ PRA (L10 vs Temp)": "DELTA_PRA",
+    "PTS L10": "L10_PTS",
+    "REB L10": "L10_REB",
+    "AST L10": "L10_AST",
+    "PTS temporada": "SEASON_PTS",
+    "REB temporada": "SEASON_REB",
+    "AST temporada": "SEASON_AST",
+    "Minutos por jogo": "SEASON_MIN",
+    "Jogos na temporada": "SEASON_GP",
+    "Nome do jogador": "PLAYER",
+}
 
 
 def get_season_string(target_date: date) -> str:
@@ -78,6 +94,17 @@ def inject_css() -> None:
             color: #94a3b8;
             font-size: 0.88rem;
         }
+        .info-pill {
+            display: inline-block;
+            padding: 0.35rem 0.6rem;
+            border-radius: 999px;
+            background: rgba(15,23,42,.65);
+            border: 1px solid rgba(148,163,184,.18);
+            color: #cbd5e1;
+            font-size: 0.85rem;
+            margin-right: 0.35rem;
+            margin-bottom: 0.35rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -111,6 +138,7 @@ def get_games_for_date(target_date: date) -> pd.DataFrame:
         + " • "
         + games["GAME_STATUS_TEXT"].fillna("Sem status")
     )
+
     return games[
         [
             "GAME_ID",
@@ -172,6 +200,11 @@ def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = frames[0].copy()
+    if df.empty:
+        return pd.DataFrame(
+            columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST"]
+        )
+
     keep_cols = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST"]
     available_cols = [c for c in keep_cols if c in df.columns]
     return df[available_cols].copy()
@@ -212,24 +245,35 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     if "POSITION" not in roster.columns:
         roster["POSITION"] = ""
 
-    season_view = season_stats.rename(
-        columns={
-            "GP": "SEASON_GP",
-            "MIN": "SEASON_MIN",
-            "PTS": "SEASON_PTS",
-            "REB": "SEASON_REB",
-            "AST": "SEASON_AST",
-        }
-    )
-    last10_view = last10_stats.rename(
-        columns={
-            "GP": "L10_GP",
-            "MIN": "L10_MIN",
-            "PTS": "L10_PTS",
-            "REB": "L10_REB",
-            "AST": "L10_AST",
-        }
-    )
+    if season_stats.empty:
+        season_view = pd.DataFrame(
+            columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST"]
+        )
+    else:
+        season_view = season_stats.rename(
+            columns={
+                "GP": "SEASON_GP",
+                "MIN": "SEASON_MIN",
+                "PTS": "SEASON_PTS",
+                "REB": "SEASON_REB",
+                "AST": "SEASON_AST",
+            }
+        )
+
+    if last10_stats.empty:
+        last10_view = pd.DataFrame(
+            columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST"]
+        )
+    else:
+        last10_view = last10_stats.rename(
+            columns={
+                "GP": "L10_GP",
+                "MIN": "L10_MIN",
+                "PTS": "L10_PTS",
+                "REB": "L10_REB",
+                "AST": "L10_AST",
+            }
+        )
 
     team_df = roster.merge(
         season_view[["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST"]],
@@ -259,53 +303,118 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
             team_df[col] = 0.0
         team_df[col] = pd.to_numeric(team_df[col], errors="coerce").fillna(0.0)
 
-    team_df["FORM_SCORE"] = (
-        (team_df["L10_PTS"] - team_df["SEASON_PTS"])
-        + (team_df["L10_REB"] - team_df["SEASON_REB"])
-        + (team_df["L10_AST"] - team_df["SEASON_AST"])
+    team_df["SEASON_PRA"] = (
+        team_df["SEASON_PTS"] + team_df["SEASON_REB"] + team_df["SEASON_AST"]
     )
+    team_df["L10_PRA"] = team_df["L10_PTS"] + team_df["L10_REB"] + team_df["L10_AST"]
 
-    def classify_form(value: float) -> str:
-        if value >= 2.5:
+    team_df["DELTA_PTS"] = team_df["L10_PTS"] - team_df["SEASON_PTS"]
+    team_df["DELTA_REB"] = team_df["L10_REB"] - team_df["SEASON_REB"]
+    team_df["DELTA_AST"] = team_df["L10_AST"] - team_df["SEASON_AST"]
+    team_df["DELTA_PRA"] = team_df["L10_PRA"] - team_df["SEASON_PRA"]
+
+    def classify_form(delta_pra: float) -> str:
+        if delta_pra >= 3.0:
             return "🔥 Forte"
-        if value >= 0.75:
+        if delta_pra >= 1.0:
             return "⬆️ Boa"
-        if value <= -2.5:
+        if delta_pra <= -3.0:
             return "🥶 Queda"
-        if value <= -0.75:
+        if delta_pra <= -1.0:
             return "⬇️ Fraca"
         return "➖ Neutra"
 
-    team_df["TREND"] = team_df["FORM_SCORE"].apply(classify_form)
-
-    team_df = team_df.sort_values(
-        by=["SEASON_MIN", "SEASON_PTS", "PLAYER"],
-        ascending=[False, False, True],
-    ).reset_index(drop=True)
-
-    team_df["Jogador"] = team_df["PLAYER"]
-    team_df["Pos"] = team_df["POSITION"]
-    team_df["GP"] = team_df["SEASON_GP"].round(0).astype(int)
-    team_df["PTS Temp"] = team_df["SEASON_PTS"].round(1)
-    team_df["PTS L10"] = team_df["L10_PTS"].round(1)
-    team_df["REB Temp"] = team_df["SEASON_REB"].round(1)
-    team_df["REB L10"] = team_df["L10_REB"].round(1)
-    team_df["AST Temp"] = team_df["SEASON_AST"].round(1)
-    team_df["AST L10"] = team_df["L10_AST"].round(1)
-    team_df["Trend"] = team_df["TREND"]
+    team_df["TREND"] = team_df["DELTA_PRA"].apply(classify_form)
 
     return team_df[
         [
             "PLAYER_ID",
+            "PLAYER",
+            "POSITION",
+            "SEASON_GP",
+            "SEASON_MIN",
+            "SEASON_PTS",
+            "L10_PTS",
+            "SEASON_REB",
+            "L10_REB",
+            "SEASON_AST",
+            "L10_AST",
+            "SEASON_PRA",
+            "L10_PRA",
+            "DELTA_PTS",
+            "DELTA_REB",
+            "DELTA_AST",
+            "DELTA_PRA",
+            "TREND",
+        ]
+    ].copy()
+
+
+def filter_and_sort_team_df(
+    team_df: pd.DataFrame,
+    min_games: int,
+    min_minutes: int,
+    sort_column: str,
+    ascending: bool,
+) -> pd.DataFrame:
+    if team_df.empty:
+        return team_df
+
+    filtered = team_df[
+        (team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)
+    ].copy()
+
+    if filtered.empty:
+        return filtered
+
+    if sort_column == "PLAYER":
+        filtered = filtered.sort_values(
+            by=["PLAYER", "SEASON_MIN"],
+            ascending=[ascending, False],
+        )
+    else:
+        filtered = filtered.sort_values(
+            by=[sort_column, "SEASON_MIN", "PLAYER"],
+            ascending=[ascending, False, True],
+        )
+
+    return filtered.reset_index(drop=True)
+
+
+def format_team_display_df(team_df: pd.DataFrame) -> pd.DataFrame:
+    display_df = team_df.copy()
+
+    display_df["Jogador"] = display_df["PLAYER"]
+    display_df["Pos"] = display_df["POSITION"].replace("", "-")
+    display_df["GP"] = display_df["SEASON_GP"].round(0).astype(int)
+    display_df["MIN"] = display_df["SEASON_MIN"].round(1)
+
+    display_df["PTS Temp"] = display_df["SEASON_PTS"].round(1)
+    display_df["PTS L10"] = display_df["L10_PTS"].round(1)
+    display_df["REB Temp"] = display_df["SEASON_REB"].round(1)
+    display_df["REB L10"] = display_df["L10_REB"].round(1)
+    display_df["AST Temp"] = display_df["SEASON_AST"].round(1)
+    display_df["AST L10"] = display_df["L10_AST"].round(1)
+    display_df["PRA Temp"] = display_df["SEASON_PRA"].round(1)
+    display_df["PRA L10"] = display_df["L10_PRA"].round(1)
+    display_df["Δ PRA"] = display_df["DELTA_PRA"].round(1)
+    display_df["Trend"] = display_df["TREND"]
+
+    return display_df[
+        [
             "Jogador",
             "Pos",
             "GP",
+            "MIN",
             "PTS Temp",
             "PTS L10",
             "REB Temp",
             "REB L10",
             "AST Temp",
             "AST L10",
+            "PRA Temp",
+            "PRA L10",
+            "Δ PRA",
             "Trend",
         ]
     ].copy()
@@ -339,7 +448,10 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
         st.info("Sem histórico suficiente para esse jogador.")
         return
 
+    recent["PRA"] = recent["PTS"] + recent["REB"] + recent["AST"]
+
     fig = go.Figure()
+
     fig.add_trace(
         go.Scatter(
             x=recent["GAME_DATE"],
@@ -367,11 +479,20 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
             line=dict(width=3),
         )
     )
+    fig.add_trace(
+        go.Scatter(
+            x=recent["GAME_DATE"],
+            y=recent["PRA"],
+            mode="lines+markers",
+            name="PRA",
+            line=dict(width=3, dash="dot"),
+        )
+    )
 
     fig.update_layout(
         title=f"Últimos 10 jogos — {player_name}",
         template="plotly_dark",
-        height=360,
+        height=380,
         margin=dict(l=20, r=20, t=60, b=20),
         legend=dict(orientation="h", y=1.08, x=0),
         paper_bgcolor="rgba(0,0,0,0)",
@@ -383,27 +504,62 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
-def render_team_section(team_name: str, team_df: pd.DataFrame, season: str) -> None:
+def render_team_section(
+    team_name: str,
+    team_df: pd.DataFrame,
+    season: str,
+    min_games: int,
+    min_minutes: int,
+    sort_label: str,
+    ascending: bool,
+) -> None:
     st.subheader(team_name)
 
     if team_df.empty:
         st.warning("Não consegui montar os dados desse time.")
         return
 
+    sort_column = SORT_OPTIONS[sort_label]
+    filtered_df = filter_and_sort_team_df(
+        team_df=team_df,
+        min_games=min_games,
+        min_minutes=min_minutes,
+        sort_column=sort_column,
+        ascending=ascending,
+    )
+
+    if filtered_df.empty:
+        st.warning(
+            "Nenhum jogador passou pelos filtros. Você apertou demais o funil, grande sommelier de amostra."
+        )
+        return
+
+    st.markdown(
+        f"""
+        <div class="info-pill">Jogadores exibidos: {len(filtered_df)}</div>
+        <div class="info-pill">Filtro GP mínimo: {min_games}</div>
+        <div class="info-pill">Filtro MIN mínimo: {min_minutes}</div>
+        <div class="info-pill">Ordenação: {sort_label}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    display_df = format_team_display_df(filtered_df)
+
     st.dataframe(
-        team_df.drop(columns=["PLAYER_ID"]),
+        display_df,
         use_container_width=True,
         hide_index=True,
     )
 
-    options = team_df[["Jogador", "PLAYER_ID"]].drop_duplicates()
+    options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
     player_name = st.selectbox(
         f"Ver gráfico de jogador — {team_name}",
-        options["Jogador"].tolist(),
+        options["PLAYER"].tolist(),
         key=f"player_select_{team_name}",
     )
     selected_player_id = int(
-        options.loc[options["Jogador"] == player_name, "PLAYER_ID"].iloc[0]
+        options.loc[options["PLAYER"] == player_name, "PLAYER_ID"].iloc[0]
     )
     render_player_chart(player_name, selected_player_id, season)
 
@@ -413,13 +569,29 @@ def main() -> None:
 
     st.markdown('<div class="main-title">NBA Dashboard MVP</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="subtitle">Escolha o jogo e veja PTS, REB e AST com média da temporada e média dos últimos 10 jogos.</div>',
+        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com média da temporada e média dos últimos 10 jogos.</div>',
         unsafe_allow_html=True,
     )
 
     with st.sidebar:
         st.header("Configurações")
         selected_date = st.date_input("Data dos jogos", value=date.today())
+
+        st.divider()
+        st.subheader("Filtros")
+        min_games = st.slider("Mínimo de jogos na temporada", 0, 82, 5, 1)
+        min_minutes = st.slider("Mínimo de minutos por jogo", 0, 40, 15, 1)
+
+        st.divider()
+        st.subheader("Ordenação")
+        sort_label = st.selectbox(
+            "Ordenar jogadores por",
+            options=list(SORT_OPTIONS.keys()),
+            index=0,
+        )
+        ascending = st.toggle("Ordem crescente", value=False)
+
+        st.divider()
         st.caption("Este MVP busca os dados ao abrir a página.")
         if st.button("Forçar atualização"):
             st.cache_data.clear()
@@ -465,13 +637,29 @@ def main() -> None:
     )
 
     with tab1:
-        render_team_section(selected_game["away_team_name"], away_df, season)
+        render_team_section(
+            team_name=selected_game["away_team_name"],
+            team_df=away_df,
+            season=season,
+            min_games=min_games,
+            min_minutes=min_minutes,
+            sort_label=sort_label,
+            ascending=ascending,
+        )
 
     with tab2:
-        render_team_section(selected_game["home_team_name"], home_df, season)
+        render_team_section(
+            team_name=selected_game["home_team_name"],
+            team_df=home_df,
+            season=season,
+            min_games=min_games,
+            min_minutes=min_minutes,
+            sort_label=sort_label,
+            ascending=ascending,
+        )
 
     st.markdown(
-        '<div class="small-note">Dica: use o botão "Forçar atualização" quando quiser recarregar os dados na marra.</div>',
+        '<div class="small-note">Agora você já consegue filtrar porcaria estatística, ordenar direito e ver PRA sem precisar fazer conta no guardanapo.</div>',
         unsafe_allow_html=True,
     )
 
