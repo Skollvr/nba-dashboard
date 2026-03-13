@@ -1041,6 +1041,22 @@ def render_mobile_badges(role: str, trend: str) -> None:
         unsafe_allow_html=True,
     )
 
+def render_mobile_detail_metric(title: str, temp_val: float, l5_val: float, l10_val: float) -> None:
+    st.markdown(f"**{title}**")
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.caption("Temp")
+        st.markdown(f"### {format_number(temp_val)}")
+
+    with c2:
+        st.caption("L5")
+        st.markdown(f"### {format_number(l5_val)}")
+
+    with c3:
+        st.caption("L10")
+        st.markdown(f"### {format_number(l10_val)}")
+
 
 def render_mobile_player_card(row: pd.Series) -> None:
     with st.container(border=True):
@@ -1057,29 +1073,50 @@ def render_mobile_player_card(row: pd.Series) -> None:
             )
             render_mobile_badges(row["ROLE"], row["TREND"])
 
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.metric("PRA Temp", format_number(row["SEASON_PRA"]))
-        with m2:
-            st.metric("PRA L5", format_number(row["L5_PRA"]))
-        with m3:
+        r1c1, r1c2, r1c3 = st.columns(3)
+        with r1c1:
             st.metric("PRA L10", format_number(row["L10_PRA"]))
-
-        d1, d2 = st.columns(2)
-        with d1:
-            st.metric("Δ PRA L5", format_signed_number(row["DELTA_PRA_L5"]))
-        with d2:
+        with r1c2:
             st.metric("Δ PRA L10", format_signed_number(row["DELTA_PRA_L10"]))
+        with r1c3:
+            st.metric("PTS L10", format_number(row["L10_PTS"]))
 
-        with st.expander("Ver PTS / REB / AST"):
-            st.write(
-                f"**PTS** T/L5/L10: {format_number(row['SEASON_PTS'])} / {format_number(row['L5_PTS'])} / {format_number(row['L10_PTS'])}"
+        r2c1, r2c2 = st.columns(2)
+        with r2c1:
+            st.metric("AST L10", format_number(row["L10_AST"]))
+        with r2c2:
+            st.metric("REB L10", format_number(row["L10_REB"]))
+
+        with st.expander("Ver detalhamento completo"):
+            render_mobile_detail_metric(
+                "PRA",
+                row["SEASON_PRA"],
+                row["L5_PRA"],
+                row["L10_PRA"],
             )
-            st.write(
-                f"**REB** T/L5/L10: {format_number(row['SEASON_REB'])} / {format_number(row['L5_REB'])} / {format_number(row['L10_REB'])}"
+            st.divider()
+
+            render_mobile_detail_metric(
+                "PTS",
+                row["SEASON_PTS"],
+                row["L5_PTS"],
+                row["L10_PTS"],
             )
-            st.write(
-                f"**AST** T/L5/L10: {format_number(row['SEASON_AST'])} / {format_number(row['L5_AST'])} / {format_number(row['L10_AST'])}"
+            st.divider()
+
+            render_mobile_detail_metric(
+                "REB",
+                row["SEASON_REB"],
+                row["L5_REB"],
+                row["L10_REB"],
+            )
+            st.divider()
+
+            render_mobile_detail_metric(
+                "AST",
+                row["SEASON_AST"],
+                row["L5_AST"],
+                row["L10_AST"],
             )
 
 
