@@ -19,6 +19,7 @@ st.set_page_config(
 )
 
 TEAM_LOOKUP = {team["id"]: team for team in teams.get_teams()}
+TEAM_LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/primary/L/logo.svg"
 
 SORT_OPTIONS = {
     "PRA L5": "L5_PRA",
@@ -53,53 +54,92 @@ def get_season_string(target_date: date) -> str:
     return f"{start_year}-{end_year}"
 
 
+def get_team_logo_url(team_id: int) -> str:
+    return TEAM_LOGO_URL.format(team_id=team_id)
+
+
 def inject_css() -> None:
     st.markdown(
         """
         <style>
         .block-container {
-            padding-top: 1.2rem;
+            padding-top: 1.1rem;
             padding-bottom: 2rem;
         }
         .main-title {
-            font-size: 2.2rem;
+            font-size: 2.1rem;
             font-weight: 800;
-            margin-bottom: 0.2rem;
+            margin-bottom: 0.15rem;
         }
         .subtitle {
             color: #94a3b8;
-            margin-bottom: 1.1rem;
+            margin-bottom: 1rem;
         }
-        .game-card {
-            background: linear-gradient(135deg, rgba(29,78,216,.22), rgba(124,58,237,.18));
-            border: 1px solid rgba(148,163,184,.16);
-            border-radius: 18px;
-            padding: 1rem 1.1rem;
-            margin-bottom: 0.9rem;
+        .matchup-shell {
+            background: linear-gradient(180deg, rgba(17,24,39,0.92), rgba(15,23,42,0.92));
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 22px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 1rem;
         }
-        .team-name {
-            font-size: 1.15rem;
+        .center-vs {
+            text-align: center;
+            color: #cbd5e1;
+            font-size: 0.9rem;
             font-weight: 700;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            margin-top: 0.75rem;
         }
-        .vs-text {
+        .status-chip {
+            display: inline-block;
+            padding: 0.32rem 0.7rem;
+            border-radius: 999px;
+            background: rgba(139,92,246,0.12);
+            border: 1px solid rgba(139,92,246,0.22);
+            color: #e9d5ff;
+            font-size: 0.84rem;
+            font-weight: 600;
+        }
+        .team-title {
+            font-size: 1.35rem;
+            font-weight: 800;
+            margin-bottom: 0.15rem;
+        }
+        .team-sub {
             color: #94a3b8;
-            font-size: 0.85rem;
+            font-size: 0.9rem;
+        }
+        .summary-card {
+            background: rgba(15,23,42,0.75);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 18px;
+            padding: 0.9rem 1rem;
+            min-height: 112px;
+            margin-bottom: 0.35rem;
+        }
+        .summary-label {
+            color: #94a3b8;
+            font-size: 0.78rem;
             text-transform: uppercase;
             letter-spacing: 0.08em;
+            margin-bottom: 0.45rem;
         }
-        .status-pill {
-            display: inline-block;
-            padding: 0.25rem 0.55rem;
-            border-radius: 999px;
-            background: rgba(124,58,237,.18);
-            border: 1px solid rgba(124,58,237,.35);
-            color: #e9d5ff;
-            font-size: 0.82rem;
-            margin-top: 0.55rem;
+        .summary-value {
+            font-size: 1.55rem;
+            font-weight: 800;
+            line-height: 1.1;
+            color: #f8fafc;
+            margin-bottom: 0.3rem;
         }
-        .small-note {
+        .summary-meta {
+            color: #cbd5e1;
+            font-size: 0.9rem;
+        }
+        .summary-extra {
             color: #94a3b8;
-            font-size: 0.88rem;
+            font-size: 0.82rem;
+            margin-top: 0.25rem;
         }
         .info-pill {
             display: inline-block;
@@ -116,6 +156,10 @@ def inject_css() -> None:
             color: #cbd5e1;
             font-size: 0.92rem;
             margin-bottom: 0.55rem;
+        }
+        .small-note {
+            color: #94a3b8;
+            font-size: 0.88rem;
         }
         </style>
         """,
@@ -395,6 +439,17 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     ].copy()
 
 
+def apply_filters(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str) -> pd.DataFrame:
+    filtered = team_df[
+        (team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)
+    ].copy()
+
+    if role_filter != "Todos":
+        filtered = filtered[filtered["ROLE"] == role_filter].copy()
+
+    return filtered
+
+
 def filter_and_sort_team_df(
     team_df: pd.DataFrame,
     min_games: int,
@@ -406,12 +461,7 @@ def filter_and_sort_team_df(
     if team_df.empty:
         return team_df
 
-    filtered = team_df[
-        (team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)
-    ].copy()
-
-    if role_filter != "Todos":
-        filtered = filtered[filtered["ROLE"] == role_filter].copy()
+    filtered = apply_filters(team_df, min_games, min_minutes, role_filter)
 
     if filtered.empty:
         return filtered
@@ -437,31 +487,31 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     display_df["Pos"] = display_df["POSITION"].replace("", "-")
     display_df["Papel"] = display_df["ROLE"].map(
         {
-            "Titular provável": "⭐ Titular provável",
-            "Reserva": "🪑 Reserva",
+            "Titular provável": "Titular provável",
+            "Reserva": "Reserva",
         }
     )
-    display_df["GP"] = display_df["SEASON_GP"].round(0).astype(int)
-    display_df["MIN"] = display_df["SEASON_MIN"].round(1)
+    display_df["GP"] = display_df["SEASON_GP"]
+    display_df["MIN"] = display_df["SEASON_MIN"]
 
-    display_df["PRA Temp"] = display_df["SEASON_PRA"].round(1)
-    display_df["PRA L5"] = display_df["L5_PRA"].round(1)
-    display_df["PRA L10"] = display_df["L10_PRA"].round(1)
-    display_df["Δ PRA L5"] = display_df["DELTA_PRA_L5"].round(1)
-    display_df["Δ PRA L10"] = display_df["DELTA_PRA_L10"].round(1)
+    display_df["PRA Temp"] = display_df["SEASON_PRA"]
+    display_df["PRA L5"] = display_df["L5_PRA"]
+    display_df["PRA L10"] = display_df["L10_PRA"]
+    display_df["Δ PRA L5"] = display_df["DELTA_PRA_L5"]
+    display_df["Δ PRA L10"] = display_df["DELTA_PRA_L10"]
     display_df["Trend"] = display_df["TREND"]
 
-    display_df["PTS Temp"] = display_df["SEASON_PTS"].round(1)
-    display_df["PTS L5"] = display_df["L5_PTS"].round(1)
-    display_df["PTS L10"] = display_df["L10_PTS"].round(1)
+    display_df["PTS Temp"] = display_df["SEASON_PTS"]
+    display_df["PTS L5"] = display_df["L5_PTS"]
+    display_df["PTS L10"] = display_df["L10_PTS"]
 
-    display_df["REB Temp"] = display_df["SEASON_REB"].round(1)
-    display_df["REB L5"] = display_df["L5_REB"].round(1)
-    display_df["REB L10"] = display_df["L10_REB"].round(1)
+    display_df["REB Temp"] = display_df["SEASON_REB"]
+    display_df["REB L5"] = display_df["L5_REB"]
+    display_df["REB L10"] = display_df["L10_REB"]
 
-    display_df["AST Temp"] = display_df["SEASON_AST"].round(1)
-    display_df["AST L5"] = display_df["L5_AST"].round(1)
-    display_df["AST L10"] = display_df["L10_AST"].round(1)
+    display_df["AST Temp"] = display_df["SEASON_AST"]
+    display_df["AST L5"] = display_df["L5_AST"]
+    display_df["AST L10"] = display_df["L10_AST"]
 
     summary_df = display_df[
         [
@@ -506,60 +556,71 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     return summary_df, detail_df
 
 
-def color_delta(val) -> str:
+def format_number_br(value, decimals: int = 1) -> str:
+    try:
+        return f"{float(value):.{decimals}f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def style_delta(val) -> str:
     try:
         value = float(val)
     except (TypeError, ValueError):
         return ""
 
-    if value >= 3:
-        return "background-color: rgba(34,197,94,0.35); color: #dcfce7; font-weight: 700;"
-    if value >= 1:
-        return "background-color: rgba(34,197,94,0.18); color: #bbf7d0; font-weight: 600;"
-    if value <= -3:
-        return "background-color: rgba(239,68,68,0.35); color: #fee2e2; font-weight: 700;"
-    if value <= -1:
-        return "background-color: rgba(239,68,68,0.18); color: #fecaca; font-weight: 600;"
+    if value > 0:
+        return "background-color: rgba(34,197,94,0.12); color: #dcfce7; font-weight: 600;"
+    if value < 0:
+        return "background-color: rgba(239,68,68,0.12); color: #fee2e2; font-weight: 600;"
     return "color: #cbd5e1;"
 
 
-def color_trend(val) -> str:
-    mapping = {
-        "🔥 Forte": "background-color: rgba(249,115,22,0.28); color: #ffedd5; font-weight: 700;",
-        "⬆️ Boa": "background-color: rgba(34,197,94,0.20); color: #dcfce7; font-weight: 700;",
-        "➖ Neutra": "background-color: rgba(148,163,184,0.16); color: #e2e8f0; font-weight: 600;",
-        "⬇️ Fraca": "background-color: rgba(234,179,8,0.18); color: #fef9c3; font-weight: 700;",
-        "🥶 Queda": "background-color: rgba(59,130,246,0.22); color: #dbeafe; font-weight: 700;",
-    }
-    return mapping.get(val, "")
+def style_trend(val) -> str:
+    if val in ["🔥 Forte", "⬆️ Boa"]:
+        return "background-color: rgba(34,197,94,0.10); color: #dcfce7; font-weight: 700;"
+    if val in ["🥶 Queda", "⬇️ Fraca"]:
+        return "background-color: rgba(239,68,68,0.10); color: #fee2e2; font-weight: 700;"
+    return "background-color: rgba(148,163,184,0.10); color: #e2e8f0; font-weight: 600;"
 
 
-def color_role(val) -> str:
+def style_role(val) -> str:
     if "Titular" in str(val):
-        return "background-color: rgba(168,85,247,0.22); color: #f3e8ff; font-weight: 700;"
+        return "background-color: rgba(139,92,246,0.12); color: #f3e8ff; font-weight: 700;"
     if "Reserva" in str(val):
-        return "background-color: rgba(100,116,139,0.18); color: #e2e8f0; font-weight: 600;"
+        return "background-color: rgba(148,163,184,0.08); color: #cbd5e1; font-weight: 600;"
     return ""
 
 
+def style_pra(val) -> str:
+    return "background-color: rgba(139,92,246,0.10); color: #f5f3ff; font-weight: 700;"
+
+
 def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
-    styler = df.style.format(na_rep="-")
+    format_map = {}
+    for col in df.columns:
+        if col == "GP":
+            format_map[col] = "{:.0f}"
+        elif col not in ["Jogador", "Pos", "Papel", "Trend"]:
+            format_map[col] = "{:.1f}"
+
+    styler = df.style.format(format_map, na_rep="-")
 
     pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10"] if c in df.columns]
     delta_cols = [c for c in ["Δ PRA L5", "Δ PRA L10"] if c in df.columns]
     center_cols = [c for c in ["Papel", "GP", "MIN", "Trend"] if c in df.columns]
 
     if pra_cols:
-        styler = styler.background_gradient(cmap="Purples", subset=pra_cols)
+        styler = styler.map(style_pra, subset=pra_cols)
 
     if delta_cols:
-        styler = styler.map(color_delta, subset=delta_cols)
+        styler = styler.map(style_delta, subset=delta_cols)
 
     if "Trend" in df.columns:
-        styler = styler.map(color_trend, subset=["Trend"])
+        styler = styler.map(style_trend, subset=["Trend"])
 
     if "Papel" in df.columns:
-        styler = styler.map(color_role, subset=["Papel"])
+        styler = styler.map(style_role, subset=["Papel"])
 
     if "Jogador" in df.columns:
         styler = styler.set_properties(subset=["Jogador"], **{"font-weight": "700"})
@@ -568,26 +629,143 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
         styler = styler.set_properties(subset=center_cols, **{"text-align": "center"})
 
     if quick_view:
-        styler = styler.set_properties(
-            subset=[c for c in ["PRA Temp", "PRA L5", "PRA L10", "Δ PRA L5", "Δ PRA L10"] if c in df.columns],
-            **{"font-weight": "650"}
-        )
+        quick_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10", "Δ PRA L5", "Δ PRA L10"] if c in df.columns]
+        styler = styler.set_properties(subset=quick_cols, **{"font-weight": "700"})
 
     return styler
 
 
-def render_game_card(game_row: pd.Series) -> None:
-    st.markdown(
-        f"""
-        <div class="game-card">
-            <div class="team-name">{game_row["away_team_name"]}</div>
-            <div class="vs-text">vs</div>
-            <div class="team-name">{game_row["home_team_name"]}</div>
-            <div class="status-pill">{game_row["GAME_STATUS_TEXT"]}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+def render_matchup_header(game_row: pd.Series) -> None:
+    away_team_id = int(game_row["VISITOR_TEAM_ID"])
+    home_team_id = int(game_row["HOME_TEAM_ID"])
+
+    with st.container():
+        st.markdown('<div class="matchup-shell">', unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns([1.4, 0.9, 1.4])
+
+        with c1:
+            st.image(get_team_logo_url(away_team_id), width=96)
+            st.markdown(f'<div class="team-title">{game_row["away_team_name"]}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="team-sub">Visitante</div>', unsafe_allow_html=True)
+
+        with c2:
+            st.markdown('<div class="center-vs">VS</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{game_row["GAME_STATUS_TEXT"]}</span></div>',
+                unsafe_allow_html=True,
+            )
+
+        with c3:
+            st.image(get_team_logo_url(home_team_id), width=96)
+            st.markdown(f'<div class="team-title">{game_row["home_team_name"]}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="team-sub">Mandante</div>', unsafe_allow_html=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+def build_summary_cards_data(
+    away_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+    min_games: int,
+    min_minutes: int,
+    role_filter: str,
+) -> pd.DataFrame:
+    away_filtered = apply_filters(away_df, min_games, min_minutes, role_filter).copy()
+    home_filtered = apply_filters(home_df, min_games, min_minutes, role_filter).copy()
+
+    combined = pd.concat([away_filtered, home_filtered], ignore_index=True)
+
+    if combined.empty:
+        return combined
+
+    return combined
+
+
+def render_single_card(title: str, value: str, meta: str, extra: str = "") -> str:
+    return f"""
+    <div class="summary-card">
+        <div class="summary-label">{title}</div>
+        <div class="summary-value">{value}</div>
+        <div class="summary-meta">{meta}</div>
+        <div class="summary-extra">{extra}</div>
+    </div>
+    """
+
+
+def render_summary_cards(
+    away_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+    min_games: int,
+    min_minutes: int,
+    role_filter: str,
+) -> None:
+    combined = build_summary_cards_data(
+        away_df=away_df,
+        home_df=home_df,
+        min_games=min_games,
+        min_minutes=min_minutes,
+        role_filter=role_filter,
     )
+
+    st.subheader("Destaques do confronto")
+
+    if combined.empty:
+        st.info("Nenhum jogador passou pelos filtros atuais para montar os cards.")
+        return
+
+    best_pra = combined.sort_values("L5_PRA", ascending=False).iloc[0]
+    best_delta = combined.sort_values("DELTA_PRA_L5", ascending=False).iloc[0]
+    best_pts = combined.sort_values("L5_PTS", ascending=False).iloc[0]
+    best_reb = combined.sort_values("L5_REB", ascending=False).iloc[0]
+    best_ast = combined.sort_values("L5_AST", ascending=False).iloc[0]
+
+    cols = st.columns(5)
+
+    cards = [
+        (
+            "PRA L5 líder",
+            format_number_br(best_pra["L5_PRA"]),
+            f'{best_pra["PLAYER"]} • {best_pra["TEAM_NAME"]}',
+            f'Temporada: {format_number_br(best_pra["SEASON_PRA"])}',
+        ),
+        (
+            "Maior alta L5",
+            f'{format_number_br(best_delta["DELTA_PRA_L5"])}',
+            f'{best_delta["PLAYER"]} • {best_delta["TEAM_NAME"]}',
+            f'PRA L5: {format_number_br(best_delta["L5_PRA"])}',
+        ),
+        (
+            "Pontos L5",
+            format_number_br(best_pts["L5_PTS"]),
+            f'{best_pts["PLAYER"]} • {best_pts["TEAM_NAME"]}',
+            f'Temporada: {format_number_br(best_pts["SEASON_PTS"])}',
+        ),
+        (
+            "Rebotes L5",
+            format_number_br(best_reb["L5_REB"]),
+            f'{best_reb["PLAYER"]} • {best_reb["TEAM_NAME"]}',
+            f'Temporada: {format_number_br(best_reb["SEASON_REB"])}',
+        ),
+        (
+            "Assistências L5",
+            format_number_br(best_ast["L5_AST"]),
+            f'{best_ast["PLAYER"]} • {best_ast["TEAM_NAME"]}',
+            f'Temporada: {format_number_br(best_ast["SEASON_AST"])}',
+        ),
+    ]
+
+    for col, card in zip(cols, cards):
+        with col:
+            st.markdown(
+                render_single_card(
+                    title=card[0],
+                    value=card[1],
+                    meta=card[2],
+                    extra=card[3],
+                ),
+                unsafe_allow_html=True,
+            )
 
 
 def render_player_chart(player_name: str, player_id: int, season: str) -> None:
@@ -614,7 +792,7 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
             y=recent["PRA"],
             mode="lines+markers",
             name="PRA",
-            line=dict(width=4, dash="dot"),
+            line=dict(width=4, color="#8b5cf6"),
         )
     )
     fig.add_trace(
@@ -623,8 +801,8 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
             y=recent["PTS"],
             mode="lines+markers",
             name="PTS",
-            line=dict(width=2.5),
-            opacity=0.85,
+            line=dict(width=2.2, color="#38bdf8"),
+            opacity=0.8,
         )
     )
     fig.add_trace(
@@ -633,8 +811,8 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
             y=recent["REB"],
             mode="lines+markers",
             name="REB",
-            line=dict(width=2.5),
-            opacity=0.85,
+            line=dict(width=2.2, color="#34d399"),
+            opacity=0.8,
         )
     )
     fig.add_trace(
@@ -643,8 +821,8 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
             y=recent["AST"],
             mode="lines+markers",
             name="AST",
-            line=dict(width=2.5),
-            opacity=0.85,
+            line=dict(width=2.2, color="#f59e0b"),
+            opacity=0.8,
         )
     )
 
@@ -691,7 +869,7 @@ def render_team_section(
 
     if filtered_df.empty:
         st.warning(
-            "Nenhum jogador passou pelos filtros. Você apertou demais o funil, pequeno curador de amostra."
+            "Nenhum jogador passou pelos filtros. Você apertou demais o funil, pequeno fiscal da amostra."
         )
         return
 
@@ -712,7 +890,7 @@ def render_team_section(
 
     with quick_tab:
         st.markdown(
-            '<div class="section-note">Aqui o foco é no que bate mais rápido no olho: PRA, tendência e papel do jogador.</div>',
+            '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, tendência e papel do jogador.</div>',
             unsafe_allow_html=True,
         )
         st.dataframe(
@@ -723,7 +901,7 @@ def render_team_section(
 
     with detail_tab:
         st.markdown(
-            '<div class="section-note">Aqui entra a parte mais nerdola: PTS, REB, AST, além do PRA completo.</div>',
+            '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST e PRA no mesmo lugar.</div>',
             unsafe_allow_html=True,
         )
         st.dataframe(
@@ -749,7 +927,7 @@ def main() -> None:
 
     st.markdown('<div class="main-title">NBA Dashboard MVP</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com leitura rápida e detalhamento completo.</div>',
+        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com um visual mais limpo e direto.</div>',
         unsafe_allow_html=True,
     )
 
@@ -786,7 +964,7 @@ def main() -> None:
         games = get_games_for_date(selected_date)
     except Exception as exc:
         st.error(
-            "Deu ruim na consulta da NBA. Às vezes a fonte externa resolve implicar com a existência humana."
+            "Deu ruim na consulta da NBA. A fonte externa, como sempre, decidiu ter personalidade."
         )
         st.exception(exc)
         return
@@ -794,26 +972,33 @@ def main() -> None:
     st.caption(f"Temporada detectada: {season}")
 
     if games.empty:
-        st.warning("Não encontrei jogos nessa data. A NBA também sabe estragar um calendário.")
+        st.warning("Não encontrei jogos nessa data. A NBA também sabe sabotar entretenimento.")
         return
 
     game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
-    render_game_card(selected_game)
-
-    home_team_id = int(selected_game["HOME_TEAM_ID"])
-    away_team_id = int(selected_game["VISITOR_TEAM_ID"])
-
     try:
-        away_df = build_team_table(away_team_id, season)
-        home_df = build_team_table(home_team_id, season)
+        away_df = build_team_table(int(selected_game["VISITOR_TEAM_ID"]), season)
+        home_df = build_team_table(int(selected_game["HOME_TEAM_ID"]), season)
     except Exception as exc:
         st.error(
-            "Consegui pegar o jogo, mas a coleta das estatísticas falhou. MVP grátis também tem seus surtos de diva."
+            "Consegui pegar o jogo, mas a coleta das estatísticas falhou. MVP grátis também tem seus surtos."
         )
         st.exception(exc)
         return
+
+    away_df["TEAM_NAME"] = selected_game["away_team_name"]
+    home_df["TEAM_NAME"] = selected_game["home_team_name"]
+
+    render_matchup_header(selected_game)
+    render_summary_cards(
+        away_df=away_df,
+        home_df=home_df,
+        min_games=min_games,
+        min_minutes=min_minutes,
+        role_filter=role_filter,
+    )
 
     tab1, tab2 = st.tabs(
         [selected_game["away_team_name"], selected_game["home_team_name"]]
