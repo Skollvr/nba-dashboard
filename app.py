@@ -1246,48 +1246,68 @@ def enrich_filtered_team_df(
     if filtered_df.empty:
         return filtered_df
 
-    defense_profile = get_opponent_defense_profile(opponent_team_id, season, last_n_games=7)
-    defense_lookup = {
-        row["POSITION_GROUP"]: row.to_dict()
-        for _, row in defense_profile.iterrows()
+    enriched_df = filtered_df.copy()
+
+    if "POSITION_GROUP" not in enriched_df.columns:
+        enriched_df["POSITION_GROUP"] = enriched_df["POSITION"].apply(normalize_position_group)
+
+    # Campos de forma/consistência: usa o pré-processado do time quando existir.
+    default_values = {
+        "HIT_RATE_L10": 0.0,
+        "HIT_RATE_L10_TEXT": "-",
+        "VOL_L10": 0.0,
+        "VOL_CLASS": "-",
+        "FORM_SIGNAL": "→ Estável",
     }
+    for col, default in default_values.items():
+        if col not in enriched_df.columns:
+            enriched_df[col] = default
+        enriched_df[col] = enriched_df[col].fillna(default)
 
-    enriched_rows = []
-    for _, row in filtered_df.iterrows():
-        item = row.to_dict()
-        position_group = normalize_position_group(item.get("POSITION", ""))
-        recent_profile = get_player_recent_profile(int(item["PLAYER_ID"]), season)
+    # Contexto do adversário por posição: barato e cacheado.
+    if {"OPP_PRA_ALLOWED", "LEAGUE_PRA_BASELINE", "MATCHUP_DIFF", "MATCHUP_LABEL", "OPP_TEAM_NAME"}.issubset(enriched_df.columns):
+        enriched_df["OPP_TEAM_NAME"] = enriched_df["OPP_TEAM_NAME"].fillna(opponent_name)
+        return enriched_df
 
-        pra_values = [float(v) for v in recent_profile.get("PRA_VALUES_L10", [])]
-        sample_size = len(pra_values)
-        hit_count = sum(value >= float(item["SEASON_PRA"]) for value in pra_values)
-        hit_rate = (hit_count / sample_size * 100) if sample_size else 0.0
+    matchup_rows = [
+        get_position_opponent_profile(season, opponent_team_id, position_group)
+        for position_group in ["G", "F", "C"]
+    ]
+    matchup_df = pd.DataFrame(matchup_rows)
 
-        item["POSITION_GROUP"] = position_group
-        item["TREND_RECENT_LABEL"] = recent_profile.get("TREND_LABEL", "Estável")
-        item["TREND_RECENT_ICON"] = recent_profile.get("TREND_ICON", "→")
-        item["TREND_RECENT_DELTA"] = recent_profile.get("TREND_DELTA", 0.0)
-        item["TREND_RECENT_DISPLAY"] = f'{item["TREND_RECENT_ICON"]} {item["TREND_RECENT_LABEL"]}'
-        item["VOLATILITY_STD_L10"] = recent_profile.get("VOLATILITY_STD", 0.0)
-        item["VOLATILITY_LABEL"] = recent_profile.get("VOLATILITY_LABEL", "Sem base")
-        item["PRA_HIT_RATE_TEMP"] = hit_rate
-        item["PRA_HIT_COUNT_TEMP"] = hit_count
-        item["PRA_HIT_SAMPLE"] = sample_size
-        item["HIT_RATE_TEXT"] = f"{hit_count}/{sample_size}" if sample_size else "-"
+    if not matchup_df.empty:
+        enriched_df = enriched_df.merge(matchup_df, on="POSITION_GROUP", how="left")
+    else:
+        for col in [
+            "OPP_PTS_ALLOWED",
+            "OPP_REB_ALLOWED",
+            "OPP_AST_ALLOWED",
+            "OPP_PRA_ALLOWED",
+            "LEAGUE_PRA_BASELINE",
+            "MATCHUP_DIFF",
+        ]:
+            enriched_df[col] = 0.0
+        enriched_df["MATCHUP_LABEL"] = "Neutro"
 
-        matchup = defense_lookup.get(position_group)
-        item["MATCHUP_OPPONENT_NAME"] = opponent_name
-        item["MATCHUP_PTS_ALLOWED"] = float(matchup["PTS_ALLOWED"]) if matchup else 0.0
-        item["MATCHUP_REB_ALLOWED"] = float(matchup["REB_ALLOWED"]) if matchup else 0.0
-        item["MATCHUP_AST_ALLOWED"] = float(matchup["AST_ALLOWED"]) if matchup else 0.0
-        item["MATCHUP_PRA_ALLOWED"] = float(matchup["PRA_ALLOWED"]) if matchup else 0.0
-        item["MATCHUP_SAMPLE"] = int(matchup["SAMPLE"]) if matchup else 0
-        item["MATCHUP_DELTA"] = float(matchup["MATCHUP_DELTA"]) if matchup else 0.0
-        item["MATCHUP_LABEL"] = matchup["MATCHUP_LABEL"] if matchup else "Sem base"
+    enriched_df["OPP_TEAM_NAME"] = opponent_name
 
-        enriched_rows.append(item)
+    for col in [
+        "OPP_PTS_ALLOWED",
+        "OPP_REB_ALLOWED",
+        "OPP_AST_ALLOWED",
+        "OPP_PRA_ALLOWED",
+        "LEAGUE_PRA_BASELINE",
+        "MATCHUP_DIFF",
+    ]:
+        if col not in enriched_df.columns:
+            enriched_df[col] = 0.0
+        enriched_df[col] = pd.to_numeric(enriched_df[col], errors="coerce").fillna(0.0)
 
-    return pd.DataFrame(enriched_rows)
+    if "MATCHUP_LABEL" not in enriched_df.columns:
+        enriched_df["MATCHUP_LABEL"] = "Neutro"
+    enriched_df["MATCHUP_LABEL"] = enriched_df["MATCHUP_LABEL"].fillna("Neutro")
+
+    return enriched_df
 
 
 def filter_and_sort_team_df(
