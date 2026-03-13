@@ -20,7 +20,9 @@ st.set_page_config(
 
 TEAM_LOOKUP = {team["id"]: team for team in teams.get_teams()}
 TEAM_ABBR_LOOKUP = {team["abbreviation"]: team for team in teams.get_teams()}
+
 TEAM_LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/primary/L/logo.svg"
+PLAYER_HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png"
 
 SORT_OPTIONS = {
     "PRA L5": "L5_PRA",
@@ -43,6 +45,7 @@ SORT_OPTIONS = {
 }
 
 ROLE_OPTIONS = ["Todos", "Titular provável", "Reserva"]
+VIEW_OPTIONS = ["Desktop", "Mobile"]
 
 
 def get_season_string(target_date: date) -> str:
@@ -57,6 +60,36 @@ def get_season_string(target_date: date) -> str:
 
 def get_team_logo_url(team_id: int) -> str:
     return TEAM_LOGO_URL.format(team_id=team_id)
+
+
+def get_player_headshot_url(player_id: int) -> str:
+    return PLAYER_HEADSHOT_URL.format(player_id=player_id)
+
+
+def format_number(value, decimals: int = 1) -> str:
+    try:
+        return f"{float(value):.{decimals}f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def get_opponent_label(matchup: str) -> str:
+    if not isinstance(matchup, str) or matchup.strip() == "":
+        return ""
+
+    cleaned = matchup.replace("vs.", "vs").strip()
+    parts = cleaned.split()
+
+    if len(parts) < 3:
+        return ""
+
+    venue = "vs" if "vs" in parts else "@"
+    opponent_abbr = parts[-1].strip().upper()
+
+    opponent_team = TEAM_ABBR_LOOKUP.get(opponent_abbr, {})
+    opponent_name = opponent_team.get("nickname") or opponent_team.get("full_name") or opponent_abbr
+
+    return f"{venue} {opponent_name}"
 
 
 def inject_css() -> None:
@@ -161,6 +194,147 @@ def inject_css() -> None:
         .small-note {
             color: #94a3b8;
             font-size: 0.88rem;
+        }
+
+        .mobile-player-card {
+            background: rgba(15,23,42,0.78);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 18px;
+            padding: 0.95rem;
+            margin-bottom: 0.8rem;
+        }
+        .mobile-player-top {
+            display: flex;
+            gap: 0.9rem;
+            align-items: center;
+            margin-bottom: 0.85rem;
+        }
+        .avatar-wrap {
+            width: 72px;
+            height: 72px;
+            border-radius: 16px;
+            overflow: hidden;
+            flex: 0 0 72px;
+            background: rgba(30,41,59,0.85);
+            border: 1px solid rgba(148,163,184,.10);
+            position: relative;
+        }
+        .player-avatar {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .avatar-fallback {
+            width: 100%;
+            height: 100%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            color: #cbd5e1;
+            font-size: 1.5rem;
+            background: rgba(30,41,59,0.95);
+        }
+        .mobile-player-name {
+            font-size: 1.08rem;
+            font-weight: 800;
+            color: #f8fafc;
+            line-height: 1.15;
+            margin-bottom: 0.2rem;
+        }
+        .mobile-player-meta {
+            color: #94a3b8;
+            font-size: 0.84rem;
+            margin-bottom: 0.35rem;
+        }
+        .badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            margin-top: 0.25rem;
+        }
+        .role-badge, .trend-badge {
+            display: inline-block;
+            padding: 0.22rem 0.48rem;
+            border-radius: 999px;
+            font-size: 0.74rem;
+            font-weight: 700;
+        }
+        .role-starter {
+            background: rgba(139,92,246,0.12);
+            color: #f3e8ff;
+            border: 1px solid rgba(139,92,246,0.18);
+        }
+        .role-bench {
+            background: rgba(148,163,184,0.10);
+            color: #cbd5e1;
+            border: 1px solid rgba(148,163,184,0.14);
+        }
+        .trend-good {
+            background: rgba(34,197,94,0.10);
+            color: #dcfce7;
+            border: 1px solid rgba(34,197,94,0.16);
+        }
+        .trend-bad {
+            background: rgba(239,68,68,0.10);
+            color: #fee2e2;
+            border: 1px solid rgba(239,68,68,0.16);
+        }
+        .trend-neutral {
+            background: rgba(148,163,184,0.10);
+            color: #e2e8f0;
+            border: 1px solid rgba(148,163,184,0.14);
+        }
+        .mobile-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.45rem;
+            margin-bottom: 0.65rem;
+        }
+        .mobile-stat {
+            background: rgba(2,6,23,0.32);
+            border: 1px solid rgba(148,163,184,.10);
+            border-radius: 14px;
+            padding: 0.55rem 0.45rem;
+            text-align: center;
+        }
+        .mobile-stat-label {
+            font-size: 0.68rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 0.2rem;
+        }
+        .mobile-stat-value {
+            font-size: 1rem;
+            font-weight: 800;
+            color: #f8fafc;
+        }
+        .delta-pos {
+            color: #86efac;
+        }
+        .delta-neg {
+            color: #fca5a5;
+        }
+        .delta-neu {
+            color: #e2e8f0;
+        }
+        .mobile-details-line {
+            color: #cbd5e1;
+            font-size: 0.82rem;
+            line-height: 1.45;
+            margin-top: 0.15rem;
+        }
+        .mobile-details-muted {
+            color: #94a3b8;
+            font-size: 0.78rem;
+            margin-top: 0.4rem;
+        }
+
+        @media (max-width: 640px) {
+            .mobile-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
         </style>
         """,
@@ -486,12 +660,7 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
 
     display_df["Jogador"] = display_df["PLAYER"]
     display_df["Pos"] = display_df["POSITION"].replace("", "-")
-    display_df["Papel"] = display_df["ROLE"].map(
-        {
-            "Titular provável": "Titular provável",
-            "Reserva": "Reserva",
-        }
-    )
+    display_df["Papel"] = display_df["ROLE"]
     display_df["GP"] = display_df["SEASON_GP"]
     display_df["MIN"] = display_df["SEASON_MIN"]
 
@@ -555,13 +724,6 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     ].copy()
 
     return summary_df, detail_df
-
-
-def format_number_br(value, decimals: int = 1) -> str:
-    try:
-        return f"{float(value):.{decimals}f}"
-    except (TypeError, ValueError):
-        return "-"
 
 
 def style_delta(val) -> str:
@@ -726,33 +888,33 @@ def render_summary_cards(
     cards = [
         (
             "PRA L5 líder",
-            format_number_br(best_pra["L5_PRA"]),
+            format_number(best_pra["L5_PRA"]),
             f'{best_pra["PLAYER"]} • {best_pra["TEAM_NAME"]}',
-            f'Temporada: {format_number_br(best_pra["SEASON_PRA"])}',
+            f'Temporada: {format_number(best_pra["SEASON_PRA"])}',
         ),
         (
             "Maior alta L5",
-            f'{format_number_br(best_delta["DELTA_PRA_L5"])}',
+            format_number(best_delta["DELTA_PRA_L5"]),
             f'{best_delta["PLAYER"]} • {best_delta["TEAM_NAME"]}',
-            f'PRA L5: {format_number_br(best_delta["L5_PRA"])}',
+            f'PRA L5: {format_number(best_delta["L5_PRA"])}',
         ),
         (
             "Pontos L5",
-            format_number_br(best_pts["L5_PTS"]),
+            format_number(best_pts["L5_PTS"]),
             f'{best_pts["PLAYER"]} • {best_pts["TEAM_NAME"]}',
-            f'Temporada: {format_number_br(best_pts["SEASON_PTS"])}',
+            f'Temporada: {format_number(best_pts["SEASON_PTS"])}',
         ),
         (
             "Rebotes L5",
-            format_number_br(best_reb["L5_REB"]),
+            format_number(best_reb["L5_REB"]),
             f'{best_reb["PLAYER"]} • {best_reb["TEAM_NAME"]}',
-            f'Temporada: {format_number_br(best_reb["SEASON_REB"])}',
+            f'Temporada: {format_number(best_reb["SEASON_REB"])}',
         ),
         (
             "Assistências L5",
-            format_number_br(best_ast["L5_AST"]),
+            format_number(best_ast["L5_AST"]),
             f'{best_ast["PLAYER"]} • {best_ast["TEAM_NAME"]}',
-            f'Temporada: {format_number_br(best_ast["SEASON_AST"])}',
+            f'Temporada: {format_number(best_ast["SEASON_AST"])}',
         ),
     ]
 
@@ -767,23 +929,6 @@ def render_summary_cards(
                 ),
                 unsafe_allow_html=True,
             )
-def get_opponent_label(matchup: str) -> str:
-    if not isinstance(matchup, str) or matchup.strip() == "":
-        return ""
-
-    cleaned = matchup.replace("vs.", "vs").strip()
-    parts = cleaned.split()
-
-    if len(parts) < 3:
-        return ""
-
-    venue = "vs" if "vs" in parts else "@"
-    opponent_abbr = parts[-1].strip().upper()
-
-    opponent_team = TEAM_ABBR_LOOKUP.get(opponent_abbr, {})
-    opponent_name = opponent_team.get("nickname") or opponent_team.get("full_name") or opponent_abbr
-
-    return f"{venue} {opponent_name}"
 
 
 def render_player_chart(player_name: str, player_id: int, season: str) -> None:
@@ -892,6 +1037,101 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
+def get_role_css_class(role: str) -> str:
+    if role == "Titular provável":
+        return "role-starter"
+    return "role-bench"
+
+
+def get_trend_css_class(trend: str) -> str:
+    if trend in ["🔥 Forte", "⬆️ Boa"]:
+        return "trend-good"
+    if trend in ["🥶 Queda", "⬇️ Fraca"]:
+        return "trend-bad"
+    return "trend-neutral"
+
+
+def get_delta_css_class(value: float) -> str:
+    if value > 0:
+        return "delta-pos"
+    if value < 0:
+        return "delta-neg"
+    return "delta-neu"
+
+
+def build_mobile_card_html(row: pd.Series) -> str:
+    role_class = get_role_css_class(row["ROLE"])
+    trend_class = get_trend_css_class(row["TREND"])
+    delta_l5_class = get_delta_css_class(float(row["DELTA_PRA_L5"]))
+    delta_l10_class = get_delta_css_class(float(row["DELTA_PRA_L10"]))
+    player_id = int(row["PLAYER_ID"])
+    position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+
+    return f"""
+    <div class="mobile-player-card">
+        <div class="mobile-player-top">
+            <div class="avatar-wrap">
+                <img
+                    src="{get_player_headshot_url(player_id)}"
+                    class="player-avatar"
+                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                />
+                <div class="avatar-fallback">🏀</div>
+            </div>
+            <div style="flex:1;">
+                <div class="mobile-player-name">{row["PLAYER"]}</div>
+                <div class="mobile-player-meta">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])}</div>
+                <div class="badge-row">
+                    <span class="role-badge {role_class}">{row["ROLE"]}</span>
+                    <span class="trend-badge {trend_class}">{row["TREND"]}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="mobile-grid">
+            <div class="mobile-stat">
+                <div class="mobile-stat-label">PRA Temp</div>
+                <div class="mobile-stat-value">{format_number(row["SEASON_PRA"])}</div>
+            </div>
+            <div class="mobile-stat">
+                <div class="mobile-stat-label">PRA L5</div>
+                <div class="mobile-stat-value">{format_number(row["L5_PRA"])}</div>
+            </div>
+            <div class="mobile-stat">
+                <div class="mobile-stat-label">PRA L10</div>
+                <div class="mobile-stat-value">{format_number(row["L10_PRA"])}</div>
+            </div>
+            <div class="mobile-stat">
+                <div class="mobile-stat-label">Δ PRA L5</div>
+                <div class="mobile-stat-value {delta_l5_class}">{format_number(row["DELTA_PRA_L5"])}</div>
+            </div>
+            <div class="mobile-stat">
+                <div class="mobile-stat-label">Δ PRA L10</div>
+                <div class="mobile-stat-value {delta_l10_class}">{format_number(row["DELTA_PRA_L10"])}</div>
+            </div>
+        </div>
+
+        <div class="mobile-details-line">
+            <strong>PTS</strong> T/L5/L10: {format_number(row["SEASON_PTS"])} / {format_number(row["L5_PTS"])} / {format_number(row["L10_PTS"])}
+        </div>
+        <div class="mobile-details-line">
+            <strong>REB</strong> T/L5/L10: {format_number(row["SEASON_REB"])} / {format_number(row["L5_REB"])} / {format_number(row["L10_REB"])}
+        </div>
+        <div class="mobile-details-line">
+            <strong>AST</strong> T/L5/L10: {format_number(row["SEASON_AST"])} / {format_number(row["L5_AST"])} / {format_number(row["L10_AST"])}
+        </div>
+        <div class="mobile-details-muted">
+            Card mobile: leitura rápida sem te obrigar a fazer pinça mental em tabela apertada.
+        </div>
+    </div>
+    """
+
+
+def render_mobile_player_cards(filtered_df: pd.DataFrame) -> None:
+    for _, row in filtered_df.iterrows():
+        st.markdown(build_mobile_card_html(row), unsafe_allow_html=True)
+
+
 def render_team_section(
     team_name: str,
     team_df: pd.DataFrame,
@@ -901,6 +1141,7 @@ def render_team_section(
     role_filter: str,
     sort_label: str,
     ascending: bool,
+    view_mode: str,
 ) -> None:
     st.subheader(team_name)
 
@@ -931,41 +1172,49 @@ def render_team_section(
         <div class="info-pill">MIN mínimo: {min_minutes}</div>
         <div class="info-pill">Papel: {role_filter}</div>
         <div class="info-pill">Ordenação: {sort_label}</div>
+        <div class="info-pill">Visualização: {view_mode}</div>
         """,
         unsafe_allow_html=True,
     )
 
-    summary_df, detail_df = build_display_dataframes(filtered_df)
-
-    quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
-
-    with quick_tab:
+    if view_mode == "Mobile":
         st.markdown(
-            '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, tendência e papel do jogador.</div>',
+            '<div class="section-note">Modo mobile: cards por jogador com foto e leitura rápida dos números que mais importam.</div>',
             unsafe_allow_html=True,
         )
-        st.dataframe(
-            style_table(summary_df, quick_view=True),
-            use_container_width=True,
-            hide_index=True,
-        )
+        render_mobile_player_cards(filtered_df)
+    else:
+        summary_df, detail_df = build_display_dataframes(filtered_df)
 
-    with detail_tab:
-        st.markdown(
-            '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST e PRA no mesmo lugar.</div>',
-            unsafe_allow_html=True,
-        )
-        st.dataframe(
-            style_table(detail_df, quick_view=False),
-            use_container_width=True,
-            hide_index=True,
-        )
+        quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
+
+        with quick_tab:
+            st.markdown(
+                '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, tendência e papel do jogador.</div>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                style_table(summary_df, quick_view=True),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with detail_tab:
+            st.markdown(
+                '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST e PRA no mesmo lugar.</div>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                style_table(detail_df, quick_view=False),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
     player_name = st.selectbox(
         f"Ver gráfico de jogador — {team_name}",
         options["PLAYER"].tolist(),
-        key=f"player_select_{team_name}",
+        key=f"player_select_{team_name}_{view_mode}",
     )
     selected_player_id = int(
         options.loc[options["PLAYER"] == player_name, "PLAYER_ID"].iloc[0]
@@ -978,13 +1227,17 @@ def main() -> None:
 
     st.markdown('<div class="main-title">NBA Dashboard MVP</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com um visual mais limpo e direto.</div>',
+        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com visual desktop ou cards mobile.</div>',
         unsafe_allow_html=True,
     )
 
     with st.sidebar:
         st.header("Configurações")
         selected_date = st.date_input("Data dos jogos", value=date.today())
+
+        st.divider()
+        st.subheader("Visualização")
+        view_mode = st.radio("Modo de exibição", VIEW_OPTIONS, index=0)
 
         st.divider()
         st.subheader("Filtros")
@@ -1004,7 +1257,7 @@ def main() -> None:
         ascending = st.toggle("Ordem crescente", value=False)
 
         st.divider()
-        st.caption("Este MVP busca os dados ao abrir a página.")
+        st.caption("Este app busca os dados ao abrir a página.")
         if st.button("Forçar atualização"):
             st.cache_data.clear()
             st.rerun()
@@ -1065,6 +1318,7 @@ def main() -> None:
             role_filter=role_filter,
             sort_label=sort_label,
             ascending=ascending,
+            view_mode=view_mode,
         )
 
     with tab2:
@@ -1077,6 +1331,7 @@ def main() -> None:
             role_filter=role_filter,
             sort_label=sort_label,
             ascending=ascending,
+            view_mode=view_mode,
         )
 
     st.markdown(
