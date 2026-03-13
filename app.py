@@ -4,8 +4,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from textwrap import dedent
-
 from nba_api.stats.endpoints import (
     commonteamroster,
     leaguedashplayerstats,
@@ -71,6 +69,14 @@ def get_player_headshot_url(player_id: int) -> str:
 def format_number(value, decimals: int = 1) -> str:
     try:
         return f"{float(value):.{decimals}f}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def format_signed_number(value, decimals: int = 1) -> str:
+    try:
+        value = float(value)
+        return f"{value:+.{decimals}f}"
     except (TypeError, ValueError):
         return "-"
 
@@ -197,146 +203,44 @@ def inject_css() -> None:
             color: #94a3b8;
             font-size: 0.88rem;
         }
-
-        .mobile-player-card {
-            background: rgba(15,23,42,0.78);
-            border: 1px solid rgba(148,163,184,.12);
-            border-radius: 18px;
-            padding: 0.95rem;
-            margin-bottom: 0.8rem;
-        }
-        .mobile-player-top {
-            display: flex;
-            gap: 0.9rem;
-            align-items: center;
-            margin-bottom: 0.85rem;
-        }
-        .avatar-wrap {
-            width: 72px;
-            height: 72px;
-            border-radius: 16px;
-            overflow: hidden;
-            flex: 0 0 72px;
-            background: rgba(30,41,59,0.85);
-            border: 1px solid rgba(148,163,184,.10);
-            position: relative;
-        }
-        .player-avatar {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
-        }
-        .avatar-fallback {
-            width: 100%;
-            height: 100%;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            color: #cbd5e1;
-            font-size: 1.5rem;
-            background: rgba(30,41,59,0.95);
-        }
-        .mobile-player-name {
-            font-size: 1.08rem;
-            font-weight: 800;
-            color: #f8fafc;
-            line-height: 1.15;
-            margin-bottom: 0.2rem;
-        }
-        .mobile-player-meta {
-            color: #94a3b8;
-            font-size: 0.84rem;
-            margin-bottom: 0.35rem;
-        }
         .badge-row {
             display: flex;
-            flex-wrap: wrap;
             gap: 0.35rem;
-            margin-top: 0.25rem;
+            flex-wrap: wrap;
+            margin-top: 0.2rem;
+            margin-bottom: 0.15rem;
         }
-        .role-badge, .trend-badge {
+        .badge {
             display: inline-block;
             padding: 0.22rem 0.48rem;
             border-radius: 999px;
             font-size: 0.74rem;
             font-weight: 700;
         }
-        .role-starter {
+        .badge-starter {
             background: rgba(139,92,246,0.12);
             color: #f3e8ff;
             border: 1px solid rgba(139,92,246,0.18);
         }
-        .role-bench {
+        .badge-bench {
             background: rgba(148,163,184,0.10);
             color: #cbd5e1;
             border: 1px solid rgba(148,163,184,0.14);
         }
-        .trend-good {
+        .badge-good {
             background: rgba(34,197,94,0.10);
             color: #dcfce7;
             border: 1px solid rgba(34,197,94,0.16);
         }
-        .trend-bad {
+        .badge-bad {
             background: rgba(239,68,68,0.10);
             color: #fee2e2;
             border: 1px solid rgba(239,68,68,0.16);
         }
-        .trend-neutral {
+        .badge-neutral {
             background: rgba(148,163,184,0.10);
             color: #e2e8f0;
             border: 1px solid rgba(148,163,184,0.14);
-        }
-        .mobile-grid {
-            display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
-            gap: 0.45rem;
-            margin-bottom: 0.65rem;
-        }
-        .mobile-stat {
-            background: rgba(2,6,23,0.32);
-            border: 1px solid rgba(148,163,184,.10);
-            border-radius: 14px;
-            padding: 0.55rem 0.45rem;
-            text-align: center;
-        }
-        .mobile-stat-label {
-            font-size: 0.68rem;
-            color: #94a3b8;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            margin-bottom: 0.2rem;
-        }
-        .mobile-stat-value {
-            font-size: 1rem;
-            font-weight: 800;
-            color: #f8fafc;
-        }
-        .delta-pos {
-            color: #86efac;
-        }
-        .delta-neg {
-            color: #fca5a5;
-        }
-        .delta-neu {
-            color: #e2e8f0;
-        }
-        .mobile-details-line {
-            color: #cbd5e1;
-            font-size: 0.82rem;
-            line-height: 1.45;
-            margin-top: 0.15rem;
-        }
-        .mobile-details-muted {
-            color: #94a3b8;
-            font-size: 0.78rem;
-            margin-top: 0.4rem;
-        }
-
-        @media (max-width: 640px) {
-            .mobile-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
         }
         </style>
         """,
@@ -804,29 +708,28 @@ def render_matchup_header(game_row: pd.Series) -> None:
     away_team_id = int(game_row["VISITOR_TEAM_ID"])
     home_team_id = int(game_row["HOME_TEAM_ID"])
 
-    with st.container():
-        st.markdown('<div class="matchup-shell">', unsafe_allow_html=True)
+    st.markdown('<div class="matchup-shell">', unsafe_allow_html=True)
 
-        c1, c2, c3 = st.columns([1.4, 0.9, 1.4])
+    c1, c2, c3 = st.columns([1.4, 0.9, 1.4])
 
-        with c1:
-            st.image(get_team_logo_url(away_team_id), width=96)
-            st.markdown(f'<div class="team-title">{game_row["away_team_name"]}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="team-sub">Visitante</div>', unsafe_allow_html=True)
+    with c1:
+        st.image(get_team_logo_url(away_team_id), width=96)
+        st.markdown(f'<div class="team-title">{game_row["away_team_name"]}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="team-sub">Visitante</div>', unsafe_allow_html=True)
 
-        with c2:
-            st.markdown('<div class="center-vs">VS</div>', unsafe_allow_html=True)
-            st.markdown(
-                f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{game_row["GAME_STATUS_TEXT"]}</span></div>',
-                unsafe_allow_html=True,
-            )
+    with c2:
+        st.markdown('<div class="center-vs">VS</div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{game_row["GAME_STATUS_TEXT"]}</span></div>',
+            unsafe_allow_html=True,
+        )
 
-        with c3:
-            st.image(get_team_logo_url(home_team_id), width=96)
-            st.markdown(f'<div class="team-title">{game_row["home_team_name"]}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="team-sub">Mandante</div>', unsafe_allow_html=True)
+    with c3:
+        st.image(get_team_logo_url(home_team_id), width=96)
+        st.markdown(f'<div class="team-title">{game_row["home_team_name"]}</div>', unsafe_allow_html=True)
+        st.markdown('<div class="team-sub">Mandante</div>', unsafe_allow_html=True)
 
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def build_summary_cards_data(
@@ -896,7 +799,7 @@ def render_summary_cards(
         ),
         (
             "Maior alta L5",
-            format_number(best_delta["DELTA_PRA_L5"]),
+            format_signed_number(best_delta["DELTA_PRA_L5"]),
             f'{best_delta["PLAYER"]} • {best_delta["TEAM_NAME"]}',
             f'PRA L5: {format_number(best_delta["L5_PRA"])}',
         ),
@@ -1039,102 +942,72 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
-def get_role_css_class(role: str) -> str:
-    if role == "Titular provável":
-        return "role-starter"
-    return "role-bench"
+def render_mobile_badges(role: str, trend: str) -> None:
+    role_class = "badge-starter" if role == "Titular provável" else "badge-bench"
 
-
-def get_trend_css_class(trend: str) -> str:
     if trend in ["🔥 Forte", "⬆️ Boa"]:
-        return "trend-good"
-    if trend in ["🥶 Queda", "⬇️ Fraca"]:
-        return "trend-bad"
-    return "trend-neutral"
+        trend_class = "badge-good"
+    elif trend in ["🥶 Queda", "⬇️ Fraca"]:
+        trend_class = "badge-bad"
+    else:
+        trend_class = "badge-neutral"
 
-
-def get_delta_css_class(value: float) -> str:
-    if value > 0:
-        return "delta-pos"
-    if value < 0:
-        return "delta-neg"
-    return "delta-neu"
-
-def build_mobile_card_html(row: pd.Series) -> str:
-    role_class = get_role_css_class(row["ROLE"])
-    trend_class = get_trend_css_class(row["TREND"])
-    delta_l5_class = get_delta_css_class(float(row["DELTA_PRA_L5"]))
-    delta_l10_class = get_delta_css_class(float(row["DELTA_PRA_L10"]))
-    player_id = int(row["PLAYER_ID"])
-    position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
-
-    return f"""
-<div class="mobile-player-card">
-    <div class="mobile-player-top">
-        <div class="avatar-wrap">
-            <img
-                src="{get_player_headshot_url(player_id)}"
-                class="player-avatar"
-            />
+    st.markdown(
+        f"""
+        <div class="badge-row">
+            <span class="badge {role_class}">{role}</span>
+            <span class="badge {trend_class}">{trend}</span>
         </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        <div style="flex:1;">
-            <div class="mobile-player-name">{row["PLAYER"]}</div>
-            <div class="mobile-player-meta">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])}</div>
 
-            <div class="badge-row">
-                <span class="role-badge {role_class}">{row["ROLE"]}</span>
-                <span class="trend-badge {trend_class}">{row["TREND"]}</span>
-            </div>
-        </div>
-    </div>
+def render_mobile_player_card(row: pd.Series) -> None:
+    with st.container(border=True):
+        top_left, top_right = st.columns([1, 4])
 
-    <div class="mobile-grid">
-        <div class="mobile-stat">
-            <div class="mobile-stat-label">PRA Temp</div>
-            <div class="mobile-stat-value">{format_number(row["SEASON_PRA"])}</div>
-        </div>
-        <div class="mobile-stat">
-            <div class="mobile-stat-label">PRA L5</div>
-            <div class="mobile-stat-value">{format_number(row["L5_PRA"])}</div>
-        </div>
-        <div class="mobile-stat">
-            <div class="mobile-stat-label">PRA L10</div>
-            <div class="mobile-stat-value">{format_number(row["L10_PRA"])}</div>
-        </div>
-        <div class="mobile-stat">
-            <div class="mobile-stat-label">Δ PRA L5</div>
-            <div class="mobile-stat-value {delta_l5_class}">{format_number(row["DELTA_PRA_L5"])}</div>
-        </div>
-        <div class="mobile-stat">
-            <div class="mobile-stat-label">Δ PRA L10</div>
-            <div class="mobile-stat-value {delta_l10_class}">{format_number(row["DELTA_PRA_L10"])}</div>
-        </div>
-    </div>
+        with top_left:
+            st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=78)
 
-    <div class="mobile-details-line">
-        <strong>PTS</strong> T/L5/L10: {format_number(row["SEASON_PTS"])} / {format_number(row["L5_PTS"])} / {format_number(row["L10_PTS"])}
-    </div>
-    <div class="mobile-details-line">
-        <strong>REB</strong> T/L5/L10: {format_number(row["SEASON_REB"])} / {format_number(row["L5_REB"])} / {format_number(row["L10_REB"])}
-    </div>
-    <div class="mobile-details-line">
-        <strong>AST</strong> T/L5/L10: {format_number(row["SEASON_AST"])} / {format_number(row["L5_AST"])} / {format_number(row["L10_AST"])}
-    </div>
-    <div class="mobile-details-muted">
-        Card mobile: leitura rápida sem te obrigar a fazer pinça mental em tabela apertada.
-    </div>
-</div>
-"""
+        with top_right:
+            st.markdown(f"**{row['PLAYER']}**")
+            position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+            st.caption(
+                f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}"
+            )
+            render_mobile_badges(row["ROLE"], row["TREND"])
+
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("PRA Temp", format_number(row["SEASON_PRA"]))
+        with m2:
+            st.metric("PRA L5", format_number(row["L5_PRA"]))
+        with m3:
+            st.metric("PRA L10", format_number(row["L10_PRA"]))
+
+        d1, d2 = st.columns(2)
+        with d1:
+            st.metric("Δ PRA L5", format_signed_number(row["DELTA_PRA_L5"]))
+        with d2:
+            st.metric("Δ PRA L10", format_signed_number(row["DELTA_PRA_L10"]))
+
+        with st.expander("Ver PTS / REB / AST"):
+            st.write(
+                f"**PTS** T/L5/L10: {format_number(row['SEASON_PTS'])} / {format_number(row['L5_PTS'])} / {format_number(row['L10_PTS'])}"
+            )
+            st.write(
+                f"**REB** T/L5/L10: {format_number(row['SEASON_REB'])} / {format_number(row['L5_REB'])} / {format_number(row['L10_REB'])}"
+            )
+            st.write(
+                f"**AST** T/L5/L10: {format_number(row['SEASON_AST'])} / {format_number(row['L5_AST'])} / {format_number(row['L10_AST'])}"
+            )
 
 
 def render_mobile_player_cards(filtered_df: pd.DataFrame) -> None:
     for _, row in filtered_df.iterrows():
-        st.html(build_mobile_card_html(row))
-
-def render_mobile_player_cards(filtered_df: pd.DataFrame) -> None:
-    for _, row in filtered_df.iterrows():
-        st.markdown(build_mobile_card_html(row), unsafe_allow_html=True)
+        render_mobile_player_card(row)
+        st.write("")
 
 
 def render_team_section(
