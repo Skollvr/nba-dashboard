@@ -4,6 +4,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from textwrap import dedent
+
 from nba_api.stats.endpoints import (
     commonteamroster,
     leaguedashplayerstats,
@@ -1067,7 +1069,7 @@ def build_mobile_card_html(row: pd.Series) -> str:
     player_id = int(row["PLAYER_ID"])
     position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
 
-    return f"""
+    html = f"""
     <div class="mobile-player-card">
         <div class="mobile-player-top">
             <div class="avatar-wrap">
@@ -1078,9 +1080,11 @@ def build_mobile_card_html(row: pd.Series) -> str:
                 />
                 <div class="avatar-fallback">🏀</div>
             </div>
+
             <div style="flex:1;">
                 <div class="mobile-player-name">{row["PLAYER"]}</div>
                 <div class="mobile-player-meta">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])}</div>
+
                 <div class="badge-row">
                     <span class="role-badge {role_class}">{row["ROLE"]}</span>
                     <span class="trend-badge {trend_class}">{row["TREND"]}</span>
@@ -1125,6 +1129,7 @@ def build_mobile_card_html(row: pd.Series) -> str:
         </div>
     </div>
     """
+    return dedent(html).strip()
 
 
 def render_mobile_player_cards(filtered_df: pd.DataFrame) -> None:
