@@ -19,6 +19,7 @@ st.set_page_config(
 )
 
 TEAM_LOOKUP = {team["id"]: team for team in teams.get_teams()}
+TEAM_ABBR_LOOKUP = {team["abbreviation"]: team for team in teams.get_teams()}
 TEAM_LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/primary/L/logo.svg"
 
 SORT_OPTIONS = {
@@ -766,6 +767,23 @@ def render_summary_cards(
                 ),
                 unsafe_allow_html=True,
             )
+def get_opponent_label(matchup: str) -> str:
+    if not isinstance(matchup, str) or matchup.strip() == "":
+        return ""
+
+    cleaned = matchup.replace("vs.", "vs").strip()
+    parts = cleaned.split()
+
+    if len(parts) < 3:
+        return ""
+
+    venue = "vs" if "vs" in parts else "@"
+    opponent_abbr = parts[-1].strip().upper()
+
+    opponent_team = TEAM_ABBR_LOOKUP.get(opponent_abbr, {})
+    opponent_name = opponent_team.get("nickname") or opponent_team.get("full_name") or opponent_abbr
+
+    return f"{venue} {opponent_name}"
 
 
 def render_player_chart(player_name: str, player_id: int, season: str) -> None:
@@ -775,8 +793,13 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
         st.info("Sem histórico suficiente para esse jogador.")
         return
 
-    recent = log[["GAME_DATE", "PTS", "REB", "AST"]].copy()
-    recent = recent.dropna().sort_values("GAME_DATE").tail(10)
+    needed_cols = ["GAME_DATE", "PTS", "REB", "AST"]
+    if "MATCHUP" in log.columns:
+        needed_cols.append("MATCHUP")
+
+    recent = log[needed_cols].copy()
+    recent = recent.dropna(subset=["GAME_DATE", "PTS", "REB", "AST"])
+    recent = recent.sort_values("GAME_DATE").tail(10)
 
     if recent.empty:
         st.info("Sem histórico suficiente para esse jogador.")
@@ -784,58 +807,86 @@ def render_player_chart(player_name: str, player_id: int, season: str) -> None:
 
     recent["PRA"] = recent["PTS"] + recent["REB"] + recent["AST"]
 
+    if "MATCHUP" in recent.columns:
+        recent["OPPONENT_LABEL"] = recent["MATCHUP"].apply(get_opponent_label)
+    else:
+        recent["OPPONENT_LABEL"] = ""
+
+    recent["X_LABEL"] = recent.apply(
+        lambda row: (
+            f'{row["GAME_DATE"].strftime("%b %d")}\n{row["OPPONENT_LABEL"]}'
+            if row["OPPONENT_LABEL"]
+            else row["GAME_DATE"].strftime("%b %d")
+        ),
+        axis=1,
+    )
+
     fig = go.Figure()
 
     fig.add_trace(
         go.Scatter(
-            x=recent["GAME_DATE"],
+            x=recent["X_LABEL"],
             y=recent["PRA"],
             mode="lines+markers",
             name="PRA",
             line=dict(width=4, color="#8b5cf6"),
+            hovertemplate="PRA: %{y:.1f}<extra></extra>",
         )
     )
     fig.add_trace(
         go.Scatter(
-            x=recent["GAME_DATE"],
+            x=recent["X_LABEL"],
             y=recent["PTS"],
             mode="lines+markers",
             name="PTS",
             line=dict(width=2.2, color="#38bdf8"),
             opacity=0.8,
+            hovertemplate="PTS: %{y:.1f}<extra></extra>",
         )
     )
     fig.add_trace(
         go.Scatter(
-            x=recent["GAME_DATE"],
+            x=recent["X_LABEL"],
             y=recent["REB"],
             mode="lines+markers",
             name="REB",
             line=dict(width=2.2, color="#34d399"),
             opacity=0.8,
+            hovertemplate="REB: %{y:.1f}<extra></extra>",
         )
     )
     fig.add_trace(
         go.Scatter(
-            x=recent["GAME_DATE"],
+            x=recent["X_LABEL"],
             y=recent["AST"],
             mode="lines+markers",
             name="AST",
             line=dict(width=2.2, color="#f59e0b"),
             opacity=0.8,
+            hovertemplate="AST: %{y:.1f}<extra></extra>",
         )
     )
 
     fig.update_layout(
         title=f"Últimos 10 jogos — {player_name}",
         template="plotly_dark",
-        height=380,
+        height=400,
         margin=dict(l=20, r=20, t=60, b=20),
         legend=dict(orientation="h", y=1.08, x=0),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(15,23,42,0.35)",
+        hoverlabel=dict(
+            bgcolor="#0f172a",
+            bordercolor="#334155",
+            font=dict(color="#f8fafc", size=13),
+        ),
     )
-    fig.update_xaxes(title="")
+    fig.update_xaxes(
+        title="",
+        type="category",
+        tickangle=0,
+        showgrid=False,
+    )
     fig.update_yaxes(title="")
 
     st.plotly_chart(fig, use_container_width=True)
