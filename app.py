@@ -236,6 +236,149 @@ def inject_css() -> None:
             color: #e2e8f0;
             border: 1px solid rgba(148,163,184,0.14);
         }
+        .player-quick-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.55rem;
+            margin-top: 0.9rem;
+            margin-bottom: 0.15rem;
+        }
+        .quick-stat {
+            background: rgba(15,23,42,0.74);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 16px;
+            padding: 0.72rem 0.78rem;
+            min-height: 84px;
+        }
+        .quick-stat-primary {
+            background: linear-gradient(180deg, rgba(76,29,149,0.58), rgba(30,41,59,0.9));
+            border: 1px solid rgba(167,139,250,0.28);
+        }
+        .quick-stat-up {
+            background: linear-gradient(180deg, rgba(21,128,61,0.38), rgba(30,41,59,0.9));
+            border: 1px solid rgba(74,222,128,0.24);
+        }
+        .quick-stat-down {
+            background: linear-gradient(180deg, rgba(153,27,27,0.34), rgba(30,41,59,0.9));
+            border: 1px solid rgba(248,113,113,0.22);
+        }
+        .quick-stat-label {
+            color: #94a3b8;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.32rem;
+        }
+        .quick-stat-value {
+            color: #f8fafc;
+            font-size: 1.28rem;
+            font-weight: 800;
+            line-height: 1.05;
+            margin-bottom: 0.28rem;
+        }
+        .quick-stat-meta {
+            color: #cbd5e1;
+            font-size: 0.77rem;
+            line-height: 1.25;
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.72rem;
+            margin-top: 0.2rem;
+        }
+        .detail-box {
+            background: rgba(15,23,42,0.74);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 18px;
+            padding: 0.82rem;
+        }
+        .detail-box-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .detail-box-title {
+            color: #f8fafc;
+            font-size: 0.95rem;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+        }
+        .delta-pill-row {
+            display: flex;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .delta-pill {
+            display: inline-block;
+            padding: 0.2rem 0.42rem;
+            border-radius: 999px;
+            font-size: 0.69rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .delta-up {
+            background: rgba(34,197,94,0.12);
+            color: #dcfce7;
+            border: 1px solid rgba(34,197,94,0.16);
+        }
+        .delta-down {
+            background: rgba(239,68,68,0.12);
+            color: #fee2e2;
+            border: 1px solid rgba(239,68,68,0.16);
+        }
+        .delta-flat {
+            background: rgba(148,163,184,0.10);
+            color: #e2e8f0;
+            border: 1px solid rgba(148,163,184,0.14);
+        }
+        .detail-mini-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.45rem;
+        }
+        .detail-mini {
+            background: rgba(2,6,23,0.35);
+            border: 1px solid rgba(148,163,184,.10);
+            border-radius: 14px;
+            padding: 0.52rem 0.58rem;
+        }
+        .detail-mini-highlight {
+            background: rgba(30,41,59,0.82);
+            border: 1px solid rgba(139,92,246,0.22);
+        }
+        .detail-mini-label {
+            color: #94a3b8;
+            font-size: 0.69rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.2rem;
+        }
+        .detail-mini-value {
+            color: #f8fafc;
+            font-size: 1rem;
+            font-weight: 800;
+            line-height: 1.05;
+        }
+        @media (max-width: 1200px) {
+            .player-quick-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+            .detail-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 760px) {
+            .player-quick-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .detail-mini-grid {
+                grid-template-columns: 1fr;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -1017,25 +1160,92 @@ def render_badges(role: str, trend: str) -> None:
     )
 
 
-def render_detail_metric_boxes(title: str, temp_val: float, l5_val: float, l10_val: float) -> None:
-    with st.container(border=True):
-        st.markdown(f"**{title}**")
-        c1, c2, c3 = st.columns(3)
+def build_delta_pill_html(label: str, value: float) -> str:
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        numeric_value = 0.0
 
-        with c1:
-            with st.container(border=True):
-                st.caption("Temp")
-                st.markdown(f"### {format_number(temp_val)}")
+    if numeric_value > 0.3:
+        css_class = "delta-up"
+    elif numeric_value < -0.3:
+        css_class = "delta-down"
+    else:
+        css_class = "delta-flat"
 
-        with c2:
-            with st.container(border=True):
-                st.caption("L5")
-                st.markdown(f"### {format_number(l5_val)}")
+    return f'<span class="delta-pill {css_class}">{label} {format_signed_number(numeric_value)}</span>'
 
-        with c3:
-            with st.container(border=True):
-                st.caption("L10")
-                st.markdown(f"### {format_number(l10_val)}")
+
+def render_detail_metric_box_html(title: str, temp_val: float, l5_val: float, l10_val: float) -> str:
+    delta_l5 = l5_val - temp_val
+    delta_l10 = l10_val - temp_val
+
+    return f"""
+    <div class="detail-box">
+        <div class="detail-box-top">
+            <div class="detail-box-title">{title}</div>
+            <div class="delta-pill-row">
+                {build_delta_pill_html('Δ L5', delta_l5)}
+                {build_delta_pill_html('Δ L10', delta_l10)}
+            </div>
+        </div>
+        <div class="detail-mini-grid">
+            <div class="detail-mini">
+                <div class="detail-mini-label">Temp</div>
+                <div class="detail-mini-value">{format_number(temp_val)}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">L5</div>
+                <div class="detail-mini-value">{format_number(l5_val)}</div>
+            </div>
+            <div class="detail-mini detail-mini-highlight">
+                <div class="detail-mini-label">L10</div>
+                <div class="detail-mini-value">{format_number(l10_val)}</div>
+            </div>
+        </div>
+    </div>
+    """
+
+
+def render_player_highlight_tiles(row: pd.Series) -> None:
+    delta_class = "quick-stat"
+    if float(row["DELTA_PRA_L10"]) > 0.3:
+        delta_class = "quick-stat quick-stat-up"
+    elif float(row["DELTA_PRA_L10"]) < -0.3:
+        delta_class = "quick-stat quick-stat-down"
+
+    st.markdown(
+        f"""
+        <div class="player-quick-grid">
+            <div class="quick-stat quick-stat-primary">
+                <div class="quick-stat-label">PRA L10</div>
+                <div class="quick-stat-value">{format_number(row['L10_PRA'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PRA'])} • L5 {format_number(row['L5_PRA'])}</div>
+            </div>
+            <div class="{delta_class}">
+                <div class="quick-stat-label">Δ PRA L10</div>
+                <div class="quick-stat-value">{format_signed_number(row['DELTA_PRA_L10'])}</div>
+                <div class="quick-stat-meta">Comparado à média da temporada</div>
+            </div>
+            <div class="quick-stat">
+                <div class="quick-stat-label">PTS L10</div>
+                <div class="quick-stat-value">{format_number(row['L10_PTS'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PTS'])}</div>
+            </div>
+            <div class="quick-stat">
+                <div class="quick-stat-label">REB L10</div>
+                <div class="quick-stat-value">{format_number(row['L10_REB'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_REB'])}</div>
+            </div>
+            <div class="quick-stat">
+                <div class="quick-stat-label">AST L10</div>
+                <div class="quick-stat-value">{format_number(row['L10_AST'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_AST'])}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_player_card(row: pd.Series) -> None:
@@ -1053,52 +1263,20 @@ def render_player_card(row: pd.Series) -> None:
             )
             render_badges(row["ROLE"], row["TREND"])
 
-        r1c1, r1c2, r1c3 = st.columns(3)
-        with r1c1:
-            st.metric("PRA L10", format_number(row["L10_PRA"]))
-        with r1c2:
-            st.metric("Δ PRA L10", format_signed_number(row["DELTA_PRA_L10"]))
-        with r1c3:
-            st.metric("PTS L10", format_number(row["L10_PTS"]))
-
-        r2c1, r2c2 = st.columns(2)
-        with r2c1:
-            st.metric("AST L10", format_number(row["L10_AST"]))
-        with r2c2:
-            st.metric("REB L10", format_number(row["L10_REB"]))
+        render_player_highlight_tiles(row)
 
         with st.expander("Ver detalhamento completo"):
-            top_a, top_b = st.columns(2)
-            with top_a:
-                render_detail_metric_boxes(
-                    "PRA",
-                    row["SEASON_PRA"],
-                    row["L5_PRA"],
-                    row["L10_PRA"],
-                )
-            with top_b:
-                render_detail_metric_boxes(
-                    "PTS",
-                    row["SEASON_PTS"],
-                    row["L5_PTS"],
-                    row["L10_PTS"],
-                )
-
-            bottom_a, bottom_b = st.columns(2)
-            with bottom_a:
-                render_detail_metric_boxes(
-                    "REB",
-                    row["SEASON_REB"],
-                    row["L5_REB"],
-                    row["L10_REB"],
-                )
-            with bottom_b:
-                render_detail_metric_boxes(
-                    "AST",
-                    row["SEASON_AST"],
-                    row["L5_AST"],
-                    row["L10_AST"],
-                )
+            st.markdown(
+                f"""
+                <div class="detail-grid">
+                    {render_detail_metric_box_html('PRA', row['SEASON_PRA'], row['L5_PRA'], row['L10_PRA'])}
+                    {render_detail_metric_box_html('PTS', row['SEASON_PTS'], row['L5_PTS'], row['L10_PTS'])}
+                    {render_detail_metric_box_html('REB', row['SEASON_REB'], row['L5_REB'], row['L10_REB'])}
+                    {render_detail_metric_box_html('AST', row['SEASON_AST'], row['L5_AST'], row['L10_AST'])}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_player_cards_grid(filtered_df: pd.DataFrame, cards_per_row: int = 2) -> None:
@@ -1165,7 +1343,7 @@ def render_team_section(
 
     if view_mode == "Cards":
         st.markdown(
-            '<div class="section-note">Cards com foto, leitura rápida em L10 e detalhamento em mini caixas.</div>',
+            '<div class="section-note">Cards com leitura rápida em L10 e detalhamento em mini caixas com deltas para L5 e L10.</div>',
             unsafe_allow_html=True,
         )
         render_player_cards_grid(filtered_df, cards_per_row=cards_per_row)
