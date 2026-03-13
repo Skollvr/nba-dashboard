@@ -1415,7 +1415,7 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     display_df["Matchup"] = display_df["MATCHUP_LABEL"]
     display_df["Hit L10"] = display_df["HIT_RATE_L10_TEXT"]
     display_df["Sinal"] = display_df["FORM_SIGNAL"]
-    display_df["Vol L10"] = display_df["VOL_CLASS"]
+    display_df["Oscilação"] = display_df["VOL_CLASS"]
     display_df["PRA adv pos"] = display_df["OPP_PRA_ALLOWED"]
     display_df["Liga pos"] = display_df["LEAGUE_PRA_BASELINE"]
 
@@ -1430,7 +1430,7 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
             "Δ PRA L10",
             "Matchup",
             "Hit L10",
-            "Vol L10",
+            "Oscilação",
             "Sinal",
             "Trend",
         ]
@@ -1549,7 +1549,7 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
 
     pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10", "PRA adv pos", "Liga pos"] if c in df.columns]
     delta_cols = [c for c in ["Δ PRA L5", "Δ PRA L10"] if c in df.columns]
-    center_cols = [c for c in ["Papel", "GP", "MIN", "Trend", "Matchup", "Hit L10", "Vol L10", "Sinal"] if c in df.columns]
+    center_cols = [c for c in ["Papel", "GP", "MIN", "Trend", "Matchup", "Hit L10", "Oscilação", "Sinal"] if c in df.columns]
 
     if pra_cols:
         styler = styler.map(style_pra, subset=pra_cols)
@@ -1569,8 +1569,8 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
     if "Sinal" in df.columns:
         styler = styler.map(style_signal, subset=["Sinal"])
 
-    if "Vol L10" in df.columns:
-        styler = styler.map(style_volatility, subset=["Vol L10"])
+    if "Oscilação" in df.columns:
+        styler = styler.map(style_volatility, subset=["Oscilação"])
 
     if "Jogador" in df.columns:
         styler = styler.set_properties(subset=["Jogador"], **{"font-weight": "700"})
@@ -1924,7 +1924,7 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
         st.plotly_chart(fig, use_container_width=True)
 
 
-def render_badges(role: str, momentum: str, volatility: str, matchup: str) -> None:
+def render_badges(role: str, momentum: str, oscillation: str, matchup: str) -> None:
     role_class = "badge-starter" if role == "Titular provável" else "badge-bench"
 
     if str(momentum).startswith("↗") or str(momentum).startswith("↑"):
@@ -1934,12 +1934,12 @@ def render_badges(role: str, momentum: str, volatility: str, matchup: str) -> No
     else:
         momentum_class = "badge-neutral"
 
-    if volatility == "Baixa":
-        volatility_class = "badge-good"
-    elif volatility == "Alta":
-        volatility_class = "badge-bad"
+    if oscillation == "Baixa":
+        oscillation_class = "badge-good"
+    elif oscillation == "Alta":
+        oscillation_class = "badge-bad"
     else:
-        volatility_class = "badge-neutral"
+        oscillation_class = "badge-neutral"
 
     if matchup == "Favorável":
         matchup_class = "badge-good"
@@ -1953,7 +1953,7 @@ def render_badges(role: str, momentum: str, volatility: str, matchup: str) -> No
         <div class="badge-row">
             <span class="badge {role_class}">{role}</span>
             <span class="badge {momentum_class}">{momentum}</span>
-            <span class="badge {volatility_class}">Vol {volatility}</span>
+            <span class="badge {oscillation_class}">Osc {oscillation}</span>
             <span class="badge {matchup_class}">Matchup {matchup}</span>
         </div>
         """,
@@ -2012,7 +2012,7 @@ def render_player_headline_html(row: pd.Series) -> str:
     hit_rate_pct = int(round(float(row.get("HIT_RATE_L10", 0.0)) * 100))
     hit_rate_text = row.get("HIT_RATE_L10_TEXT", "-")
     form_signal = row.get("FORM_SIGNAL", "→ Estável")
-    vol_class = row.get("VOL_CLASS", "-")
+    osc_class = row.get("VOL_CLASS", "-")
 
     return f"""
     <div class="player-headline-card">
@@ -2020,26 +2020,22 @@ def render_player_headline_html(row: pd.Series) -> str:
         <div class="player-headline-value">{format_number(row['L10_PRA'])} PRA</div>
         <div class="player-headline-sub">
             Temp {format_number(row['SEASON_PRA'])} • Δ L10 {format_signed_number(row['DELTA_PRA_L10'])}
-            • Hit L10 {hit_rate_text} ({hit_rate_pct}%) • Vol {vol_class} • {form_signal}
+            • Hit L10 {hit_rate_text} ({hit_rate_pct}%) • Oscilação {osc_class} • {form_signal}
         </div>
     </div>
     """
 
 
-def render_player_highlight_tiles(row: pd.Series) -> None:
-    hit_class = "quick-stat quick-stat-primary"
+def render_player_support_tiles(row: pd.Series) -> None:
     matchup_class = "quick-stat"
     if row["MATCHUP_LABEL"] == "Favorável":
         matchup_class = "quick-stat quick-stat-up"
     elif row["MATCHUP_LABEL"] == "Difícil":
         matchup_class = "quick-stat quick-stat-down"
 
-    matchup_value = format_number(row["MATCHUP_PRA_ALLOWED"]) if row["MATCHUP_SAMPLE"] > 0 else "-"
-    matchup_meta = (
-        f'{row["MATCHUP_OPPONENT_NAME"]} vs {row["POSITION_GROUP"]} • amostra {int(row["MATCHUP_SAMPLE"])}'
-        if row["MATCHUP_SAMPLE"] > 0
-        else f'{row["MATCHUP_OPPONENT_NAME"]} • sem base suficiente'
-    )
+    pts_hit = row.get("PTS_HIT_RATE_L10_TEXT", "-")
+    reb_hit = row.get("REB_HIT_RATE_L10_TEXT", "-")
+    ast_hit = row.get("AST_HIT_RATE_L10_TEXT", "-")
 
     st.markdown(
         f"""
@@ -2047,27 +2043,27 @@ def render_player_highlight_tiles(row: pd.Series) -> None:
             <div class="quick-stat">
                 <div class="quick-stat-label">PTS L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_PTS'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PTS'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PTS'])} • L5 {format_number(row['L5_PTS'])} • Hit {pts_hit}</div>
             </div>
             <div class="quick-stat">
                 <div class="quick-stat-label">REB L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_REB'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_REB'])}</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_REB'])} • L5 {format_number(row['L5_REB'])} • Hit {reb_hit}</div>
             </div>
             <div class="quick-stat">
                 <div class="quick-stat-label">AST L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_AST'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_AST'])}</div>
-            </div>
-            <div class="{hit_class}">
-                <div class="quick-stat-label">Hit Temp PRA</div>
-                <div class="quick-stat-value">{row['HIT_RATE_TEXT']}</div>
-                <div class="quick-stat-meta">{int(round(row['PRA_HIT_RATE_TEMP'])) if row['PRA_HIT_SAMPLE'] else 0}% dos últimos jogos</div>
+                <div class="quick-stat-meta">Temp {format_number(row['SEASON_AST'])} • L5 {format_number(row['L5_AST'])} • Hit {ast_hit}</div>
             </div>
             <div class="{matchup_class}">
-                <div class="quick-stat-label">PRA cedido</div>
-                <div class="quick-stat-value">{matchup_value}</div>
-                <div class="quick-stat-meta">{matchup_meta}</div>
+                <div class="quick-stat-label">Matchup</div>
+                <div class="quick-stat-value">{row['MATCHUP_LABEL']}</div>
+                <div class="quick-stat-meta">PRA cedido {format_number(row['OPP_PRA_ALLOWED'])} • diff {format_signed_number(row['MATCHUP_DIFF'])}</div>
+            </div>
+            <div class="quick-stat quick-stat-primary">
+                <div class="quick-stat-label">Consistência</div>
+                <div class="quick-stat-value">{row.get('HIT_RATE_L10_TEXT', '-')}</div>
+                <div class="quick-stat-meta">Oscilação {row.get('VOL_CLASS', '-')} • {row.get('FORM_SIGNAL', '→ Estável')}</div>
             </div>
         </div>
         """,
@@ -2075,33 +2071,7 @@ def render_player_highlight_tiles(row: pd.Series) -> None:
     )
 
 
-def render_player_hero_summary(row: pd.Series) -> None:
-    matchup_class = get_matchup_chip_class(row["MATCHUP_LABEL"])
-
-    st.markdown(
-        f"""
-        <div class="hero-shell">
-            <div class="hero-kicker">Leitura em 3 segundos</div>
-            <div class="hero-value-row">
-                <div>
-                    <div class="hero-main-value">{format_number(row['L10_PRA'])}</div>
-                    <div class="hero-main-label">PRA nos últimos 10</div>
-                </div>
-                <span class="matchup-chip {matchup_class}">{row['MATCHUP_LABEL']} vs {row['POSITION_GROUP']}</span>
-            </div>
-            <div class="hero-subline">
-                Δ vs temp {format_signed_number(row['DELTA_PRA_L10'])} • Hit rate {row['HIT_RATE_L10_TEXT']} • Vol {row['VOL_CLASS']} • {row['FORM_SIGNAL']}
-            </div>
-            <div class="hero-note">
-                {row['OPP_TEAM_NAME']} cede {format_number(row['OPP_PRA_ALLOWED'])} PRA para {row['POSITION_GROUP']} • liga {format_number(row['LEAGUE_PRA_BASELINE'])}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_player_support_tiles(row: pd.Series) -> None:
+def render_matchup_detail_box_html(row: pd.Series) -> None:
     matchup_class = "quick-stat"
     if row["MATCHUP_LABEL"] == "Favorável":
         matchup_class = "quick-stat quick-stat-up"
