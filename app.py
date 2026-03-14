@@ -44,6 +44,13 @@ SORT_OPTIONS = {
 ROLE_OPTIONS = ["Todos", "Titular provável", "Reserva"]
 VIEW_OPTIONS = ["Cards", "Tabela"]
 CHART_OPTIONS = ["Compacto", "Completo"]
+LINE_METRIC_OPTIONS = ["PRA", "PTS", "REB", "AST"]
+PROJECTION_WEIGHTS = {
+    "season": 0.35,
+    "l10": 0.40,
+    "l5": 0.15,
+    "matchup": 0.10,
+}
 
 
 def get_season_string(target_date: date) -> str:
@@ -146,6 +153,71 @@ def get_matchup_chip_class(label: str) -> str:
     if label == "Difícil":
         return "matchup-bad"
     return "matchup-neutral"
+
+
+def calculate_projection(
+    season_value: float,
+    l10_value: float,
+    l5_value: float,
+    opp_allowed: float,
+    league_allowed: float,
+) -> float:
+    matchup_adjusted = float(season_value) + (float(opp_allowed) - float(league_allowed))
+    projection = (
+        PROJECTION_WEIGHTS["season"] * float(season_value)
+        + PROJECTION_WEIGHTS["l10"] * float(l10_value)
+        + PROJECTION_WEIGHTS["l5"] * float(l5_value)
+        + PROJECTION_WEIGHTS["matchup"] * matchup_adjusted
+    )
+    return max(0.0, projection)
+
+
+def get_metric_projection_column(metric: str) -> str:
+    return {
+        "PRA": "PROJ_PRA",
+        "PTS": "PROJ_PTS",
+        "REB": "PROJ_REB",
+        "AST": "PROJ_AST",
+    }[metric]
+
+
+def get_metric_recent_list_column(metric: str) -> str:
+    return {
+        "PRA": "RECENT_PRA_L10",
+        "PTS": "RECENT_PTS_L10",
+        "REB": "RECENT_REB_L10",
+        "AST": "RECENT_AST_L10",
+    }[metric]
+
+
+def classify_line_edge(edge: float) -> str:
+    if edge >= 1.5:
+        return "Acima"
+    if edge <= -1.5:
+        return "Abaixo"
+    return "Justa"
+
+
+def get_line_context(row: pd.Series, metric: str, line_value: float) -> dict:
+    projection_col = get_metric_projection_column(metric)
+    recent_list_col = get_metric_recent_list_column(metric)
+
+    projection = float(row.get(projection_col, 0.0))
+    edge = projection - float(line_value)
+    recent_values = row.get(recent_list_col, [])
+    if not isinstance(recent_values, list):
+        recent_values = []
+
+    hit_l10 = sum(float(v) >= float(line_value) for v in recent_values)
+    hit_l5 = sum(float(v) >= float(line_value) for v in recent_values[:5])
+
+    return {
+        "projection": projection,
+        "edge": edge,
+        "label": classify_line_edge(edge),
+        "hit_l10": format_ratio_text(hit_l10, len(recent_values)),
+        "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
+    }
 
 
 def inject_css() -> None:
@@ -673,6 +745,9 @@ def get_position_opponent_profile(season: str, opponent_team_id: int, position_g
         "OPP_REB_ALLOWED": opp_profile["REB"],
         "OPP_AST_ALLOWED": opp_profile["AST"],
         "OPP_PRA_ALLOWED": opp_profile["PRA"],
+        "LEAGUE_PTS_BASELINE": league_profile["PTS"],
+        "LEAGUE_REB_BASELINE": league_profile["REB"],
+        "LEAGUE_AST_BASELINE": league_profile["AST"],
         "LEAGUE_PRA_BASELINE": league_profile["PRA"],
         "MATCHUP_DIFF": matchup_diff,
         "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
@@ -804,7 +879,7 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
     if team_df.empty:
         return team_df
 
-    defaults_map = {
+    scalar_defaults = {
         "HIT_RATE_L10": 0.0,
         "HIT_RATE_L10_TEXT": "-",
         "PTS_HIT_RATE_L10": 0.0,
@@ -816,6 +891,12 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         "OSC_L10": 0.0,
         "OSC_CLASS": "-",
         "FORM_SIGNAL": "→ Estável",
+    }
+    list_defaults = {
+        "RECENT_PRA_L10": [],
+        "RECENT_PTS_L10": [],
+        "RECENT_REB_L10": [],
+        "RECENT_AST_L10": [],
     }
 
     if team_logs.empty:
@@ -833,7 +914,7 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         thresholds = threshold_map.get(player_id, {})
 
         if sample_size == 0:
-            metrics.append({"PLAYER_ID": player_id, **defaults_map})
+            metrics.append({"PLAYER_ID": player_id, **scalar_defaults, **list_defaults})
             continue
 
         pra_threshold = float(thresholds.get("SEASON_PRA", 0.0))
@@ -864,17 +945,26 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
                 "OSC_L10": osc_value,
                 "OSC_CLASS": classify_oscillation(osc_value),
                 "FORM_SIGNAL": classify_form_signal(slope),
+                "RECENT_PRA_L10": recent10["PRA"].round(1).tolist(),
+                "RECENT_PTS_L10": recent10["PTS"].round(1).tolist(),
+                "RECENT_REB_L10": recent10["REB"].round(1).tolist(),
+                "RECENT_AST_L10": recent10["AST"].round(1).tolist(),
             }
         )
 
     metrics_df = pd.DataFrame(metrics)
     enriched = team_df.merge(metrics_df, on="PLAYER_ID", how="left")
 
-    for col, default in defaults_map.items():
+    for col, default in scalar_defaults.items():
         if isinstance(default, float):
             enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(default)
         else:
             enriched[col] = enriched[col].fillna(default)
+
+    for col in list_defaults:
+        if col not in enriched.columns:
+            enriched[col] = [[] for _ in range(len(enriched))]
+        enriched[col] = enriched[col].apply(lambda x: x if isinstance(x, list) else [])
 
     return enriched
 
@@ -904,9 +994,16 @@ def enrich_team_with_context(
         enriched["OPP_REB_ALLOWED"] = 0.0
         enriched["OPP_AST_ALLOWED"] = 0.0
         enriched["OPP_PRA_ALLOWED"] = 0.0
+        enriched["LEAGUE_PTS_BASELINE"] = 0.0
+        enriched["LEAGUE_REB_BASELINE"] = 0.0
+        enriched["LEAGUE_AST_BASELINE"] = 0.0
         enriched["LEAGUE_PRA_BASELINE"] = 0.0
         enriched["MATCHUP_DIFF"] = 0.0
         enriched["MATCHUP_LABEL"] = "Neutro"
+        enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], 0.0, 0.0), axis=1)
+        enriched["PROJ_REB"] = enriched.apply(lambda row: calculate_projection(row["SEASON_REB"], row["L10_REB"], row["L5_REB"], 0.0, 0.0), axis=1)
+        enriched["PROJ_AST"] = enriched.apply(lambda row: calculate_projection(row["SEASON_AST"], row["L10_AST"], row["L5_AST"], 0.0, 0.0), axis=1)
+        enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], 0.0, 0.0), axis=1)
         return enriched
 
     enriched = enriched.merge(matchup_df, on="POSITION_GROUP", how="left")
@@ -914,11 +1011,40 @@ def enrich_team_with_context(
 
     for col in [
         "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED",
-        "OPP_PRA_ALLOWED", "LEAGUE_PRA_BASELINE", "MATCHUP_DIFF",
+        "OPP_PRA_ALLOWED", "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE",
+        "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE", "MATCHUP_DIFF",
     ]:
+        if col not in enriched.columns:
+            enriched[col] = 0.0
         enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
 
     enriched["MATCHUP_LABEL"] = enriched["MATCHUP_LABEL"].fillna("Neutro")
+
+    enriched["PROJ_PTS"] = enriched.apply(
+        lambda row: calculate_projection(
+            row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], row["OPP_PTS_ALLOWED"], row["LEAGUE_PTS_BASELINE"]
+        ),
+        axis=1,
+    )
+    enriched["PROJ_REB"] = enriched.apply(
+        lambda row: calculate_projection(
+            row["SEASON_REB"], row["L10_REB"], row["L5_REB"], row["OPP_REB_ALLOWED"], row["LEAGUE_REB_BASELINE"]
+        ),
+        axis=1,
+    )
+    enriched["PROJ_AST"] = enriched.apply(
+        lambda row: calculate_projection(
+            row["SEASON_AST"], row["L10_AST"], row["L5_AST"], row["OPP_AST_ALLOWED"], row["LEAGUE_AST_BASELINE"]
+        ),
+        axis=1,
+    )
+    enriched["PROJ_PRA"] = enriched.apply(
+        lambda row: calculate_projection(
+            row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], row["OPP_PRA_ALLOWED"], row["LEAGUE_PRA_BASELINE"]
+        ),
+        axis=1,
+    )
+
     return enriched
 
 
@@ -979,6 +1105,10 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     display_df["AST L5"] = display_df["L5_AST"]
     display_df["AST L10"] = display_df["L10_AST"]
 
+    display_df["Proj PRA"] = display_df["PROJ_PRA"]
+    display_df["Proj PTS"] = display_df["PROJ_PTS"]
+    display_df["Proj REB"] = display_df["PROJ_REB"]
+    display_df["Proj AST"] = display_df["PROJ_AST"]
     display_df["Matchup"] = display_df["MATCHUP_LABEL"]
     display_df["Hit PRA"] = display_df["HIT_RATE_L10_TEXT"]
     display_df["Hit PTS"] = display_df["PTS_HIT_RATE_L10_TEXT"]
@@ -991,7 +1121,7 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
 
     summary_df = display_df[
         [
-            "Jogador", "Papel", "GP", "MIN", "PRA Temp", "PRA L10", "Δ PRA L10",
+            "Jogador", "Papel", "GP", "MIN", "PRA Temp", "PRA L10", "Proj PRA", "Δ PRA L10",
             "Matchup", "Hit PRA", "Oscilação", "Sinal", "Trend",
         ]
     ].copy()
@@ -999,10 +1129,10 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     detail_df = display_df[
         [
             "Jogador", "Pos", "Papel", "GP", "MIN",
-            "PTS Temp", "PTS L5", "PTS L10", "Hit PTS",
-            "REB Temp", "REB L5", "REB L10", "Hit REB",
-            "AST Temp", "AST L5", "AST L10", "Hit AST",
-            "PRA Temp", "PRA L5", "PRA L10", "Hit PRA",
+            "PTS Temp", "PTS L5", "PTS L10", "Proj PTS", "Hit PTS",
+            "REB Temp", "REB L5", "REB L10", "Proj REB", "Hit REB",
+            "AST Temp", "AST L5", "AST L10", "Proj AST", "Hit AST",
+            "PRA Temp", "PRA L5", "PRA L10", "Proj PRA", "Hit PRA",
             "Δ PRA L5", "Δ PRA L10", "PRA adv pos", "Liga pos",
             "Matchup", "Oscilação", "Sinal", "Trend",
         ]
@@ -1485,7 +1615,7 @@ def render_player_headline_html(row: pd.Series) -> str:
         <div class="player-headline-label">Leitura em 3 segundos</div>
         <div class="player-headline-value">{format_number(row['L10_PRA'])}</div>
         <div class="player-headline-sub">
-            PRA nos últimos 10 • Δ vs temp {format_signed_number(row['DELTA_PRA_L10'])}
+            PRA L10 • Proj {format_number(row['PROJ_PRA'])} • Δ vs temp {format_signed_number(row['DELTA_PRA_L10'])}
             • Hit L10 {hit_rate_text} ({hit_rate_pct}%) • Oscilação {osc_class} • {form_signal}
         </div>
         <div class="hero-note">
@@ -1496,12 +1626,20 @@ def render_player_headline_html(row: pd.Series) -> str:
     """
 
 
-def render_player_support_tiles(row: pd.Series) -> None:
+def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: float) -> None:
     matchup_class = "quick-stat"
     if row["MATCHUP_LABEL"] == "Favorável":
         matchup_class = "quick-stat quick-stat-up"
     elif row["MATCHUP_LABEL"] == "Difícil":
         matchup_class = "quick-stat quick-stat-down"
+
+    line_context = get_line_context(row, line_metric, line_value)
+    if line_context["edge"] > 0.75:
+        line_class = "quick-stat quick-stat-up"
+    elif line_context["edge"] < -0.75:
+        line_class = "quick-stat quick-stat-down"
+    else:
+        line_class = "quick-stat quick-stat-primary"
 
     pts_hit = row.get("PTS_HIT_RATE_L10_TEXT", "-")
     reb_hit = row.get("REB_HIT_RATE_L10_TEXT", "-")
@@ -1513,32 +1651,102 @@ def render_player_support_tiles(row: pd.Series) -> None:
             <div class="quick-stat">
                 <div class="quick-stat-label">PTS L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_PTS'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_PTS'])} • L5 {format_number(row['L5_PTS'])} • Hit {pts_hit}</div>
+                <div class="quick-stat-meta">Proj {format_number(row['PROJ_PTS'])} • Hit {pts_hit}</div>
             </div>
             <div class="quick-stat">
                 <div class="quick-stat-label">REB L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_REB'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_REB'])} • L5 {format_number(row['L5_REB'])} • Hit {reb_hit}</div>
+                <div class="quick-stat-meta">Proj {format_number(row['PROJ_REB'])} • Hit {reb_hit}</div>
             </div>
             <div class="quick-stat">
                 <div class="quick-stat-label">AST L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_AST'])}</div>
-                <div class="quick-stat-meta">Temp {format_number(row['SEASON_AST'])} • L5 {format_number(row['L5_AST'])} • Hit {ast_hit}</div>
+                <div class="quick-stat-meta">Proj {format_number(row['PROJ_AST'])} • Hit {ast_hit}</div>
             </div>
             <div class="{matchup_class}">
                 <div class="quick-stat-label">Matchup</div>
                 <div class="quick-stat-value">{row['MATCHUP_LABEL']}</div>
                 <div class="quick-stat-meta">PRA cedido {format_number(row['OPP_PRA_ALLOWED'])} • diff {format_signed_number(row['MATCHUP_DIFF'])}</div>
             </div>
-            <div class="quick-stat quick-stat-primary">
-                <div class="quick-stat-label">Consistência PRA</div>
-                <div class="quick-stat-value">{row.get('HIT_RATE_L10_TEXT', '-')}</div>
-                <div class="quick-stat-meta">Oscilação {row.get('OSC_CLASS', '-')} • {row.get('FORM_SIGNAL', '→ Estável')}</div>
+            <div class="{line_class}">
+                <div class="quick-stat-label">Linha {line_metric}</div>
+                <div class="quick-stat-value">{format_signed_number(line_context['edge'])}</div>
+                <div class="quick-stat-meta">Proj {format_number(line_context['projection'])} vs {format_number(line_value)} • L10 {line_context['hit_l10']}</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_projection_detail_box_html(row: pd.Series) -> str:
+    return f"""
+    <div class="detail-box">
+        <div class="detail-box-top">
+            <div class="detail-box-title">Projeções do modelo</div>
+            <div class="delta-pill-row">
+                <span class="delta-pill delta-flat">peso L10 maior</span>
+            </div>
+        </div>
+        <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+            <div class="detail-mini">
+                <div class="detail-mini-label">Proj PTS</div>
+                <div class="detail-mini-value">{format_number(row['PROJ_PTS'])}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">Proj REB</div>
+                <div class="detail-mini-value">{format_number(row['PROJ_REB'])}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">Proj AST</div>
+                <div class="detail-mini-value">{format_number(row['PROJ_AST'])}</div>
+            </div>
+            <div class="detail-mini detail-mini-highlight">
+                <div class="detail-mini-label">Proj PRA</div>
+                <div class="detail-mini-value">{format_number(row['PROJ_PRA'])}</div>
+            </div>
+        </div>
+    </div>
+    """
+
+
+def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_value: float) -> str:
+    line_context = get_line_context(row, line_metric, line_value)
+    line_chip_class = "delta-flat"
+    if line_context["edge"] > 0.75:
+        line_chip_class = "delta-up"
+    elif line_context["edge"] < -0.75:
+        line_chip_class = "delta-down"
+
+    return f"""
+    <div class="detail-box">
+        <div class="detail-box-top">
+            <div class="detail-box-title">Linha manual — {line_metric}</div>
+            <div class="delta-pill-row">
+                <span class="delta-pill {line_chip_class}">{line_context['label']}</span>
+                <span class="delta-pill delta-flat">Linha {format_number(line_value)}</span>
+            </div>
+        </div>
+        <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+            <div class="detail-mini">
+                <div class="detail-mini-label">Projeção</div>
+                <div class="detail-mini-value">{format_number(line_context['projection'])}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">Edge</div>
+                <div class="detail-mini-value">{format_signed_number(line_context['edge'])}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">Hit L5</div>
+                <div class="detail-mini-value">{line_context['hit_l5']}</div>
+            </div>
+            <div class="detail-mini detail-mini-highlight">
+                <div class="detail-mini-label">Hit L10</div>
+                <div class="detail-mini-value">{line_context['hit_l10']}</div>
+            </div>
+        </div>
+    </div>
+    """
 
 
 def render_matchup_detail_box_html(row: pd.Series) -> str:
@@ -1574,7 +1782,7 @@ def render_matchup_detail_box_html(row: pd.Series) -> str:
     """
 
 
-def render_player_card(row: pd.Series) -> None:
+def render_player_card(row: pd.Series, line_metric: str, line_value: float) -> None:
     with st.container(border=True):
         top_left, top_right = st.columns([1, 4])
 
@@ -1593,7 +1801,7 @@ def render_player_card(row: pd.Series) -> None:
                 row.get("MATCHUP_LABEL", "Neutro"),
             )
 
-        render_player_support_tiles(row)
+        render_player_support_tiles(row, line_metric, line_value)
 
         with st.expander("Ver detalhamento completo"):
             first_cols = st.columns(2)
@@ -1608,17 +1816,24 @@ def render_player_card(row: pd.Series) -> None:
                 with col:
                     st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
 
+            st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
+            st.markdown(render_manual_line_detail_box_html(row, line_metric, line_value), unsafe_allow_html=True)
             st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
 
 
-def render_player_cards_grid(filtered_df: pd.DataFrame, cards_per_row: int = 2) -> None:
+def render_player_cards_grid(
+    filtered_df: pd.DataFrame,
+    line_metric: str,
+    line_value: float,
+    cards_per_row: int = 2,
+) -> None:
     rows = [filtered_df.iloc[i:i + cards_per_row] for i in range(0, len(filtered_df), cards_per_row)]
     for row_df in rows:
         cols = st.columns(cards_per_row)
         for col_idx in range(cards_per_row):
             with cols[col_idx]:
                 if col_idx < len(row_df):
-                    render_player_card(row_df.iloc[col_idx])
+                    render_player_card(row_df.iloc[col_idx], line_metric, line_value)
 
 
 def render_team_section(
@@ -1632,6 +1847,8 @@ def render_team_section(
     ascending: bool,
     view_mode: str,
     chart_mode: str,
+    line_metric: str,
+    line_value: float,
     cards_per_row: int,
 ) -> None:
     st.subheader(team_name)
@@ -1660,6 +1877,7 @@ def render_team_section(
         <div class="info-pill">Papel: {role_filter}</div>
         <div class="info-pill">Ordenação: {sort_label}</div>
         <div class="info-pill">Visualização: {view_mode}</div>
+        <div class="info-pill">Linha manual: {line_metric} {format_number(line_value)}</div>
         <div class="info-pill">Adversário: {filtered_df['OPP_TEAM_NAME'].iloc[0]}</div>
         """,
         unsafe_allow_html=True,
@@ -1667,22 +1885,22 @@ def render_team_section(
 
     if view_mode == "Cards":
         st.markdown(
-            '<div class="section-note">Cards com leitura principal de PRA, matchup por posição, hits de PRA/PTS/REB/AST e oscilação do jogador.</div>',
+            '<div class="section-note">Cards com leitura principal de PRA, projeção, matchup por posição, hits de PRA/PTS/REB/AST e linha manual.</div>',
             unsafe_allow_html=True,
         )
-        render_player_cards_grid(filtered_df, cards_per_row=cards_per_row)
+        render_player_cards_grid(filtered_df, line_metric=line_metric, line_value=line_value, cards_per_row=cards_per_row)
     else:
         summary_df, detail_df = build_display_dataframes(filtered_df)
         quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
         with quick_tab:
             st.markdown(
-                '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, matchup, hit PRA, oscilação e sinal de forma.</div>',
+                '<div class="section-note">Aqui o foco é no que bate rápido no olho: PRA, projeção, matchup, hit PRA, oscilação e sinal de forma.</div>',
                 unsafe_allow_html=True,
             )
             st.dataframe(style_table(summary_df, quick_view=True), use_container_width=True, hide_index=True)
         with detail_tab:
             st.markdown(
-                '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST, PRA e hit rate separado por atributo.</div>',
+                '<div class="section-note">Aqui entra a parte mais detalhada: PTS, REB, AST, PRA, projeções e hit rate separado por atributo.</div>',
                 unsafe_allow_html=True,
             )
             st.dataframe(style_table(detail_df, quick_view=False), use_container_width=True, hide_index=True)
@@ -1721,6 +1939,18 @@ def main() -> None:
         min_games = st.slider("Mínimo de jogos na temporada", 0, 82, 5, 1)
         min_minutes = st.slider("Mínimo de minutos por jogo", 0, 40, 15, 1)
         role_filter = st.selectbox("Mostrar jogadores", ROLE_OPTIONS, index=0)
+
+        st.divider()
+        st.subheader("Linha manual")
+        line_metric = st.selectbox("Métrica da linha", LINE_METRIC_OPTIONS, index=0)
+        default_line_map = {"PRA": 25.5, "PTS": 20.5, "REB": 7.5, "AST": 5.5}
+        line_value = st.number_input(
+            "Valor da linha",
+            min_value=0.0,
+            value=float(default_line_map[line_metric]),
+            step=0.5,
+            key=f"manual_line_{line_metric}",
+        )
 
         st.divider()
         st.subheader("Ordenação")
@@ -1801,6 +2031,8 @@ def main() -> None:
             ascending=ascending,
             view_mode=view_mode,
             chart_mode=chart_mode,
+            line_metric=line_metric,
+            line_value=line_value,
             cards_per_row=cards_per_row,
         )
 
@@ -1816,6 +2048,8 @@ def main() -> None:
             ascending=ascending,
             view_mode=view_mode,
             chart_mode=chart_mode,
+            line_metric=line_metric,
+            line_value=line_value,
             cards_per_row=cards_per_row,
         )
 
