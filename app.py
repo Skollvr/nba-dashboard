@@ -555,6 +555,74 @@ def inject_css() -> None:
             color: #fee2e2;
             border: 1px solid rgba(239,68,68,0.16);
         }
+        .focus-shell {
+            background: linear-gradient(180deg, rgba(17,24,39,0.94), rgba(15,23,42,0.94));
+            border: 1px solid rgba(148,163,184,.14);
+            border-radius: 22px;
+            padding: 1rem 1rem 0.75rem 1rem;
+            margin-top: 1rem;
+            margin-bottom: 0.75rem;
+        }
+        .focus-title {
+            color: #f8fafc;
+            font-size: 1.2rem;
+            font-weight: 800;
+            margin-bottom: 0.15rem;
+        }
+        .focus-sub {
+            color: #94a3b8;
+            font-size: 0.88rem;
+            margin-bottom: 0.5rem;
+        }
+        .micro-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.45rem;
+            margin-top: 0.65rem;
+            margin-bottom: 0.1rem;
+        }
+        .micro-stat {
+            background: rgba(2,6,23,0.34);
+            border: 1px solid rgba(148,163,184,.10);
+            border-radius: 14px;
+            padding: 0.52rem 0.58rem;
+        }
+        .micro-stat-emph {
+            background: linear-gradient(180deg, rgba(76,29,149,0.46), rgba(30,41,59,0.9));
+            border: 1px solid rgba(167,139,250,0.24);
+        }
+        .micro-stat-good {
+            background: linear-gradient(180deg, rgba(21,128,61,0.34), rgba(30,41,59,0.9));
+            border: 1px solid rgba(74,222,128,0.22);
+        }
+        .micro-stat-bad {
+            background: linear-gradient(180deg, rgba(153,27,27,0.34), rgba(30,41,59,0.9));
+            border: 1px solid rgba(248,113,113,0.22);
+        }
+        .micro-label {
+            color: #94a3b8;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.18rem;
+        }
+        .micro-value {
+            color: #f8fafc;
+            font-size: 1.02rem;
+            font-weight: 800;
+            line-height: 1.05;
+            margin-bottom: 0.15rem;
+        }
+        .micro-meta {
+            color: #cbd5e1;
+            font-size: 0.73rem;
+            line-height: 1.2;
+        }
+        @media (max-width: 760px) {
+            .micro-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
         @media (max-width: 1200px) {
             .player-quick-grid {
                 grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1931,12 +1999,108 @@ def render_matchup_detail_box_html(row: pd.Series) -> str:
     """
 
 
+def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float) -> None:
+    line_context = get_line_context(row, line_metric, line_value)
+    line_class = "micro-stat micro-stat-emph"
+    if line_context["edge"] > 0.75:
+        line_class = "micro-stat micro-stat-good"
+    elif line_context["edge"] < -0.75:
+        line_class = "micro-stat micro-stat-bad"
+
+    matchup_class = "micro-stat"
+    if row.get("MATCHUP_LABEL") == "Favorável":
+        matchup_class = "micro-stat micro-stat-good"
+    elif row.get("MATCHUP_LABEL") == "Difícil":
+        matchup_class = "micro-stat micro-stat-bad"
+
+    st.markdown(
+        f"""
+        <div class="micro-grid">
+            <div class="micro-stat micro-stat-emph">
+                <div class="micro-label">Proj PRA</div>
+                <div class="micro-value">{format_number(row['PROJ_PRA'])}</div>
+                <div class="micro-meta">Temp {format_number(row['SEASON_PRA'])} • L10 {format_number(row['L10_PRA'])}</div>
+            </div>
+            <div class="{line_class}">
+                <div class="micro-label">Linha {line_metric}</div>
+                <div class="micro-value">{format_signed_number(line_context['edge'])}</div>
+                <div class="micro-meta">Proj {format_number(line_context['projection'])} • L10 {line_context['hit_l10']}</div>
+            </div>
+            <div class="{matchup_class}">
+                <div class="micro-label">Matchup</div>
+                <div class="micro-value">{row['MATCHUP_LABEL']}</div>
+                <div class="micro-meta">{row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']}</div>
+            </div>
+            <div class="micro-stat">
+                <div class="micro-label">Oscilação</div>
+                <div class="micro-value">{row['OSC_CLASS']}</div>
+                <div class="micro-meta">{row['FORM_SIGNAL']}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: float, season: str, chart_mode: str) -> None:
+    st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
+    top_left, top_right = st.columns([1, 5])
+    with top_left:
+        st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
+    with top_right:
+        st.markdown(f'<div class="focus-title">{row["PLAYER"]}</div>', unsafe_allow_html=True)
+        position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+        st.markdown(
+            f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])} • Time {row["TEAM_NAME"]}</div>',
+            unsafe_allow_html=True,
+        )
+        render_badges(row["ROLE"], row.get("FORM_SIGNAL", "→ Estável"), row.get("OSC_CLASS", "-"), row.get("MATCHUP_LABEL", "Neutro"))
+        render_focus_summary_tiles(row, line_metric, line_value)
+
+    overview_tab, detail_tab, chart_tab = st.tabs(["Resumo", "Detalhamento", "Gráfico"])
+
+    with overview_tab:
+        render_player_support_tiles(row, line_metric, line_value)
+        st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
+        st.markdown(render_manual_line_detail_box_html(row, line_metric, line_value), unsafe_allow_html=True)
+
+    with detail_tab:
+        first_cols = st.columns(2)
+        second_cols = st.columns(2)
+        detail_items = [
+            ("PRA", row["SEASON_PRA"], row["L5_PRA"], row["L10_PRA"]),
+            ("PTS", row["SEASON_PTS"], row["L5_PTS"], row["L10_PTS"]),
+            ("REB", row["SEASON_REB"], row["L5_REB"], row["L10_REB"]),
+            ("AST", row["SEASON_AST"], row["L5_AST"], row["L10_AST"]),
+        ]
+        for col, item in zip([*first_cols, *second_cols], detail_items):
+            with col:
+                st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
+
+        extra_cols = st.columns(3)
+        extra_detail_items = [
+            ("3PM", row["SEASON_3PM"], row["L5_3PM"], row["L10_3PM"]),
+            ("FGA", row["SEASON_FGA"], row["L5_FGA"], row["L10_FGA"]),
+            ("3PA", row["SEASON_3PA"], row["L5_3PA"], row["L10_3PA"]),
+        ]
+        for col, item in zip(extra_cols, extra_detail_items):
+            with col:
+                st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
+
+        st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
+
+    with chart_tab:
+        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
 def render_player_card(row: pd.Series, line_metric: str, line_value: float) -> None:
     with st.container(border=True):
         top_left, top_right = st.columns([1, 4])
 
         with top_left:
-            st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=78)
+            st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=72)
 
         with top_right:
             st.markdown(f"**{row['PLAYER']}**")
@@ -1951,33 +2115,7 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float) -> N
             )
 
         render_player_support_tiles(row, line_metric, line_value)
-
-        with st.expander("Ver detalhamento completo"):
-            first_cols = st.columns(2)
-            second_cols = st.columns(2)
-            detail_items = [
-                ("PRA", row["SEASON_PRA"], row["L5_PRA"], row["L10_PRA"]),
-                ("PTS", row["SEASON_PTS"], row["L5_PTS"], row["L10_PTS"]),
-                ("REB", row["SEASON_REB"], row["L5_REB"], row["L10_REB"]),
-                ("AST", row["SEASON_AST"], row["L5_AST"], row["L10_AST"]),
-            ]
-            for col, item in zip([*first_cols, *second_cols], detail_items):
-                with col:
-                    st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
-
-            extra_cols = st.columns(3)
-            extra_detail_items = [
-                ("3PM", row["SEASON_3PM"], row["L5_3PM"], row["L10_3PM"]),
-                ("FGA", row["SEASON_FGA"], row["L5_FGA"], row["L10_FGA"]),
-                ("3PA", row["SEASON_3PA"], row["L5_3PA"], row["L10_3PA"]),
-            ]
-            for col, item in zip(extra_cols, extra_detail_items):
-                with col:
-                    st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
-
-            st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
-            st.markdown(render_manual_line_detail_box_html(row, line_metric, line_value), unsafe_allow_html=True)
-            st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
+        st.caption("Detalhamento completo no painel abaixo.")
 
 
 def render_player_cards_grid(
@@ -2044,7 +2182,7 @@ def render_team_section(
 
     if view_mode == "Cards":
         st.markdown(
-            '<div class="section-note">Cards com leitura principal de PRA, projeção, matchup por posição, hits de PRA/PTS/REB/AST e linha manual.</div>',
+            '<div class="section-note">Cards curtos no topo e painel fixo do jogador abaixo para facilitar consulta no celular.</div>',
             unsafe_allow_html=True,
         )
         render_player_cards_grid(filtered_df, line_metric=line_metric, line_value=line_value, cards_per_row=cards_per_row)
@@ -2066,12 +2204,12 @@ def render_team_section(
 
     options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
     player_name = st.selectbox(
-        f"Ver gráfico de jogador — {team_name}",
+        f"Jogador em foco — {team_name}",
         options["PLAYER"].tolist(),
-        key=f"player_select_{team_name}_{view_mode}_{chart_mode}",
+        key=f"player_focus_{team_name}_{view_mode}_{chart_mode}",
     )
-    selected_player_id = int(options.loc[options["PLAYER"] == player_name, "PLAYER_ID"].iloc[0])
-    render_player_chart(player_name, selected_player_id, season, chart_mode)
+    selected_row = filtered_df.loc[filtered_df["PLAYER"] == player_name].iloc[0]
+    render_player_focus_panel(selected_row, line_metric, line_value, season, chart_mode)
 
 
 def main() -> None:
