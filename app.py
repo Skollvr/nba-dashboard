@@ -1,26 +1,31 @@
 from datetime import date
+import os
 import time
+import unicodedata
+from typing import Optional
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 
+from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
 from nba_api.stats.endpoints import (
     commonteamroster,
     leaguedashplayerstats,
     playergamelog,
     playergamelogs,
-    scoreboardv2,
 )
 from nba_api.stats.static import teams
-from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
+
 
 st.set_page_config(
     page_title="NBA Dashboard MVP",
     page_icon="🏀",
     layout="wide",
 )
+
 
 TEAM_LOOKUP = {team["id"]: team for team in teams.get_teams()}
 TEAM_LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/primary/L/logo.svg"
@@ -47,11 +52,33 @@ ROLE_OPTIONS = ["Todos", "Titular provável", "Reserva"]
 VIEW_OPTIONS = ["Cards", "Tabela"]
 CHART_OPTIONS = ["Compacto", "Completo"]
 LINE_METRIC_OPTIONS = ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"]
+
 PROJECTION_WEIGHTS = {
     "season": 0.35,
     "l10": 0.40,
     "l5": 0.15,
     "matchup": 0.10,
+}
+
+ODDS_API_BASE_URL = "https://api.sportsgameodds.com/v2"
+ODDS_BOOKMAKER = "betmgm"
+ODDS_STAT_MAP = {
+    "points": "PTS",
+    "rebounds": "REB",
+    "assists": "AST",
+    "points+rebounds+assists": "PRA",
+    "threePointersMade": "3PM",
+    "fieldGoalsAttempted": "FGA",
+    "threePointersAttempted": "3PA",
+}
+ODDS_METRIC_COLUMNS = {
+    "PTS": ("BETMGM_PTS_LINE", "BETMGM_PTS_OVER_DEC", "BETMGM_PTS_UNDER_DEC", "BETMGM_PTS_UPDATED_AT"),
+    "REB": ("BETMGM_REB_LINE", "BETMGM_REB_OVER_DEC", "BETMGM_REB_UNDER_DEC", "BETMGM_REB_UPDATED_AT"),
+    "AST": ("BETMGM_AST_LINE", "BETMGM_AST_OVER_DEC", "BETMGM_AST_UNDER_DEC", "BETMGM_AST_UPDATED_AT"),
+    "PRA": ("BETMGM_PRA_LINE", "BETMGM_PRA_OVER_DEC", "BETMGM_PRA_UNDER_DEC", "BETMGM_PRA_UPDATED_AT"),
+    "3PM": ("BETMGM_3PM_LINE", "BETMGM_3PM_OVER_DEC", "BETMGM_3PM_UNDER_DEC", "BETMGM_3PM_UPDATED_AT"),
+    "FGA": ("BETMGM_FGA_LINE", "BETMGM_FGA_OVER_DEC", "BETMGM_FGA_UNDER_DEC", "BETMGM_FGA_UPDATED_AT"),
+    "3PA": ("BETMGM_3PA_LINE", "BETMGM_3PA_OVER_DEC", "BETMGM_3PA_UNDER_DEC", "BETMGM_3PA_UPDATED_AT"),
 }
 
 
@@ -157,6 +184,36 @@ def get_matchup_chip_class(label: str) -> str:
     return "matchup-neutral"
 
 
+def normalize_text(value: str) -> str:
+    text = str(value or "").strip().lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.replace(".", " ").replace("-", " ").replace("'", "").replace(",", " ")
+    return " ".join(text.split())
+
+
+def american_to_decimal(american_odds) -> Optional[float]:
+    try:
+        odds_int = int(str(american_odds).replace("+", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+    if odds_int > 0:
+        return round(1 + (odds_int / 100), 2)
+    if odds_int < 0:
+        return round(1 + (100 / abs(odds_int)), 2)
+    return None
+
+
+def get_odds_api_key() -> str:
+    secrets_obj = getattr(st, "secrets", None)
+    if secrets_obj:
+        for key_name in ["SPORTSGAMEODDS_API_KEY", "sportsgameodds_api_key"]:
+            if key_name in secrets_obj:
+                return str(secrets_obj[key_name]).strip()
+    return os.getenv("SPORTSGAMEODDS_API_KEY", "").strip()
+
+
 def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 3, delay: float = 1.2):
     last_error = None
     for attempt in range(retries):
@@ -242,23 +299,48 @@ def get_metric_hit_rate_column(metric: str) -> str:
     }[metric]
 
 
-def get_line_context(row: pd.Series, metric: str, line_value: float) -> dict:
+def get_metric_market_columns(metric: str) -> tuple[str, str, str, str]:
+    return ODDS_METRIC_COLUMNS[metric]
+
+
+def get_market_line_for_metric(row: pd.Series, metric: str) -> dict:
+    line_col, over_col, under_col, updated_col = get_metric_market_columns(metric)
+    return {
+        "line": row.get(line_col),
+        "over_dec": row.get(over_col),
+        "under_dec": row.get(under_col),
+        "updated_at": row.get(updated_col),
+    }
+
+
+def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_line: bool = False) -> dict:
     projection_col = get_metric_projection_column(metric)
     recent_list_col = get_metric_recent_list_column(metric)
 
     projection = float(row.get(projection_col, 0.0))
-    edge = projection - float(line_value)
+    market_info = get_market_line_for_metric(row, metric)
+    market_line = pd.to_numeric(market_info.get("line"), errors="coerce")
+    use_market = bool(use_market_line and pd.notna(market_line))
+    active_line = float(market_line) if use_market else float(line_value)
+
+    edge = projection - active_line
     recent_values = row.get(recent_list_col, [])
     if not isinstance(recent_values, list):
         recent_values = []
 
-    hit_l10 = sum(float(v) >= float(line_value) for v in recent_values)
-    hit_l5 = sum(float(v) >= float(line_value) for v in recent_values[:5])
+    hit_l10 = sum(float(v) >= active_line for v in recent_values)
+    hit_l5 = sum(float(v) >= active_line for v in recent_values[:5])
 
     return {
         "projection": projection,
         "edge": edge,
         "label": classify_line_edge(edge),
+        "line_value": active_line,
+        "line_source": "BetMGM" if use_market else "Manual",
+        "has_market_line": use_market,
+        "over_dec": market_info.get("over_dec") if use_market else None,
+        "under_dec": market_info.get("under_dec") if use_market else None,
+        "updated_at": market_info.get("updated_at") if use_market else "",
         "hit_l10": format_ratio_text(hit_l10, len(recent_values)),
         "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
     }
@@ -642,14 +724,6 @@ def inject_css() -> None:
         .ranking-bad .ranking-stat-value {
             color: #fca5a5;
         }
-        @media (max-width: 760px) {
-            .ranking-row {
-                grid-template-columns: 38px 1.5fr 0.8fr 0.8fr;
-            }
-            .ranking-row .ranking-stat:last-child {
-                display: none;
-            }
-        }
         .focus-shell {
             background: linear-gradient(180deg, rgba(17,24,39,0.94), rgba(15,23,42,0.94));
             border: 1px solid rgba(148,163,184,.14);
@@ -713,17 +787,21 @@ def inject_css() -> None:
             font-size: 0.73rem;
             line-height: 1.2;
         }
-        @media (max-width: 760px) {
-            .micro-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-        }
         @media (max-width: 1200px) {
             .player-quick-grid {
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
         }
         @media (max-width: 760px) {
+            .ranking-row {
+                grid-template-columns: 38px 1.5fr 0.8fr 0.8fr;
+            }
+            .ranking-row .ranking-stat:last-child {
+                display: none;
+            }
+            .micro-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
             .player-quick-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
@@ -840,7 +918,7 @@ def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
     df = frames[0].copy()
     if df.empty:
         return pd.DataFrame(
-            columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST"]
+            columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]
         )
 
     keep_cols = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]
@@ -891,7 +969,10 @@ def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
 
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
     for col in ["PTS", "REB", "AST", "MIN", "FG3M", "FGA", "FG3A"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+        else:
+            df[col] = 0.0
     df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
     return df.sort_values(["PLAYER_ID", "GAME_DATE"], ascending=[True, False])
 
@@ -968,6 +1049,97 @@ def get_position_opponent_profile(season: str, opponent_team_id: int, position_g
     }
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_nba_odds_events() -> list[dict]:
+    api_key = get_odds_api_key()
+    if not api_key:
+        return []
+
+    def _fetch():
+        response = requests.get(
+            f"{ODDS_API_BASE_URL}/events/?leagueID=NBA&oddsAvailable=true",
+            headers={"x-api-key": api_key},
+            timeout=45,
+        )
+        response.raise_for_status()
+        return response
+
+    response = run_api_call_with_retry(_fetch, endpoint_name="SportsGameOdds Events")
+    payload = response.json()
+    if not payload.get("success"):
+        return []
+    return payload.get("data", []) or []
+
+
+def find_matching_odds_event(events: list[dict], home_team_name: str, away_team_name: str) -> Optional[dict]:
+    target_home = normalize_text(home_team_name)
+    target_away = normalize_text(away_team_name)
+
+    for event in events:
+        teams_payload = event.get("teams", {})
+        event_home = normalize_text(teams_payload.get("home", {}).get("names", {}).get("long", ""))
+        event_away = normalize_text(teams_payload.get("away", {}).get("names", {}).get("long", ""))
+        if event_home == target_home and event_away == target_away:
+            return event
+    return None
+
+
+def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
+    if not event:
+        return pd.DataFrame()
+
+    players = event.get("players", {}) or {}
+    odds_payload = event.get("odds", {}) or {}
+    rows: dict[str, dict] = {}
+
+    for _, item in odds_payload.items():
+        if not isinstance(item, dict):
+            continue
+        if item.get("periodID") != "game" or item.get("betTypeID") != "ou":
+            continue
+
+        stat_id = item.get("statID")
+        metric = ODDS_STAT_MAP.get(stat_id)
+        player_id = item.get("playerID")
+        if not metric or not player_id:
+            continue
+
+        bookmaker_data = (item.get("byBookmaker") or {}).get(ODDS_BOOKMAKER)
+        if not bookmaker_data or not bookmaker_data.get("available"):
+            continue
+
+        player_info = players.get(player_id, {}) if isinstance(players, dict) else {}
+        first_name = player_info.get("firstName", "")
+        last_name = player_info.get("lastName", "")
+        player_name = f"{first_name} {last_name}".strip() or player_info.get("name") or item.get("marketName", "")
+        line_value = item.get("bookOverUnder") or bookmaker_data.get("overUnder")
+        side = item.get("sideID")
+        key = normalize_text(player_name)
+
+        if key not in rows:
+            rows[key] = {
+                "PLAYER_NAME_ODDS": player_name,
+                "PLAYER_KEY_ODDS": key,
+            }
+            for _, cols in ODDS_METRIC_COLUMNS.items():
+                rows[key][cols[0]] = None
+                rows[key][cols[1]] = None
+                rows[key][cols[2]] = None
+                rows[key][cols[3]] = None
+
+        line_col, over_col, under_col, updated_col = ODDS_METRIC_COLUMNS[metric]
+        rows[key][line_col] = pd.to_numeric(line_value, errors="coerce")
+        rows[key][updated_col] = bookmaker_data.get("lastUpdatedAt", "")
+
+        decimal_value = american_to_decimal(bookmaker_data.get("odds"))
+        if side == "over":
+            rows[key][over_col] = decimal_value
+        elif side == "under":
+            rows[key][under_col] = decimal_value
+
+    return pd.DataFrame(rows.values())
+
+
 def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     roster = get_team_roster(team_id, season)
     season_stats = get_league_player_stats(season, last_n_games=0)
@@ -977,13 +1149,12 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     if roster.empty:
         return pd.DataFrame()
 
-    roster_cols = ["PLAYER", "PLAYER_ID", "POSITION"]
-    roster = roster[[c for c in roster_cols if c in roster.columns]].copy()
+    roster = roster[[c for c in ["PLAYER", "PLAYER_ID", "POSITION"] if c in roster.columns]].copy()
     if "POSITION" not in roster.columns:
         roster["POSITION"] = ""
 
     season_view = (
-        pd.DataFrame(columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"])
+        pd.DataFrame(columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"])
         if season_stats.empty
         else season_stats.rename(
             columns={
@@ -1000,7 +1171,7 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     )
 
     last5_view = (
-        pd.DataFrame(columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA", "L5_3PM", "L5_FGA", "L5_3PA"])
+        pd.DataFrame(columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA"])
         if last5_stats.empty
         else last5_stats.rename(
             columns={
@@ -1017,7 +1188,7 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     )
 
     last10_view = (
-        pd.DataFrame(columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA", "L10_3PM", "L10_FGA", "L10_3PA"])
+        pd.DataFrame(columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"])
         if last10_stats.empty
         else last10_stats.rename(
             columns={
@@ -1048,9 +1219,9 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     )
 
     numeric_cols = [
-        "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST",
-        "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST",
-        "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST",
+        "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA",
+        "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA",
+        "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA",
     ]
     for col in numeric_cols:
         if col not in team_df.columns:
@@ -1076,6 +1247,7 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
 
     team_df["TREND"] = team_df["DELTA_PRA_L10"].apply(classify_trend)
     team_df["POSITION_GROUP"] = team_df["POSITION"].apply(normalize_position_group)
+    team_df["PLAYER_KEY"] = team_df["PLAYER"].apply(normalize_text)
 
     team_df["ROLE"] = "Reserva"
     starter_ids = (
@@ -1087,7 +1259,7 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
 
     return team_df[
         [
-            "PLAYER_ID", "PLAYER", "POSITION", "POSITION_GROUP", "ROLE",
+            "PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP", "ROLE",
             "SEASON_GP", "SEASON_MIN",
             "SEASON_PTS", "L5_PTS", "L10_PTS",
             "SEASON_REB", "L5_REB", "L10_REB",
@@ -1136,8 +1308,10 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
 
     if team_logs.empty:
         enriched = team_df.copy()
-        for col, default in defaults_map.items():
+        for col, default in scalar_defaults.items():
             enriched[col] = default
+        for col, default in list_defaults.items():
+            enriched[col] = [default.copy() for _ in range(len(enriched))]
         return enriched
 
     threshold_map = team_df.set_index("PLAYER_ID")[["SEASON_PRA", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]].to_dict("index")
@@ -1232,103 +1406,64 @@ def enrich_team_with_context(
     team_logs = get_team_player_logs(team_id, season)
     enriched = build_form_context(team_df, team_logs)
 
-    matchup_rows = [
-        get_position_opponent_profile(season, opponent_team_id, pos)
-        for pos in ["G", "F", "C"]
-    ]
+    matchup_rows = [get_position_opponent_profile(season, opponent_team_id, pos) for pos in ["G", "F", "C"]]
     matchup_df = pd.DataFrame(matchup_rows)
 
     if matchup_df.empty:
         enriched["OPP_TEAM_NAME"] = opponent_team_name
-        enriched["OPP_PTS_ALLOWED"] = 0.0
-        enriched["OPP_REB_ALLOWED"] = 0.0
-        enriched["OPP_AST_ALLOWED"] = 0.0
-        enriched["OPP_PRA_ALLOWED"] = 0.0
-        enriched["OPP_3PM_ALLOWED"] = 0.0
-        enriched["OPP_FGA_ALLOWED"] = 0.0
-        enriched["OPP_3PA_ALLOWED"] = 0.0
-        enriched["LEAGUE_PTS_BASELINE"] = 0.0
-        enriched["LEAGUE_REB_BASELINE"] = 0.0
-        enriched["LEAGUE_AST_BASELINE"] = 0.0
-        enriched["LEAGUE_3PM_BASELINE"] = 0.0
-        enriched["LEAGUE_FGA_BASELINE"] = 0.0
-        enriched["LEAGUE_3PA_BASELINE"] = 0.0
-        enriched["LEAGUE_PRA_BASELINE"] = 0.0
-        enriched["MATCHUP_DIFF"] = 0.0
-        enriched["MATCHUP_LABEL"] = "Neutro"
-        enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], 0.0, 0.0), axis=1)
-        enriched["PROJ_REB"] = enriched.apply(lambda row: calculate_projection(row["SEASON_REB"], row["L10_REB"], row["L5_REB"], 0.0, 0.0), axis=1)
-        enriched["PROJ_AST"] = enriched.apply(lambda row: calculate_projection(row["SEASON_AST"], row["L10_AST"], row["L5_AST"], 0.0, 0.0), axis=1)
-        enriched["PROJ_3PM"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PM"], row["L10_3PM"], row["L5_3PM"], 0.0, 0.0), axis=1)
-        enriched["PROJ_FGA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_FGA"], row["L10_FGA"], row["L5_FGA"], 0.0, 0.0), axis=1)
-        enriched["PROJ_3PA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], 0.0, 0.0), axis=1)
-        enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], 0.0, 0.0), axis=1)
-        return enriched
-
-    enriched = enriched.merge(matchup_df, on="POSITION_GROUP", how="left")
-    enriched["OPP_TEAM_NAME"] = opponent_team_name
-
-    for col in [
-        "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED",
-        "OPP_PRA_ALLOWED", "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED", "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE",
-        "LEAGUE_AST_BASELINE", "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE", "LEAGUE_PRA_BASELINE", "MATCHUP_DIFF",
-    ]:
-        if col not in enriched.columns:
+        fallback_cols = [
+            "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED",
+            "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED",
+            "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE",
+            "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE", "MATCHUP_DIFF",
+        ]
+        for col in fallback_cols:
             enriched[col] = 0.0
-        enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
+        enriched["MATCHUP_LABEL"] = "Neutro"
+    else:
+        enriched = enriched.merge(matchup_df, on="POSITION_GROUP", how="left")
+        enriched["OPP_TEAM_NAME"] = opponent_team_name
+        for col in [
+            "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED", "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED",
+            "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE",
+            "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE", "MATCHUP_DIFF",
+        ]:
+            enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
+        enriched["MATCHUP_LABEL"] = enriched["MATCHUP_LABEL"].fillna("Neutro")
 
-    enriched["MATCHUP_LABEL"] = enriched["MATCHUP_LABEL"].fillna("Neutro")
-
-    enriched["PROJ_PTS"] = enriched.apply(
-        lambda row: calculate_projection(
-            row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], row["OPP_PTS_ALLOWED"], row["LEAGUE_PTS_BASELINE"]
-        ),
-        axis=1,
-    )
-    enriched["PROJ_REB"] = enriched.apply(
-        lambda row: calculate_projection(
-            row["SEASON_REB"], row["L10_REB"], row["L5_REB"], row["OPP_REB_ALLOWED"], row["LEAGUE_REB_BASELINE"]
-        ),
-        axis=1,
-    )
-    enriched["PROJ_AST"] = enriched.apply(
-        lambda row: calculate_projection(
-            row["SEASON_AST"], row["L10_AST"], row["L5_AST"], row["OPP_AST_ALLOWED"], row["LEAGUE_AST_BASELINE"]
-        ),
-        axis=1,
-    )
-    enriched["PROJ_3PM"] = enriched.apply(
-        lambda row: calculate_projection(
-            row["SEASON_3PM"], row["L10_3PM"], row["L5_3PM"], row["OPP_3PM_ALLOWED"], row["LEAGUE_3PM_BASELINE"]
-        ),
-        axis=1,
-    )
-    enriched["PROJ_FGA"] = enriched.apply(
-        lambda row: calculate_projection(
-            row["SEASON_FGA"], row["L10_FGA"], row["L5_FGA"], row["OPP_FGA_ALLOWED"], row["LEAGUE_FGA_BASELINE"]
-        ),
-        axis=1,
-    )
-    enriched["PROJ_3PA"] = enriched.apply(
-        lambda row: calculate_projection(
-            row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], row["OPP_3PA_ALLOWED"], row["LEAGUE_3PA_BASELINE"]
-        ),
-        axis=1,
-    )
-    enriched["PROJ_PRA"] = enriched.apply(
-        lambda row: calculate_projection(
-            row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], row["OPP_PRA_ALLOWED"], row["LEAGUE_PRA_BASELINE"]
-        ),
-        axis=1,
-    )
+    enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], row["OPP_PTS_ALLOWED"], row["LEAGUE_PTS_BASELINE"]), axis=1)
+    enriched["PROJ_REB"] = enriched.apply(lambda row: calculate_projection(row["SEASON_REB"], row["L10_REB"], row["L5_REB"], row["OPP_REB_ALLOWED"], row["LEAGUE_REB_BASELINE"]), axis=1)
+    enriched["PROJ_AST"] = enriched.apply(lambda row: calculate_projection(row["SEASON_AST"], row["L10_AST"], row["L5_AST"], row["OPP_AST_ALLOWED"], row["LEAGUE_AST_BASELINE"]), axis=1)
+    enriched["PROJ_3PM"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PM"], row["L10_3PM"], row["L5_3PM"], row["OPP_3PM_ALLOWED"], row["LEAGUE_3PM_BASELINE"]), axis=1)
+    enriched["PROJ_FGA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_FGA"], row["L10_FGA"], row["L5_FGA"], row["OPP_FGA_ALLOWED"], row["LEAGUE_FGA_BASELINE"]), axis=1)
+    enriched["PROJ_3PA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], row["OPP_3PA_ALLOWED"], row["LEAGUE_3PA_BASELINE"]), axis=1)
+    enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], row["OPP_PRA_ALLOWED"], row["LEAGUE_PRA_BASELINE"]), axis=1)
 
     return enriched
 
 
+def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFrame:
+    if team_df.empty:
+        return team_df
+
+    enriched = team_df.copy()
+    for _, cols in ODDS_METRIC_COLUMNS.items():
+        for col in cols:
+            if col not in enriched.columns:
+                enriched[col] = None
+
+    if odds_df.empty:
+        return enriched
+
+    merged = enriched.merge(odds_df, left_on="PLAYER_KEY", right_on="PLAYER_KEY_ODDS", how="left")
+    for col in ["PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"]:
+        if col in merged.columns:
+            merged = merged.drop(columns=[col])
+    return merged
+
+
 def apply_filters(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str) -> pd.DataFrame:
-    filtered = team_df[
-        (team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)
-    ].copy()
+    filtered = team_df[(team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)].copy()
     if role_filter != "Todos":
         filtered = filtered[filtered["ROLE"] == role_filter].copy()
     return filtered
@@ -1381,15 +1516,12 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     display_df["AST Temp"] = display_df["SEASON_AST"]
     display_df["AST L5"] = display_df["L5_AST"]
     display_df["AST L10"] = display_df["L10_AST"]
-
     display_df["3PM Temp"] = display_df["SEASON_3PM"]
     display_df["3PM L5"] = display_df["L5_3PM"]
     display_df["3PM L10"] = display_df["L10_3PM"]
-
     display_df["FGA Temp"] = display_df["SEASON_FGA"]
     display_df["FGA L5"] = display_df["L5_FGA"]
     display_df["FGA L10"] = display_df["L10_FGA"]
-
     display_df["3PA Temp"] = display_df["SEASON_3PA"]
     display_df["3PA L5"] = display_df["L5_3PA"]
     display_df["3PA L10"] = display_df["L10_3PA"]
@@ -1713,21 +1845,16 @@ def render_summary_cards(
 
 def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
     rows_html = []
-
     for idx, (_, row) in enumerate(rank_df.iterrows(), start=1):
         if mode == "projection":
             stat1_label, stat1_value = "Proj", format_number(row["RANK_PROJ"])
             stat2_label, stat2_value = "Hit", row["RANK_HIT_TEXT"]
             stat3_label, stat3_value = "Match", row["MATCHUP_LABEL"]
-            stat3_class = (
-                "ranking-good" if row["MATCHUP_LABEL"] == "Favorável"
-                else "ranking-bad" if row["MATCHUP_LABEL"] == "Difícil"
-                else ""
-            )
+            stat3_class = "ranking-good" if row["MATCHUP_LABEL"] == "Favorável" else ("ranking-bad" if row["MATCHUP_LABEL"] == "Difícil" else "")
         elif mode == "edge":
             stat1_label, stat1_value = "Edge", format_signed_number(row["RANK_EDGE"])
             stat2_label, stat2_value = "Proj", format_number(row["RANK_PROJ"])
-            stat3_label, stat3_value = "L10", row["RANK_HIT_TEXT"]
+            stat3_label, stat3_value = "Linha", format_number(row["RANK_LINE"])
             stat3_class = ""
         else:
             stat1_label, stat1_value = "Hit", row["RANK_HIT_TEXT"]
@@ -1735,40 +1862,18 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
             stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
 
-        stat1_class = (
-            "ranking-good" if mode == "edge" and row["RANK_EDGE"] > 0.75
-            else "ranking-bad" if mode == "edge" and row["RANK_EDGE"] < -0.75
-            else ""
-        )
-
-        stat2_class = (
-            "ranking-good" if mode == "consistency" and row["OSC_CLASS"] == "Baixa"
-            else "ranking-bad" if mode == "consistency" and row["OSC_CLASS"] == "Alta"
-            else ""
-        )
+        stat1_class = "ranking-good" if mode == "edge" and row["RANK_EDGE"] > 0.75 else ("ranking-bad" if mode == "edge" and row["RANK_EDGE"] < -0.75 else "")
+        stat2_class = "ranking-good" if mode == "consistency" and row["OSC_CLASS"] == "Baixa" else ("ranking-bad" if mode == "consistency" and row["OSC_CLASS"] == "Alta" else "")
 
         row_html = (
             f'<div class="ranking-row">'
             f'<div class="ranking-rank">{idx}</div>'
-            f'<div>'
-            f'<div class="ranking-player">{row["PLAYER"]}</div>'
-            f'<div class="ranking-sub">{row["TEAM_NAME"]} • {row["ROLE"]}</div>'
-            f'</div>'
-            f'<div class="ranking-stat {stat1_class}">'
-            f'<div class="ranking-stat-label">{stat1_label}</div>'
-            f'<div class="ranking-stat-value">{stat1_value}</div>'
-            f'</div>'
-            f'<div class="ranking-stat {stat2_class}">'
-            f'<div class="ranking-stat-label">{stat2_label}</div>'
-            f'<div class="ranking-stat-value">{stat2_value}</div>'
-            f'</div>'
-            f'<div class="ranking-stat {stat3_class}">'
-            f'<div class="ranking-stat-label">{stat3_label}</div>'
-            f'<div class="ranking-stat-value">{stat3_value}</div>'
-            f'</div>'
+            f'<div><div class="ranking-player">{row["PLAYER"]}</div><div class="ranking-sub">{row["TEAM_NAME"]} • {row["ROLE"]}</div></div>'
+            f'<div class="ranking-stat {stat1_class}"><div class="ranking-stat-label">{stat1_label}</div><div class="ranking-stat-value">{stat1_value}</div></div>'
+            f'<div class="ranking-stat {stat2_class}"><div class="ranking-stat-label">{stat2_label}</div><div class="ranking-stat-value">{stat2_value}</div></div>'
+            f'<div class="ranking-stat {stat3_class}"><div class="ranking-stat-label">{stat3_label}</div><div class="ranking-stat-value">{stat3_value}</div></div>'
             f'</div>'
         )
-
         rows_html.append(row_html)
 
     return f'<div class="ranking-shell">{"".join(rows_html)}</div>'
@@ -1782,15 +1887,9 @@ def render_game_rankings(
     role_filter: str,
     line_metric: str,
     line_value: float,
+    use_market_line: bool,
 ) -> None:
-    combined = build_summary_cards_data(
-        away_df,
-        home_df,
-        min_games,
-        min_minutes,
-        role_filter,
-    )
-
+    combined = build_summary_cards_data(away_df, home_df, min_games, min_minutes, role_filter)
     if combined.empty:
         return
 
@@ -1802,49 +1901,23 @@ def render_game_rankings(
     rank_df["RANK_PROJ"] = pd.to_numeric(rank_df[projection_col], errors="coerce").fillna(0.0)
     rank_df["RANK_HIT_TEXT"] = rank_df[hit_text_col].fillna("-")
     rank_df["RANK_HIT_RATE"] = pd.to_numeric(rank_df[hit_rate_col], errors="coerce").fillna(0.0)
-    rank_df["RANK_EDGE"] = rank_df["RANK_PROJ"] - float(line_value)
+    rank_df["RANK_LINE"] = rank_df.apply(lambda row: get_line_context(row, line_metric, line_value, use_market_line=use_market_line)["line_value"], axis=1)
+    rank_df["RANK_EDGE"] = rank_df["RANK_PROJ"] - rank_df["RANK_LINE"]
 
-    proj_df = rank_df.sort_values(
-        ["RANK_PROJ", "RANK_HIT_RATE"],
-        ascending=[False, False],
-    ).head(5)
-
-    edge_df = rank_df.sort_values(
-        ["RANK_EDGE", "RANK_HIT_RATE"],
-        ascending=[False, False],
-    ).head(5)
-
-    consistency_df = rank_df.sort_values(
-        ["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"],
-        ascending=[False, True, False],
-    ).head(5)
+    proj_df = rank_df.sort_values(["RANK_PROJ", "RANK_HIT_RATE"], ascending=[False, False]).head(5)
+    edge_df = rank_df.sort_values(["RANK_EDGE", "RANK_HIT_RATE"], ascending=[False, False]).head(5)
+    consistency_df = rank_df.sort_values(["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"], ascending=[False, True, False]).head(5)
 
     st.subheader(f"Ranking do confronto — {line_metric}")
-    st.caption(
-        "Bloco compacto para bater o olho rápido, sem transformar a tela num outdoor estatístico."
-    )
-
-    tab_proj, tab_edge, tab_cons = st.tabs(
-        ["Projeção", "Edge da linha", "Consistência"]
-    )
+    st.caption("Bloco compacto para bater o olho rápido, usando BetMGM quando houver linha disponível.")
+    tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
 
     with tab_proj:
-        st.markdown(
-            render_compact_ranking_html(proj_df, mode="projection"),
-            unsafe_allow_html=True,
-        )
-
+        st.markdown(render_compact_ranking_html(proj_df, mode="projection"), unsafe_allow_html=True)
     with tab_edge:
-        st.markdown(
-            render_compact_ranking_html(edge_df, mode="edge"),
-            unsafe_allow_html=True,
-        )
-
+        st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
     with tab_cons:
-        st.markdown(
-            render_compact_ranking_html(consistency_df, mode="consistency"),
-            unsafe_allow_html=True,
-        )
+        st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
 
 
 def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str) -> None:
@@ -1864,6 +1937,10 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
         return
 
     recent["PRA"] = recent["PTS"] + recent["REB"] + recent["AST"]
+    recent["3PTM"] = recent["FG3M"]
+    recent["3PTA"] = recent["FG3A"]
+    recent["FG"] = recent["FGM"]
+
     if "MATCHUP" in recent.columns:
         matchup_parts = recent["MATCHUP"].apply(get_matchup_parts)
         recent["VENUE"] = matchup_parts.apply(lambda x: x[0])
@@ -1873,10 +1950,7 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
         recent["OPP_ABBR"] = ""
 
     recent["SHORT_LABEL"] = recent.apply(
-        lambda row: (
-            f'{row["GAME_DATE"].strftime("%m/%d")}<br>{row["VENUE"]} {row["OPP_ABBR"]}'.strip()
-            if row["OPP_ABBR"] else row["GAME_DATE"].strftime("%m/%d")
-        ),
+        lambda row: f'{row["GAME_DATE"].strftime("%m/%d")}<br>{row["VENUE"]} {row["OPP_ABBR"]}'.strip() if row["OPP_ABBR"] else row["GAME_DATE"].strftime("%m/%d"),
         axis=1,
     )
 
@@ -1894,9 +1968,6 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
             horizontal=True,
             key=f"metric_chart_{player_id}_{chart_mode}",
         )
-        recent["3PTM"] = recent["FG3M"]
-        recent["3PTA"] = recent["FG3A"]
-        recent["FG"] = recent["FGM"]
         recent_view = recent.tail(5).copy()
 
         fig = go.Figure(
@@ -2063,14 +2134,14 @@ def render_player_headline_html(row: pd.Series) -> str:
     """
 
 
-def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: float) -> None:
+def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
     matchup_class = "quick-stat"
     if row["MATCHUP_LABEL"] == "Favorável":
         matchup_class = "quick-stat quick-stat-up"
     elif row["MATCHUP_LABEL"] == "Difícil":
         matchup_class = "quick-stat quick-stat-down"
 
-    line_context = get_line_context(row, line_metric, line_value)
+    line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
     if line_context["edge"] > 0.75:
         line_class = "quick-stat quick-stat-up"
     elif line_context["edge"] < -0.75:
@@ -2081,6 +2152,10 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
     pts_hit = row.get("PTS_HIT_RATE_L10_TEXT", "-")
     reb_hit = row.get("REB_HIT_RATE_L10_TEXT", "-")
     ast_hit = row.get("AST_HIT_RATE_L10_TEXT", "-")
+
+    odds_meta = ""
+    if line_context["has_market_line"] and line_context["over_dec"] and line_context["under_dec"]:
+        odds_meta = f" • O {format_number(line_context['over_dec'], 2)} • U {format_number(line_context['under_dec'], 2)}"
 
     st.markdown(
         f"""
@@ -2106,9 +2181,9 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
                 <div class="quick-stat-meta">PRA cedido {format_number(row['OPP_PRA_ALLOWED'])} • diff {format_signed_number(row['MATCHUP_DIFF'])}</div>
             </div>
             <div class="{line_class}">
-                <div class="quick-stat-label">Linha {line_metric}</div>
+                <div class="quick-stat-label">{line_context['line_source']} {line_metric}</div>
                 <div class="quick-stat-value">{format_signed_number(line_context['edge'])}</div>
-                <div class="quick-stat-meta">Proj {format_number(line_context['projection'])} vs {format_number(line_value)} • L10 {line_context['hit_l10']}</div>
+                <div class="quick-stat-meta">Proj {format_number(line_context['projection'])} vs {format_number(line_context['line_value'])} • L10 {line_context['hit_l10']}{odds_meta}</div>
             </div>
         </div>
         """,
@@ -2161,21 +2236,27 @@ def render_projection_detail_box_html(row: pd.Series) -> str:
     """
 
 
-def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_value: float) -> str:
-    line_context = get_line_context(row, line_metric, line_value)
+def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> str:
+    line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
     line_chip_class = "delta-flat"
     if line_context["edge"] > 0.75:
         line_chip_class = "delta-up"
     elif line_context["edge"] < -0.75:
         line_chip_class = "delta-down"
 
+    odds_note = "Usando linha manual."
+    if line_context["has_market_line"]:
+        over_text = format_number(line_context["over_dec"], 2) if line_context["over_dec"] else "-"
+        under_text = format_number(line_context["under_dec"], 2) if line_context["under_dec"] else "-"
+        odds_note = f"BetMGM • Over {over_text} • Under {under_text}"
+
     return f"""
     <div class="detail-box">
         <div class="detail-box-top">
-            <div class="detail-box-title">Linha manual — {line_metric}</div>
+            <div class="detail-box-title">Linha {line_context['line_source']} — {line_metric}</div>
             <div class="delta-pill-row">
                 <span class="delta-pill {line_chip_class}">{line_context['label']}</span>
-                <span class="delta-pill delta-flat">Linha {format_number(line_value)}</span>
+                <span class="delta-pill delta-flat">Linha {format_number(line_context['line_value'])}</span>
             </div>
         </div>
         <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
@@ -2196,6 +2277,7 @@ def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_va
                 <div class="detail-mini-value">{line_context['hit_l10']}</div>
             </div>
         </div>
+        <div class="hero-note">{odds_note}</div>
     </div>
     """
 
@@ -2233,8 +2315,8 @@ def render_matchup_detail_box_html(row: pd.Series) -> str:
     """
 
 
-def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float) -> None:
-    line_context = get_line_context(row, line_metric, line_value)
+def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
+    line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
     line_class = "micro-stat micro-stat-emph"
     if line_context["edge"] > 0.75:
         line_class = "micro-stat micro-stat-good"
@@ -2256,9 +2338,9 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
                 <div class="micro-meta">Temp {format_number(row['SEASON_PRA'])} • L10 {format_number(row['L10_PRA'])}</div>
             </div>
             <div class="{line_class}">
-                <div class="micro-label">Linha {line_metric}</div>
+                <div class="micro-label">{line_context['line_source']} {line_metric}</div>
                 <div class="micro-value">{format_signed_number(line_context['edge'])}</div>
-                <div class="micro-meta">Proj {format_number(line_context['projection'])} • L10 {line_context['hit_l10']}</div>
+                <div class="micro-meta">Proj {format_number(line_context['projection'])} vs {format_number(line_context['line_value'])} • L10 {line_context['hit_l10']}</div>
             </div>
             <div class="{matchup_class}">
                 <div class="micro-label">Matchup</div>
@@ -2276,7 +2358,7 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
     )
 
 
-def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: float, season: str, chart_mode: str) -> None:
+def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool, season: str, chart_mode: str) -> None:
     st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
     top_left, top_right = st.columns([1, 5])
     with top_left:
@@ -2289,14 +2371,14 @@ def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: floa
             unsafe_allow_html=True,
         )
         render_badges(row["ROLE"], row.get("FORM_SIGNAL", "→ Estável"), row.get("OSC_CLASS", "-"), row.get("MATCHUP_LABEL", "Neutro"))
-        render_focus_summary_tiles(row, line_metric, line_value)
+        render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
 
     overview_tab, detail_tab, chart_tab = st.tabs(["Resumo", "Detalhamento", "Gráfico"])
 
     with overview_tab:
-        render_player_support_tiles(row, line_metric, line_value)
+        render_player_support_tiles(row, line_metric, line_value, use_market_line)
         st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
-        st.markdown(render_manual_line_detail_box_html(row, line_metric, line_value), unsafe_allow_html=True)
+        st.markdown(render_manual_line_detail_box_html(row, line_metric, line_value, use_market_line), unsafe_allow_html=True)
 
     with detail_tab:
         first_cols = st.columns(2)
@@ -2329,7 +2411,7 @@ def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: floa
     st.markdown('</div>', unsafe_allow_html=True)
 
 
-def render_player_card(row: pd.Series, line_metric: str, line_value: float) -> None:
+def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
     with st.container(border=True):
         top_left, top_right = st.columns([1, 4])
 
@@ -2348,14 +2430,19 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float) -> N
                 row.get("MATCHUP_LABEL", "Neutro"),
             )
 
-        render_player_support_tiles(row, line_metric, line_value)
-        st.caption("Detalhamento completo no painel abaixo.")
+        render_player_support_tiles(row, line_metric, line_value, use_market_line)
+        line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
+        if line_context["has_market_line"] and line_context["over_dec"] and line_context["under_dec"]:
+            st.caption(f"BetMGM • Linha {format_number(line_context['line_value'])} • Over {format_number(line_context['over_dec'], 2)} • Under {format_number(line_context['under_dec'], 2)}")
+        else:
+            st.caption("Detalhamento completo no painel abaixo.")
 
 
 def render_player_cards_grid(
     filtered_df: pd.DataFrame,
     line_metric: str,
     line_value: float,
+    use_market_line: bool,
     cards_per_row: int = 2,
 ) -> None:
     rows = [filtered_df.iloc[i:i + cards_per_row] for i in range(0, len(filtered_df), cards_per_row)]
@@ -2364,7 +2451,7 @@ def render_player_cards_grid(
         for col_idx in range(cards_per_row):
             with cols[col_idx]:
                 if col_idx < len(row_df):
-                    render_player_card(row_df.iloc[col_idx], line_metric, line_value)
+                    render_player_card(row_df.iloc[col_idx], line_metric, line_value, use_market_line)
 
 
 def render_team_section(
@@ -2380,6 +2467,7 @@ def render_team_section(
     chart_mode: str,
     line_metric: str,
     line_value: float,
+    use_market_line: bool,
     cards_per_row: int,
 ) -> None:
     st.subheader(team_name)
@@ -2400,6 +2488,7 @@ def render_team_section(
         st.warning("Nenhum jogador passou pelos filtros. Você apertou demais o funil, pequeno fiscal da amostra.")
         return
 
+    active_source = "BetMGM quando disponível" if use_market_line else "Linha manual"
     st.markdown(
         f"""
         <div class="info-pill">Jogadores exibidos: {len(filtered_df)}</div>
@@ -2408,7 +2497,7 @@ def render_team_section(
         <div class="info-pill">Papel: {role_filter}</div>
         <div class="info-pill">Ordenação: {sort_label}</div>
         <div class="info-pill">Visualização: {view_mode}</div>
-        <div class="info-pill">Linha manual: {line_metric} {format_number(line_value)}</div>
+        <div class="info-pill">Linha ativa: {active_source}</div>
         <div class="info-pill">Adversário: {filtered_df['OPP_TEAM_NAME'].iloc[0]}</div>
         """,
         unsafe_allow_html=True,
@@ -2419,7 +2508,7 @@ def render_team_section(
             '<div class="section-note">Cards curtos no topo e painel fixo do jogador abaixo para facilitar consulta no celular.</div>',
             unsafe_allow_html=True,
         )
-        render_player_cards_grid(filtered_df, line_metric=line_metric, line_value=line_value, cards_per_row=cards_per_row)
+        render_player_cards_grid(filtered_df, line_metric=line_metric, line_value=line_value, use_market_line=use_market_line, cards_per_row=cards_per_row)
     else:
         summary_df, detail_df = build_display_dataframes(filtered_df)
         quick_tab, detail_tab = st.tabs(["Leitura rápida", "Detalhamento"])
@@ -2440,10 +2529,10 @@ def render_team_section(
     player_name = st.selectbox(
         f"Jogador em foco — {team_name}",
         options["PLAYER"].tolist(),
-        key=f"player_focus_{team_name}_{view_mode}_{chart_mode}",
+        key=f"player_focus_{team_name}_{view_mode}_{chart_mode}_{line_metric}",
     )
     selected_row = filtered_df.loc[filtered_df["PLAYER"] == player_name].iloc[0]
-    render_player_focus_panel(selected_row, line_metric, line_value, season, chart_mode)
+    render_player_focus_panel(selected_row, line_metric, line_value, use_market_line, season, chart_mode)
 
 
 def main() -> None:
@@ -2451,7 +2540,7 @@ def main() -> None:
 
     st.markdown('<div class="main-title">NBA Dashboard MVP</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="subtitle">Jogos do dia com leitura de PTS, REB, AST e PRA em cards ou tabela, sem depender do humor de outro endpoint.</div>',
+        '<div class="subtitle">Jogos do dia com leitura de PTS, REB, AST e PRA em cards ou tabela, agora com linha manual e BetMGM quando disponível.</div>',
         unsafe_allow_html=True,
     )
 
@@ -2473,16 +2562,24 @@ def main() -> None:
         role_filter = st.selectbox("Mostrar jogadores", ROLE_OPTIONS, index=0)
 
         st.divider()
-        st.subheader("Linha manual")
+        st.subheader("Linha")
         line_metric = st.selectbox("Métrica da linha", LINE_METRIC_OPTIONS, index=0)
         default_line_map = {"PRA": 25.5, "PTS": 20.5, "REB": 7.5, "AST": 5.5, "3PM": 2.5, "FGA": 15.5, "3PA": 6.5}
         line_value = st.number_input(
-            "Valor da linha",
+            "Valor da linha manual",
             min_value=0.0,
             value=float(default_line_map[line_metric]),
             step=0.5,
             key=f"manual_line_{line_metric}",
         )
+        api_key_available = bool(get_odds_api_key())
+        use_market_line = st.toggle(
+            "Usar linha BetMGM",
+            value=api_key_available,
+            disabled=not api_key_available,
+        )
+        if not api_key_available:
+            st.caption("Adicione SPORTSGAMEODDS_API_KEY em st.secrets ou variável de ambiente para usar BetMGM.")
 
         st.divider()
         st.subheader("Ordenação")
@@ -2540,6 +2637,22 @@ def main() -> None:
     away_df["TEAM_NAME"] = selected_game["away_team_name"]
     home_df["TEAM_NAME"] = selected_game["home_team_name"]
 
+    odds_df = pd.DataFrame()
+    if api_key_available:
+        try:
+            odds_events = fetch_nba_odds_events()
+            selected_odds_event = find_matching_odds_event(
+                odds_events,
+                home_team_name=selected_game["home_team_name"],
+                away_team_name=selected_game["away_team_name"],
+            )
+            odds_df = extract_betmgm_player_props(selected_odds_event)
+        except Exception:
+            odds_df = pd.DataFrame()
+
+    away_df = merge_betmgm_odds(away_df, odds_df)
+    home_df = merge_betmgm_odds(home_df, odds_df)
+
     render_matchup_header(selected_game)
     render_summary_cards(
         away_df=away_df,
@@ -2556,6 +2669,7 @@ def main() -> None:
         role_filter=role_filter,
         line_metric=line_metric,
         line_value=line_value,
+        use_market_line=use_market_line,
     )
 
     tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
@@ -2574,6 +2688,7 @@ def main() -> None:
             chart_mode=chart_mode,
             line_metric=line_metric,
             line_value=line_value,
+            use_market_line=use_market_line,
             cards_per_row=cards_per_row,
         )
 
@@ -2591,6 +2706,7 @@ def main() -> None:
             chart_mode=chart_mode,
             line_metric=line_metric,
             line_value=line_value,
+            use_market_line=use_market_line,
             cards_per_row=cards_per_row,
         )
 
