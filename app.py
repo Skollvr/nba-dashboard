@@ -1,4 +1,5 @@
 from datetime import date
+import time
 
 import numpy as np
 import pandas as pd
@@ -153,6 +154,18 @@ def get_matchup_chip_class(label: str) -> str:
     if label == "Difícil":
         return "matchup-bad"
     return "matchup-neutral"
+
+
+def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 3, delay: float = 1.2):
+    last_error = None
+    for attempt in range(retries):
+        try:
+            return fetch_fn()
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries - 1:
+                time.sleep(delay * (attempt + 1))
+    raise RuntimeError(f"Falha ao consultar {endpoint_name} após {retries} tentativas.") from last_error
 
 
 def calculate_projection(
@@ -556,11 +569,14 @@ def inject_css() -> None:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date: date) -> pd.DataFrame:
-    response = scoreboardv2.ScoreboardV2(
-        game_date=target_date.strftime("%Y-%m-%d"),
-        day_offset=0,
-        league_id="00",
-        timeout=30,
+    response = run_api_call_with_retry(
+        lambda: scoreboardv2.ScoreboardV2(
+            game_date=target_date.strftime("%Y-%m-%d"),
+            day_offset=0,
+            league_id="00",
+            timeout=45,
+        ),
+        endpoint_name="ScoreboardV2",
     )
     data = response.get_normalized_dict()
     games = pd.DataFrame(data.get("GameHeader", []))
@@ -597,10 +613,13 @@ def get_games_for_date(target_date: date) -> pd.DataFrame:
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
-    response = commonteamroster.CommonTeamRoster(
-        team_id=team_id,
-        season=season,
-        timeout=30,
+    response = run_api_call_with_retry(
+        lambda: commonteamroster.CommonTeamRoster(
+            team_id=team_id,
+            season=season,
+            timeout=45,
+        ),
+        endpoint_name="CommonTeamRoster",
     )
     frames = response.get_data_frames()
     if not frames:
@@ -622,20 +641,23 @@ def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
-    response = leaguedashplayerstats.LeagueDashPlayerStats(
-        season=season,
-        season_type_all_star="Regular Season",
-        per_mode_detailed="PerGame",
-        measure_type_detailed_defense="Base",
-        last_n_games=last_n_games,
-        month=0,
-        opponent_team_id=0,
-        pace_adjust="N",
-        plus_minus="N",
-        rank="N",
-        period=0,
-        team_id_nullable="",
-        timeout=30,
+    response = run_api_call_with_retry(
+        lambda: leaguedashplayerstats.LeagueDashPlayerStats(
+            season=season,
+            season_type_all_star="Regular Season",
+            per_mode_detailed="PerGame",
+            measure_type_detailed_defense="Base",
+            last_n_games=last_n_games,
+            month=0,
+            opponent_team_id=0,
+            pace_adjust="N",
+            plus_minus="N",
+            rank="N",
+            period=0,
+            team_id_nullable="",
+            timeout=45,
+        ),
+        endpoint_name="LeagueDashPlayerStats",
     )
     frames = response.get_data_frames()
     if not frames:
@@ -653,11 +675,14 @@ def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_player_log(player_id: int, season: str) -> pd.DataFrame:
-    response = playergamelog.PlayerGameLog(
-        player_id=player_id,
-        season=season,
-        season_type_all_star="Regular Season",
-        timeout=30,
+    response = run_api_call_with_retry(
+        lambda: playergamelog.PlayerGameLog(
+            player_id=player_id,
+            season=season,
+            season_type_all_star="Regular Season",
+            timeout=45,
+        ),
+        endpoint_name="PlayerGameLog",
     )
     frames = response.get_data_frames()
     if not frames:
@@ -673,11 +698,14 @@ def get_player_log(player_id: int, season: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
-    response = playergamelogs.PlayerGameLogs(
-        team_id_nullable=team_id,
-        season_nullable=season,
-        season_type_nullable="Regular Season",
-        timeout=30,
+    response = run_api_call_with_retry(
+        lambda: playergamelogs.PlayerGameLogs(
+            team_id_nullable=team_id,
+            season_nullable=season,
+            season_type_nullable="Regular Season",
+            timeout=45,
+        ),
+        endpoint_name="PlayerGameLogs",
     )
     frames = response.get_data_frames()
     if not frames:
@@ -697,21 +725,24 @@ def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
 @st.cache_data(ttl=7200, show_spinner=False)
 def get_position_opponent_profile(season: str, opponent_team_id: int, position_group: str) -> dict:
     def fetch(position_value: str, opponent_value: int) -> pd.DataFrame:
-        response = leaguedashplayerstats.LeagueDashPlayerStats(
-            season=season,
-            season_type_all_star="Regular Season",
-            per_mode_detailed="PerGame",
-            measure_type_detailed_defense="Base",
-            last_n_games=0,
-            month=0,
-            opponent_team_id=opponent_value,
-            pace_adjust="N",
-            plus_minus="N",
-            rank="N",
-            period=0,
-            team_id_nullable="",
-            player_position_abbreviation_nullable=position_value,
-            timeout=30,
+        response = run_api_call_with_retry(
+            lambda: leaguedashplayerstats.LeagueDashPlayerStats(
+                season=season,
+                season_type_all_star="Regular Season",
+                per_mode_detailed="PerGame",
+                measure_type_detailed_defense="Base",
+                last_n_games=0,
+                month=0,
+                opponent_team_id=opponent_value,
+                pace_adjust="N",
+                plus_minus="N",
+                rank="N",
+                period=0,
+                team_id_nullable="",
+                player_position_abbreviation_nullable=position_value,
+                timeout=45,
+            ),
+            endpoint_name=f"LeagueDashPlayerStats {position_value}",
         )
         frames = response.get_data_frames()
         if not frames:
@@ -1969,7 +2000,7 @@ def main() -> None:
     try:
         games = get_games_for_date(selected_date)
     except Exception as exc:
-        st.error("Deu ruim na consulta da NBA. A fonte externa, como sempre, decidiu ter personalidade.")
+        st.error("A NBA demorou ou falhou ao responder na consulta dos jogos. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
         return
 
@@ -2001,7 +2032,7 @@ def main() -> None:
             season=season,
         )
     except Exception as exc:
-        st.error("Consegui pegar o jogo, mas a coleta das estatísticas falhou. MVP grátis também tem seus surtos.")
+        st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
         return
 
