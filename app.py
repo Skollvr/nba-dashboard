@@ -14,6 +14,7 @@ from nba_api.stats.endpoints import (
     scoreboardv2,
 )
 from nba_api.stats.static import teams
+from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
 
 st.set_page_config(
     page_title="NBA Dashboard MVP",
@@ -570,34 +571,38 @@ def inject_css() -> None:
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date: date) -> pd.DataFrame:
     response = run_api_call_with_retry(
-        lambda: scoreboardv2.ScoreboardV2(
-            game_date=target_date.strftime("%Y-%m-%d"),
-            day_offset=0,
-            league_id="00",
-            timeout=45,
-        ),
-        endpoint_name="ScoreboardV2",
+        lambda: live_scoreboard.ScoreBoard(),
+        endpoint_name="LiveScoreBoard",
     )
-    data = response.get_normalized_dict()
-    games = pd.DataFrame(data.get("GameHeader", []))
+    payload = response.get_dict()
+    games_list = payload.get("scoreboard", {}).get("games", [])
+    if not games_list:
+        return pd.DataFrame()
 
-    if games.empty:
-        return games
+    rows = []
+    for game in games_list:
+        home_team = game.get("homeTeam", {})
+        away_team = game.get("awayTeam", {})
 
-    games["home_team_name"] = games["HOME_TEAM_ID"].map(
-        lambda x: TEAM_LOOKUP.get(x, {}).get("full_name", str(x))
-    )
-    games["away_team_name"] = games["VISITOR_TEAM_ID"].map(
-        lambda x: TEAM_LOOKUP.get(x, {}).get("full_name", str(x))
-    )
-    games["label"] = (
-        games["away_team_name"]
-        + " @ "
-        + games["home_team_name"]
-        + " • "
-        + games["GAME_STATUS_TEXT"].fillna("Sem status")
-    )
+        home_team_id = int(home_team.get("teamId", 0) or 0)
+        away_team_id = int(away_team.get("teamId", 0) or 0)
+        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name") or f"{home_team.get('teamCity', '')} {home_team.get('teamName', '')}".strip()
+        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name") or f"{away_team.get('teamCity', '')} {away_team.get('teamName', '')}".strip()
+        game_status_text = game.get("gameStatusText", "Sem status")
 
+        rows.append(
+            {
+                "GAME_ID": str(game.get("gameId", "")),
+                "HOME_TEAM_ID": home_team_id,
+                "VISITOR_TEAM_ID": away_team_id,
+                "GAME_STATUS_TEXT": game_status_text,
+                "home_team_name": home_team_name,
+                "away_team_name": away_team_name,
+                "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
+            }
+        )
+
+    games = pd.DataFrame(rows)
     return games[
         [
             "GAME_ID",
@@ -1951,13 +1956,14 @@ def main() -> None:
 
     st.markdown('<div class="main-title">NBA Dashboard MVP</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="subtitle">Escolha o jogo e veja PTS, REB, AST e PRA com cards ou tabela, sem sofrer à toa.</div>',
+        '<div class="subtitle">Jogos do dia com leitura de PTS, REB, AST e PRA em cards ou tabela, sem depender do humor de outro endpoint.</div>',
         unsafe_allow_html=True,
     )
 
     with st.sidebar:
         st.header("Configurações")
-        selected_date = st.date_input("Data dos jogos", value=date.today())
+        selected_date = date.today()
+        st.caption(f"Jogos do dia • {selected_date.strftime('%d/%m/%Y')}")
 
         st.divider()
         st.subheader("Visualização")
@@ -2007,10 +2013,10 @@ def main() -> None:
     st.caption(f"Temporada detectada: {season}")
 
     if games.empty:
-        st.warning("Não encontrei jogos nessa data. A NBA também sabe sabotar entretenimento.")
+        st.warning("Não encontrei jogos para hoje. A NBA também sabe sabotar entretenimento.")
         return
 
-    game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
+    game_label = st.selectbox("Escolha o jogo de hoje", games["label"].tolist())
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
     try:
