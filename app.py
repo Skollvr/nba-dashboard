@@ -1783,7 +1783,14 @@ def render_game_rankings(
     line_metric: str,
     line_value: float,
 ) -> None:
-    combined = build_summary_cards_data(away_df, home_df, min_games, min_minutes, role_filter)
+    combined = build_summary_cards_data(
+        away_df,
+        home_df,
+        min_games,
+        min_minutes,
+        role_filter,
+    )
+
     if combined.empty:
         return
 
@@ -1797,22 +1804,47 @@ def render_game_rankings(
     rank_df["RANK_HIT_RATE"] = pd.to_numeric(rank_df[hit_rate_col], errors="coerce").fillna(0.0)
     rank_df["RANK_EDGE"] = rank_df["RANK_PROJ"] - float(line_value)
 
-    proj_df = rank_df.sort_values(["RANK_PROJ", "RANK_HIT_RATE"], ascending=[False, False]).head(5)
-    edge_df = rank_df.sort_values(["RANK_EDGE", "RANK_HIT_RATE"], ascending=[False, False]).head(5)
-    consistency_df = rank_df.sort_values(["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"], ascending=[False, True, False]).head(5)
+    proj_df = rank_df.sort_values(
+        ["RANK_PROJ", "RANK_HIT_RATE"],
+        ascending=[False, False],
+    ).head(5)
+
+    edge_df = rank_df.sort_values(
+        ["RANK_EDGE", "RANK_HIT_RATE"],
+        ascending=[False, False],
+    ).head(5)
+
+    consistency_df = rank_df.sort_values(
+        ["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"],
+        ascending=[False, True, False],
+    ).head(5)
 
     st.subheader(f"Ranking do confronto — {line_metric}")
-    st.caption("Bloco compacto para bater o olho rápido, sem transformar a tela num outdoor estatístico.")
-    tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
+    st.caption(
+        "Bloco compacto para bater o olho rápido, sem transformar a tela num outdoor estatístico."
+    )
 
-   with tab_proj:
-    st.markdown(render_compact_ranking_html(proj_df, mode="projection"), unsafe_allow_html=True)
+    tab_proj, tab_edge, tab_cons = st.tabs(
+        ["Projeção", "Edge da linha", "Consistência"]
+    )
 
-with tab_edge:
-    st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
+    with tab_proj:
+        st.markdown(
+            render_compact_ranking_html(proj_df, mode="projection"),
+            unsafe_allow_html=True,
+        )
 
-with tab_cons:
-    st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
+    with tab_edge:
+        st.markdown(
+            render_compact_ranking_html(edge_df, mode="edge"),
+            unsafe_allow_html=True,
+        )
+
+    with tab_cons:
+        st.markdown(
+            render_compact_ranking_html(consistency_df, mode="consistency"),
+            unsafe_allow_html=True,
+        )
 
 
 def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str) -> None:
