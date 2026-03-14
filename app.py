@@ -46,7 +46,7 @@ SORT_OPTIONS = {
 ROLE_OPTIONS = ["Todos", "Titular provável", "Reserva"]
 VIEW_OPTIONS = ["Cards", "Tabela"]
 CHART_OPTIONS = ["Compacto", "Completo"]
-LINE_METRIC_OPTIONS = ["PRA", "PTS", "REB", "AST"]
+LINE_METRIC_OPTIONS = ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"]
 PROJECTION_WEIGHTS = {
     "season": 0.35,
     "l10": 0.40,
@@ -192,6 +192,9 @@ def get_metric_projection_column(metric: str) -> str:
         "PTS": "PROJ_PTS",
         "REB": "PROJ_REB",
         "AST": "PROJ_AST",
+        "3PM": "PROJ_3PM",
+        "FGA": "PROJ_FGA",
+        "3PA": "PROJ_3PA",
     }[metric]
 
 
@@ -201,6 +204,9 @@ def get_metric_recent_list_column(metric: str) -> str:
         "PTS": "RECENT_PTS_L10",
         "REB": "RECENT_REB_L10",
         "AST": "RECENT_AST_L10",
+        "3PM": "RECENT_3PM_L10",
+        "FGA": "RECENT_FGA_L10",
+        "3PA": "RECENT_3PA_L10",
     }[metric]
 
 
@@ -674,7 +680,7 @@ def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
             columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST"]
         )
 
-    keep_cols = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST"]
+    keep_cols = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]
     return df[[c for c in keep_cols if c in df.columns]].copy()
 
 
@@ -721,7 +727,7 @@ def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
         return df
 
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
-    for col in ["PTS", "REB", "AST", "MIN"]:
+    for col in ["PTS", "REB", "AST", "MIN", "FG3M", "FGA", "FG3A"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
     return df.sort_values(["PLAYER_ID", "GAME_DATE"], ascending=[True, False])
@@ -756,20 +762,23 @@ def get_position_opponent_profile(season: str, opponent_team_id: int, position_g
 
     def weighted_profile(df: pd.DataFrame) -> dict:
         if df.empty or "GP" not in df.columns:
-            return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "PRA": 0.0, "GP": 0.0}
+            return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
 
         work_df = df.copy()
-        for col in ["GP", "PTS", "REB", "AST"]:
+        for col in ["GP", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
             work_df[col] = pd.to_numeric(work_df[col], errors="coerce").fillna(0.0)
 
         total_gp = float(work_df["GP"].sum())
         if total_gp <= 0:
-            return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "PRA": 0.0, "GP": 0.0}
+            return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
 
         pts = float((work_df["PTS"] * work_df["GP"]).sum() / total_gp)
         reb = float((work_df["REB"] * work_df["GP"]).sum() / total_gp)
         ast = float((work_df["AST"] * work_df["GP"]).sum() / total_gp)
-        return {"PTS": pts, "REB": reb, "AST": ast, "PRA": pts + reb + ast, "GP": total_gp}
+        fg3m = float((work_df["FG3M"] * work_df["GP"]).sum() / total_gp)
+        fga = float((work_df["FGA"] * work_df["GP"]).sum() / total_gp)
+        fg3a = float((work_df["FG3A"] * work_df["GP"]).sum() / total_gp)
+        return {"PTS": pts, "REB": reb, "AST": ast, "FG3M": fg3m, "FGA": fga, "FG3A": fg3a, "PRA": pts + reb + ast, "GP": total_gp}
 
     opp_profile = weighted_profile(fetch(position_group, opponent_team_id))
     league_profile = weighted_profile(fetch(position_group, 0))
@@ -781,9 +790,15 @@ def get_position_opponent_profile(season: str, opponent_team_id: int, position_g
         "OPP_REB_ALLOWED": opp_profile["REB"],
         "OPP_AST_ALLOWED": opp_profile["AST"],
         "OPP_PRA_ALLOWED": opp_profile["PRA"],
+        "OPP_3PM_ALLOWED": opp_profile["FG3M"],
+        "OPP_FGA_ALLOWED": opp_profile["FGA"],
+        "OPP_3PA_ALLOWED": opp_profile["FG3A"],
         "LEAGUE_PTS_BASELINE": league_profile["PTS"],
         "LEAGUE_REB_BASELINE": league_profile["REB"],
         "LEAGUE_AST_BASELINE": league_profile["AST"],
+        "LEAGUE_3PM_BASELINE": league_profile["FG3M"],
+        "LEAGUE_FGA_BASELINE": league_profile["FGA"],
+        "LEAGUE_3PA_BASELINE": league_profile["FG3A"],
         "LEAGUE_PRA_BASELINE": league_profile["PRA"],
         "MATCHUP_DIFF": matchup_diff,
         "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
@@ -805,7 +820,7 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
         roster["POSITION"] = ""
 
     season_view = (
-        pd.DataFrame(columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST"])
+        pd.DataFrame(columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"])
         if season_stats.empty
         else season_stats.rename(
             columns={
@@ -814,12 +829,15 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
                 "PTS": "SEASON_PTS",
                 "REB": "SEASON_REB",
                 "AST": "SEASON_AST",
+                "FG3M": "SEASON_3PM",
+                "FGA": "SEASON_FGA",
+                "FG3A": "SEASON_3PA",
             }
         )
     )
 
     last5_view = (
-        pd.DataFrame(columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST"])
+        pd.DataFrame(columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA", "L5_3PM", "L5_FGA", "L5_3PA"])
         if last5_stats.empty
         else last5_stats.rename(
             columns={
@@ -828,12 +846,15 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
                 "PTS": "L5_PTS",
                 "REB": "L5_REB",
                 "AST": "L5_AST",
+                "FG3M": "L5_3PM",
+                "FGA": "L5_FGA",
+                "FG3A": "L5_3PA",
             }
         )
     )
 
     last10_view = (
-        pd.DataFrame(columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST"])
+        pd.DataFrame(columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA", "L10_3PM", "L10_FGA", "L10_3PA"])
         if last10_stats.empty
         else last10_stats.rename(
             columns={
@@ -842,20 +863,23 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
                 "PTS": "L10_PTS",
                 "REB": "L10_REB",
                 "AST": "L10_AST",
+                "FG3M": "L10_3PM",
+                "FGA": "L10_FGA",
+                "FG3A": "L10_3PA",
             }
         )
     )
 
     team_df = roster.merge(
-        season_view[["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST"]],
+        season_view[["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]],
         on="PLAYER_ID",
         how="left",
     ).merge(
-        last5_view[["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST"]],
+        last5_view[["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA"]],
         on="PLAYER_ID",
         how="left",
     ).merge(
-        last10_view[["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST"]],
+        last10_view[["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"]],
         on="PLAYER_ID",
         how="left",
     )
@@ -905,6 +929,9 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
             "SEASON_PTS", "L5_PTS", "L10_PTS",
             "SEASON_REB", "L5_REB", "L10_REB",
             "SEASON_AST", "L5_AST", "L10_AST",
+            "SEASON_3PM", "L5_3PM", "L10_3PM",
+            "SEASON_FGA", "L5_FGA", "L10_FGA",
+            "SEASON_3PA", "L5_3PA", "L10_3PA",
             "SEASON_PRA", "L5_PRA", "L10_PRA",
             "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND",
         ]
@@ -924,6 +951,12 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         "REB_HIT_RATE_L10_TEXT": "-",
         "AST_HIT_RATE_L10": 0.0,
         "AST_HIT_RATE_L10_TEXT": "-",
+        "THREE_PM_HIT_RATE_L10": 0.0,
+        "THREE_PM_HIT_RATE_L10_TEXT": "-",
+        "FGA_HIT_RATE_L10": 0.0,
+        "FGA_HIT_RATE_L10_TEXT": "-",
+        "THREE_PA_HIT_RATE_L10": 0.0,
+        "THREE_PA_HIT_RATE_L10_TEXT": "-",
         "OSC_L10": 0.0,
         "OSC_CLASS": "-",
         "FORM_SIGNAL": "→ Estável",
@@ -933,6 +966,9 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         "RECENT_PTS_L10": [],
         "RECENT_REB_L10": [],
         "RECENT_AST_L10": [],
+        "RECENT_3PM_L10": [],
+        "RECENT_FGA_L10": [],
+        "RECENT_3PA_L10": [],
     }
 
     if team_logs.empty:
@@ -941,7 +977,7 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
             enriched[col] = default
         return enriched
 
-    threshold_map = team_df.set_index("PLAYER_ID")[["SEASON_PRA", "SEASON_PTS", "SEASON_REB", "SEASON_AST"]].to_dict("index")
+    threshold_map = team_df.set_index("PLAYER_ID")[["SEASON_PRA", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]].to_dict("index")
     metrics = []
 
     for player_id, player_logs in team_logs.groupby("PLAYER_ID"):
@@ -957,11 +993,17 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         pts_threshold = float(thresholds.get("SEASON_PTS", 0.0))
         reb_threshold = float(thresholds.get("SEASON_REB", 0.0))
         ast_threshold = float(thresholds.get("SEASON_AST", 0.0))
+        three_pm_threshold = float(thresholds.get("SEASON_3PM", 0.0))
+        fga_threshold = float(thresholds.get("SEASON_FGA", 0.0))
+        three_pa_threshold = float(thresholds.get("SEASON_3PA", 0.0))
 
         hit_count_pra = int((recent10["PRA"] >= pra_threshold).sum()) if pra_threshold > 0 else 0
         hit_count_pts = int((recent10["PTS"] >= pts_threshold).sum()) if pts_threshold > 0 else 0
         hit_count_reb = int((recent10["REB"] >= reb_threshold).sum()) if reb_threshold > 0 else 0
         hit_count_ast = int((recent10["AST"] >= ast_threshold).sum()) if ast_threshold > 0 else 0
+        hit_count_3pm = int((recent10["FG3M"] >= three_pm_threshold).sum()) if three_pm_threshold > 0 else 0
+        hit_count_fga = int((recent10["FGA"] >= fga_threshold).sum()) if fga_threshold > 0 else 0
+        hit_count_3pa = int((recent10["FG3A"] >= three_pa_threshold).sum()) if three_pa_threshold > 0 else 0
 
         osc_value = float(recent10["PRA"].std(ddof=0)) if sample_size > 1 else 0.0
         ordered = recent10.sort_values("GAME_DATE")
@@ -978,6 +1020,12 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
                 "REB_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_reb, sample_size),
                 "AST_HIT_RATE_L10": float(hit_count_ast / sample_size),
                 "AST_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_ast, sample_size),
+                "THREE_PM_HIT_RATE_L10": float(hit_count_3pm / sample_size),
+                "THREE_PM_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_3pm, sample_size),
+                "FGA_HIT_RATE_L10": float(hit_count_fga / sample_size),
+                "FGA_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_fga, sample_size),
+                "THREE_PA_HIT_RATE_L10": float(hit_count_3pa / sample_size),
+                "THREE_PA_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_3pa, sample_size),
                 "OSC_L10": osc_value,
                 "OSC_CLASS": classify_oscillation(osc_value),
                 "FORM_SIGNAL": classify_form_signal(slope),
@@ -985,6 +1033,9 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
                 "RECENT_PTS_L10": recent10["PTS"].round(1).tolist(),
                 "RECENT_REB_L10": recent10["REB"].round(1).tolist(),
                 "RECENT_AST_L10": recent10["AST"].round(1).tolist(),
+                "RECENT_3PM_L10": recent10["FG3M"].round(1).tolist(),
+                "RECENT_FGA_L10": recent10["FGA"].round(1).tolist(),
+                "RECENT_3PA_L10": recent10["FG3A"].round(1).tolist(),
             }
         )
 
@@ -1030,15 +1081,24 @@ def enrich_team_with_context(
         enriched["OPP_REB_ALLOWED"] = 0.0
         enriched["OPP_AST_ALLOWED"] = 0.0
         enriched["OPP_PRA_ALLOWED"] = 0.0
+        enriched["OPP_3PM_ALLOWED"] = 0.0
+        enriched["OPP_FGA_ALLOWED"] = 0.0
+        enriched["OPP_3PA_ALLOWED"] = 0.0
         enriched["LEAGUE_PTS_BASELINE"] = 0.0
         enriched["LEAGUE_REB_BASELINE"] = 0.0
         enriched["LEAGUE_AST_BASELINE"] = 0.0
+        enriched["LEAGUE_3PM_BASELINE"] = 0.0
+        enriched["LEAGUE_FGA_BASELINE"] = 0.0
+        enriched["LEAGUE_3PA_BASELINE"] = 0.0
         enriched["LEAGUE_PRA_BASELINE"] = 0.0
         enriched["MATCHUP_DIFF"] = 0.0
         enriched["MATCHUP_LABEL"] = "Neutro"
         enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], 0.0, 0.0), axis=1)
         enriched["PROJ_REB"] = enriched.apply(lambda row: calculate_projection(row["SEASON_REB"], row["L10_REB"], row["L5_REB"], 0.0, 0.0), axis=1)
         enriched["PROJ_AST"] = enriched.apply(lambda row: calculate_projection(row["SEASON_AST"], row["L10_AST"], row["L5_AST"], 0.0, 0.0), axis=1)
+        enriched["PROJ_3PM"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PM"], row["L10_3PM"], row["L5_3PM"], 0.0, 0.0), axis=1)
+        enriched["PROJ_FGA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_FGA"], row["L10_FGA"], row["L5_FGA"], 0.0, 0.0), axis=1)
+        enriched["PROJ_3PA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], 0.0, 0.0), axis=1)
         enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], 0.0, 0.0), axis=1)
         return enriched
 
@@ -1047,8 +1107,8 @@ def enrich_team_with_context(
 
     for col in [
         "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED",
-        "OPP_PRA_ALLOWED", "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE",
-        "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE", "MATCHUP_DIFF",
+        "OPP_PRA_ALLOWED", "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED", "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE",
+        "LEAGUE_AST_BASELINE", "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE", "LEAGUE_PRA_BASELINE", "MATCHUP_DIFF",
     ]:
         if col not in enriched.columns:
             enriched[col] = 0.0
@@ -1071,6 +1131,24 @@ def enrich_team_with_context(
     enriched["PROJ_AST"] = enriched.apply(
         lambda row: calculate_projection(
             row["SEASON_AST"], row["L10_AST"], row["L5_AST"], row["OPP_AST_ALLOWED"], row["LEAGUE_AST_BASELINE"]
+        ),
+        axis=1,
+    )
+    enriched["PROJ_3PM"] = enriched.apply(
+        lambda row: calculate_projection(
+            row["SEASON_3PM"], row["L10_3PM"], row["L5_3PM"], row["OPP_3PM_ALLOWED"], row["LEAGUE_3PM_BASELINE"]
+        ),
+        axis=1,
+    )
+    enriched["PROJ_FGA"] = enriched.apply(
+        lambda row: calculate_projection(
+            row["SEASON_FGA"], row["L10_FGA"], row["L5_FGA"], row["OPP_FGA_ALLOWED"], row["LEAGUE_FGA_BASELINE"]
+        ),
+        axis=1,
+    )
+    enriched["PROJ_3PA"] = enriched.apply(
+        lambda row: calculate_projection(
+            row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], row["OPP_3PA_ALLOWED"], row["LEAGUE_3PA_BASELINE"]
         ),
         axis=1,
     )
@@ -1141,15 +1219,33 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     display_df["AST L5"] = display_df["L5_AST"]
     display_df["AST L10"] = display_df["L10_AST"]
 
+    display_df["3PM Temp"] = display_df["SEASON_3PM"]
+    display_df["3PM L5"] = display_df["L5_3PM"]
+    display_df["3PM L10"] = display_df["L10_3PM"]
+
+    display_df["FGA Temp"] = display_df["SEASON_FGA"]
+    display_df["FGA L5"] = display_df["L5_FGA"]
+    display_df["FGA L10"] = display_df["L10_FGA"]
+
+    display_df["3PA Temp"] = display_df["SEASON_3PA"]
+    display_df["3PA L5"] = display_df["L5_3PA"]
+    display_df["3PA L10"] = display_df["L10_3PA"]
+
     display_df["Proj PRA"] = display_df["PROJ_PRA"]
     display_df["Proj PTS"] = display_df["PROJ_PTS"]
     display_df["Proj REB"] = display_df["PROJ_REB"]
     display_df["Proj AST"] = display_df["PROJ_AST"]
+    display_df["Proj 3PM"] = display_df["PROJ_3PM"]
+    display_df["Proj FGA"] = display_df["PROJ_FGA"]
+    display_df["Proj 3PA"] = display_df["PROJ_3PA"]
     display_df["Matchup"] = display_df["MATCHUP_LABEL"]
     display_df["Hit PRA"] = display_df["HIT_RATE_L10_TEXT"]
     display_df["Hit PTS"] = display_df["PTS_HIT_RATE_L10_TEXT"]
     display_df["Hit REB"] = display_df["REB_HIT_RATE_L10_TEXT"]
     display_df["Hit AST"] = display_df["AST_HIT_RATE_L10_TEXT"]
+    display_df["Hit 3PM"] = display_df["THREE_PM_HIT_RATE_L10_TEXT"]
+    display_df["Hit FGA"] = display_df["FGA_HIT_RATE_L10_TEXT"]
+    display_df["Hit 3PA"] = display_df["THREE_PA_HIT_RATE_L10_TEXT"]
     display_df["Sinal"] = display_df["FORM_SIGNAL"]
     display_df["Oscilação"] = display_df["OSC_CLASS"]
     display_df["PRA adv pos"] = display_df["OPP_PRA_ALLOWED"]
@@ -1168,6 +1264,9 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
             "PTS Temp", "PTS L5", "PTS L10", "Proj PTS", "Hit PTS",
             "REB Temp", "REB L5", "REB L10", "Proj REB", "Hit REB",
             "AST Temp", "AST L5", "AST L10", "Proj AST", "Hit AST",
+            "3PM Temp", "3PM L5", "3PM L10", "Proj 3PM", "Hit 3PM",
+            "FGA Temp", "FGA L5", "FGA L10", "Proj FGA", "Hit FGA",
+            "3PA Temp", "3PA L5", "3PA L10", "Proj 3PA", "Hit 3PA",
             "PRA Temp", "PRA L5", "PRA L10", "Proj PRA", "Hit PRA",
             "Δ PRA L5", "Δ PRA L10", "PRA adv pos", "Liga pos",
             "Matchup", "Oscilação", "Sinal", "Trend",
@@ -1252,7 +1351,7 @@ def style_hit_rate(val) -> str:
 
 def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
     text_cols = {
-        "Jogador", "Pos", "Papel", "Trend", "Matchup", "Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Oscilação", "Sinal"
+        "Jogador", "Pos", "Papel", "Trend", "Matchup", "Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA", "Oscilação", "Sinal"
     }
     format_map = {}
     for col in df.columns:
@@ -1265,8 +1364,8 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
 
     pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10", "PRA adv pos", "Liga pos"] if c in df.columns]
     delta_cols = [c for c in ["Δ PRA L5", "Δ PRA L10"] if c in df.columns]
-    hit_cols = [c for c in ["Hit PRA", "Hit PTS", "Hit REB", "Hit AST"] if c in df.columns]
-    center_cols = [c for c in ["Papel", "GP", "MIN", "Trend", "Matchup", "Oscilação", "Sinal", "Hit PRA", "Hit PTS", "Hit REB", "Hit AST"] if c in df.columns]
+    hit_cols = [c for c in ["Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA"] if c in df.columns]
+    center_cols = [c for c in ["Papel", "GP", "MIN", "Trend", "Matchup", "Oscilação", "Sinal", "Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA"] if c in df.columns]
 
     if pra_cols:
         styler = styler.map(style_pra, subset=pra_cols)
@@ -1742,6 +1841,20 @@ def render_projection_detail_box_html(row: pd.Series) -> str:
                 <div class="detail-mini-value">{format_number(row['PROJ_PRA'])}</div>
             </div>
         </div>
+        <div class="detail-mini-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top:0.55rem;">
+            <div class="detail-mini">
+                <div class="detail-mini-label">Proj 3PM</div>
+                <div class="detail-mini-value">{format_number(row['PROJ_3PM'])}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">Proj FGA</div>
+                <div class="detail-mini-value">{format_number(row['PROJ_FGA'])}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">Proj 3PA</div>
+                <div class="detail-mini-value">{format_number(row['PROJ_3PA'])}</div>
+            </div>
+        </div>
     </div>
     """
 
@@ -1849,6 +1962,16 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float) -> N
                 ("AST", row["SEASON_AST"], row["L5_AST"], row["L10_AST"]),
             ]
             for col, item in zip([*first_cols, *second_cols], detail_items):
+                with col:
+                    st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
+
+            extra_cols = st.columns(3)
+            extra_detail_items = [
+                ("3PM", row["SEASON_3PM"], row["L5_3PM"], row["L10_3PM"]),
+                ("FGA", row["SEASON_FGA"], row["L5_FGA"], row["L10_FGA"]),
+                ("3PA", row["SEASON_3PA"], row["L5_3PA"], row["L10_3PA"]),
+            ]
+            for col, item in zip(extra_cols, extra_detail_items):
                 with col:
                     st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
 
@@ -1980,7 +2103,7 @@ def main() -> None:
         st.divider()
         st.subheader("Linha manual")
         line_metric = st.selectbox("Métrica da linha", LINE_METRIC_OPTIONS, index=0)
-        default_line_map = {"PRA": 25.5, "PTS": 20.5, "REB": 7.5, "AST": 5.5}
+        default_line_map = {"PRA": 25.5, "PTS": 20.5, "REB": 7.5, "AST": 5.5, "3PM": 2.5, "FGA": 15.5, "3PA": 6.5}
         line_value = st.number_input(
             "Valor da linha",
             min_value=0.0,
