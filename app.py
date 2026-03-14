@@ -1447,18 +1447,33 @@ def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFr
         return team_df
 
     enriched = team_df.copy()
-    for _, cols in ODDS_METRIC_COLUMNS.items():
-        for col in cols:
-            if col not in enriched.columns:
-                enriched[col] = None
 
+    # Se não tiver odds, só garante as colunas vazias
     if odds_df.empty:
+        for _, cols in ODDS_METRIC_COLUMNS.items():
+            for col in cols:
+                if col not in enriched.columns:
+                    enriched[col] = None
         return enriched
 
-    merged = enriched.merge(odds_df, left_on="PLAYER_KEY", right_on="PLAYER_KEY_ODDS", how="left")
+    # Faz o merge sem criar antes colunas com o mesmo nome
+    merged = enriched.merge(
+        odds_df,
+        left_on="PLAYER_KEY",
+        right_on="PLAYER_KEY_ODDS",
+        how="left",
+    )
+
     for col in ["PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"]:
         if col in merged.columns:
             merged = merged.drop(columns=[col])
+
+    # Garante que as colunas existam mesmo se algum mercado não vier
+    for _, cols in ODDS_METRIC_COLUMNS.items():
+        for col in cols:
+            if col not in merged.columns:
+                merged[col] = None
+
     return merged
 
 
