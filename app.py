@@ -1713,12 +1713,17 @@ def render_summary_cards(
 
 def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
     rows_html = []
+
     for idx, (_, row) in enumerate(rank_df.iterrows(), start=1):
         if mode == "projection":
             stat1_label, stat1_value = "Proj", format_number(row["RANK_PROJ"])
             stat2_label, stat2_value = "Hit", row["RANK_HIT_TEXT"]
             stat3_label, stat3_value = "Match", row["MATCHUP_LABEL"]
-            stat3_class = "ranking-good" if row["MATCHUP_LABEL"] == "Favorável" else ("ranking-bad" if row["MATCHUP_LABEL"] == "Difícil" else "")
+            stat3_class = (
+                "ranking-good" if row["MATCHUP_LABEL"] == "Favorável"
+                else "ranking-bad" if row["MATCHUP_LABEL"] == "Difícil"
+                else ""
+            )
         elif mode == "edge":
             stat1_label, stat1_value = "Edge", format_signed_number(row["RANK_EDGE"])
             stat2_label, stat2_value = "Proj", format_number(row["RANK_PROJ"])
@@ -1730,34 +1735,43 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
             stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
 
-        stat1_class = "ranking-good" if mode == "edge" and row["RANK_EDGE"] > 0.75 else ("ranking-bad" if mode == "edge" and row["RANK_EDGE"] < -0.75 else "")
-        stat2_class = "ranking-good" if mode == "consistency" and row["OSC_CLASS"] == "Baixa" else ("ranking-bad" if mode == "consistency" and row["OSC_CLASS"] == "Alta" else "")
-
-        rows_html.append(
-            f"""
-            <div class="ranking-row">
-                <div class="ranking-rank">{idx}</div>
-                <div>
-                    <div class="ranking-player">{row['PLAYER']}</div>
-                    <div class="ranking-sub">{row['TEAM_NAME']} • {row['ROLE']}</div>
-                </div>
-                <div class="ranking-stat {stat1_class}">
-                    <div class="ranking-stat-label">{stat1_label}</div>
-                    <div class="ranking-stat-value">{stat1_value}</div>
-                </div>
-                <div class="ranking-stat {stat2_class}">
-                    <div class="ranking-stat-label">{stat2_label}</div>
-                    <div class="ranking-stat-value">{stat2_value}</div>
-                </div>
-                <div class="ranking-stat {stat3_class}">
-                    <div class="ranking-stat-label">{stat3_label}</div>
-                    <div class="ranking-stat-value">{stat3_value}</div>
-                </div>
-            </div>
-            """
+        stat1_class = (
+            "ranking-good" if mode == "edge" and row["RANK_EDGE"] > 0.75
+            else "ranking-bad" if mode == "edge" and row["RANK_EDGE"] < -0.75
+            else ""
         )
 
-    return '<div class="ranking-shell">' + "".join(rows_html) + "</div>"
+        stat2_class = (
+            "ranking-good" if mode == "consistency" and row["OSC_CLASS"] == "Baixa"
+            else "ranking-bad" if mode == "consistency" and row["OSC_CLASS"] == "Alta"
+            else ""
+        )
+
+        row_html = (
+            f'<div class="ranking-row">'
+            f'<div class="ranking-rank">{idx}</div>'
+            f'<div>'
+            f'<div class="ranking-player">{row["PLAYER"]}</div>'
+            f'<div class="ranking-sub">{row["TEAM_NAME"]} • {row["ROLE"]}</div>'
+            f'</div>'
+            f'<div class="ranking-stat {stat1_class}">'
+            f'<div class="ranking-stat-label">{stat1_label}</div>'
+            f'<div class="ranking-stat-value">{stat1_value}</div>'
+            f'</div>'
+            f'<div class="ranking-stat {stat2_class}">'
+            f'<div class="ranking-stat-label">{stat2_label}</div>'
+            f'<div class="ranking-stat-value">{stat2_value}</div>'
+            f'</div>'
+            f'<div class="ranking-stat {stat3_class}">'
+            f'<div class="ranking-stat-label">{stat3_label}</div>'
+            f'<div class="ranking-stat-value">{stat3_value}</div>'
+            f'</div>'
+            f'</div>'
+        )
+
+        rows_html.append(row_html)
+
+    return f'<div class="ranking-shell">{"".join(rows_html)}</div>'
 
 
 def render_game_rankings(
@@ -1791,12 +1805,14 @@ def render_game_rankings(
     st.caption("Bloco compacto para bater o olho rápido, sem transformar a tela num outdoor estatístico.")
     tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
 
-    with tab_proj:
-        st.markdown(render_compact_ranking_html(proj_df, mode="projection"), unsafe_allow_html=True)
-    with tab_edge:
-        st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
-    with tab_cons:
-        st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
+   with tab_proj:
+    st.markdown(render_compact_ranking_html(proj_df, mode="projection"), unsafe_allow_html=True)
+
+with tab_edge:
+    st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
+
+with tab_cons:
+    st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
 
 
 def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str) -> None:
