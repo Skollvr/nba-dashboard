@@ -218,6 +218,30 @@ def classify_line_edge(edge: float) -> str:
     return "Justa"
 
 
+def get_metric_hit_text_column(metric: str) -> str:
+    return {
+        "PRA": "HIT_RATE_L10_TEXT",
+        "PTS": "PTS_HIT_RATE_L10_TEXT",
+        "REB": "REB_HIT_RATE_L10_TEXT",
+        "AST": "AST_HIT_RATE_L10_TEXT",
+        "3PM": "THREE_PM_HIT_RATE_L10_TEXT",
+        "FGA": "FGA_HIT_RATE_L10_TEXT",
+        "3PA": "THREE_PA_HIT_RATE_L10_TEXT",
+    }[metric]
+
+
+def get_metric_hit_rate_column(metric: str) -> str:
+    return {
+        "PRA": "HIT_RATE_L10",
+        "PTS": "PTS_HIT_RATE_L10",
+        "REB": "REB_HIT_RATE_L10",
+        "AST": "AST_HIT_RATE_L10",
+        "3PM": "THREE_PM_HIT_RATE_L10",
+        "FGA": "FGA_HIT_RATE_L10",
+        "3PA": "THREE_PA_HIT_RATE_L10",
+    }[metric]
+
+
 def get_line_context(row: pd.Series, metric: str, line_value: float) -> dict:
     projection_col = get_metric_projection_column(metric)
     recent_list_col = get_metric_recent_list_column(metric)
@@ -554,6 +578,77 @@ def inject_css() -> None:
             background: rgba(239,68,68,0.12);
             color: #fee2e2;
             border: 1px solid rgba(239,68,68,0.16);
+        }
+        .ranking-shell {
+            background: rgba(15,23,42,0.72);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 20px;
+            padding: 0.9rem 1rem 0.65rem 1rem;
+            margin-top: 0.85rem;
+            margin-bottom: 0.85rem;
+        }
+        .ranking-row {
+            display: grid;
+            grid-template-columns: 44px 1.6fr 0.9fr 0.9fr 0.9fr;
+            gap: 0.45rem;
+            align-items: center;
+            padding: 0.58rem 0.1rem;
+            border-bottom: 1px solid rgba(148,163,184,.08);
+        }
+        .ranking-row:last-child {
+            border-bottom: none;
+        }
+        .ranking-rank {
+            width: 32px;
+            height: 32px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(139,92,246,0.16);
+            color: #f3e8ff;
+            font-size: 0.78rem;
+            font-weight: 800;
+        }
+        .ranking-player {
+            color: #f8fafc;
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.15;
+        }
+        .ranking-sub {
+            color: #94a3b8;
+            font-size: 0.77rem;
+            margin-top: 0.08rem;
+        }
+        .ranking-stat {
+            text-align: center;
+        }
+        .ranking-stat-label {
+            color: #94a3b8;
+            font-size: 0.66rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.08rem;
+        }
+        .ranking-stat-value {
+            color: #f8fafc;
+            font-size: 0.92rem;
+            font-weight: 800;
+        }
+        .ranking-good .ranking-stat-value {
+            color: #86efac;
+        }
+        .ranking-bad .ranking-stat-value {
+            color: #fca5a5;
+        }
+        @media (max-width: 760px) {
+            .ranking-row {
+                grid-template-columns: 38px 1.5fr 0.8fr 0.8fr;
+            }
+            .ranking-row .ranking-stat:last-child {
+                display: none;
+            }
         }
         .focus-shell {
             background: linear-gradient(180deg, rgba(17,24,39,0.94), rgba(15,23,42,0.94));
@@ -1616,6 +1711,94 @@ def render_summary_cards(
             )
 
 
+def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
+    rows_html = []
+    for idx, (_, row) in enumerate(rank_df.iterrows(), start=1):
+        if mode == "projection":
+            stat1_label, stat1_value = "Proj", format_number(row["RANK_PROJ"])
+            stat2_label, stat2_value = "Hit", row["RANK_HIT_TEXT"]
+            stat3_label, stat3_value = "Match", row["MATCHUP_LABEL"]
+            stat3_class = "ranking-good" if row["MATCHUP_LABEL"] == "Favorável" else ("ranking-bad" if row["MATCHUP_LABEL"] == "Difícil" else "")
+        elif mode == "edge":
+            stat1_label, stat1_value = "Edge", format_signed_number(row["RANK_EDGE"])
+            stat2_label, stat2_value = "Proj", format_number(row["RANK_PROJ"])
+            stat3_label, stat3_value = "L10", row["RANK_HIT_TEXT"]
+            stat3_class = ""
+        else:
+            stat1_label, stat1_value = "Hit", row["RANK_HIT_TEXT"]
+            stat2_label, stat2_value = "Osc", row["OSC_CLASS"]
+            stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
+            stat3_class = ""
+
+        stat1_class = "ranking-good" if mode == "edge" and row["RANK_EDGE"] > 0.75 else ("ranking-bad" if mode == "edge" and row["RANK_EDGE"] < -0.75 else "")
+        stat2_class = "ranking-good" if mode == "consistency" and row["OSC_CLASS"] == "Baixa" else ("ranking-bad" if mode == "consistency" and row["OSC_CLASS"] == "Alta" else "")
+
+        rows_html.append(
+            f"""
+            <div class="ranking-row">
+                <div class="ranking-rank">{idx}</div>
+                <div>
+                    <div class="ranking-player">{row['PLAYER']}</div>
+                    <div class="ranking-sub">{row['TEAM_NAME']} • {row['ROLE']}</div>
+                </div>
+                <div class="ranking-stat {stat1_class}">
+                    <div class="ranking-stat-label">{stat1_label}</div>
+                    <div class="ranking-stat-value">{stat1_value}</div>
+                </div>
+                <div class="ranking-stat {stat2_class}">
+                    <div class="ranking-stat-label">{stat2_label}</div>
+                    <div class="ranking-stat-value">{stat2_value}</div>
+                </div>
+                <div class="ranking-stat {stat3_class}">
+                    <div class="ranking-stat-label">{stat3_label}</div>
+                    <div class="ranking-stat-value">{stat3_value}</div>
+                </div>
+            </div>
+            """
+        )
+
+    return '<div class="ranking-shell">' + "".join(rows_html) + "</div>"
+
+
+def render_game_rankings(
+    away_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+    min_games: int,
+    min_minutes: int,
+    role_filter: str,
+    line_metric: str,
+    line_value: float,
+) -> None:
+    combined = build_summary_cards_data(away_df, home_df, min_games, min_minutes, role_filter)
+    if combined.empty:
+        return
+
+    projection_col = get_metric_projection_column(line_metric)
+    hit_text_col = get_metric_hit_text_column(line_metric)
+    hit_rate_col = get_metric_hit_rate_column(line_metric)
+
+    rank_df = combined.copy()
+    rank_df["RANK_PROJ"] = pd.to_numeric(rank_df[projection_col], errors="coerce").fillna(0.0)
+    rank_df["RANK_HIT_TEXT"] = rank_df[hit_text_col].fillna("-")
+    rank_df["RANK_HIT_RATE"] = pd.to_numeric(rank_df[hit_rate_col], errors="coerce").fillna(0.0)
+    rank_df["RANK_EDGE"] = rank_df["RANK_PROJ"] - float(line_value)
+
+    proj_df = rank_df.sort_values(["RANK_PROJ", "RANK_HIT_RATE"], ascending=[False, False]).head(5)
+    edge_df = rank_df.sort_values(["RANK_EDGE", "RANK_HIT_RATE"], ascending=[False, False]).head(5)
+    consistency_df = rank_df.sort_values(["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"], ascending=[False, True, False]).head(5)
+
+    st.subheader(f"Ranking do confronto — {line_metric}")
+    st.caption("Bloco compacto para bater o olho rápido, sem transformar a tela num outdoor estatístico.")
+    tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
+
+    with tab_proj:
+        st.markdown(render_compact_ranking_html(proj_df, mode="projection"), unsafe_allow_html=True)
+    with tab_edge:
+        st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
+    with tab_cons:
+        st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
+
+
 def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str) -> None:
     log = get_player_log(player_id, season)
     if log.empty:
@@ -2313,6 +2496,15 @@ def main() -> None:
         min_games=min_games,
         min_minutes=min_minutes,
         role_filter=role_filter,
+    )
+    render_game_rankings(
+        away_df=away_df,
+        home_df=home_df,
+        min_games=min_games,
+        min_minutes=min_minutes,
+        role_filter=role_filter,
+        line_metric=line_metric,
+        line_value=line_value,
     )
 
     tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
