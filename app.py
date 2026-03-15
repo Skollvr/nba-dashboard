@@ -251,19 +251,20 @@ def normalize_text(value: str) -> str:
     text = text.replace(".", " ").replace("-", " ").replace("'", "").replace(",", " ")
     return " ".join(text.split())
 
-    def normalize_person_name(value: str) -> str:
+
+def normalize_person_name(value: str) -> str:
     text = str(value or "").strip()
     if "," in text:
         last_part, first_part = text.split(",", 1)
         text = f"{first_part.strip()} {last_part.strip()}"
     return normalize_text(text)
 
-    def clean_injury_pdf_line(line: str) -> str:
+
+def clean_injury_pdf_line(line: str) -> str:
     line = str(line or "").strip()
     line = re.sub(r"Injury Report:.*$", "", line).strip()
     line = re.sub(r"Page\s+\d+\s+of\s+\d+$", "", line).strip()
     return line
-
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
