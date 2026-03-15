@@ -1868,8 +1868,6 @@ def style_hit_rate(val) -> str:
     if ratio <= 0.4:
         return "background-color: rgba(239,68,68,0.10); color: #fee2e2; font-weight: 700;"
     return "background-color: rgba(148,163,184,0.10); color: #e2e8f0; font-weight: 600;"
-
-
 def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
     text_cols = {
         "Jogador",
@@ -1924,31 +1922,32 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
         ] if c in df.columns
     ]
 
-   if pra_cols:
-    styler = styler.map(style_pra, subset=pra_cols)
-if delta_cols:
-    styler = styler.map(style_delta, subset=delta_cols)
-if hit_cols:
-    styler = styler.map(style_hit_rate, subset=hit_cols)
-if "Trend" in df.columns:
-    styler = styler.map(style_trend, subset=["Trend"])
-if "Papel" in df.columns:
-    styler = styler.map(style_role, subset=["Papel"])
-if "Matchup" in df.columns:
-    styler = styler.map(style_matchup, subset=["Matchup"])
-if "Sinal" in df.columns:
-    styler = styler.map(style_signal, subset=["Sinal"])
-if "Oscilação" in df.columns:
-    styler = styler.map(style_oscillation, subset=["Oscilação"])
-if "Jogador" in df.columns:
-    styler = styler.set_properties(subset=["Jogador"], **{"font-weight": "700"})
-if center_cols:
-    styler = styler.set_properties(subset=center_cols, **{"text-align": "center"})
-if quick_view:
-    quick_cols = [c for c in ["PRA Temp", "PRA L10", "Δ PRA L10"] if c in df.columns]
-    styler = styler.set_properties(subset=quick_cols, **{"font-weight": "700"})
+    if pra_cols:
+        styler = styler.map(style_pra, subset=pra_cols)
+    if delta_cols:
+        styler = styler.map(style_delta, subset=delta_cols)
+    if hit_cols:
+        styler = styler.map(style_hit_rate, subset=hit_cols)
+    if "Trend" in df.columns:
+        styler = styler.map(style_trend, subset=["Trend"])
+    if "Papel" in df.columns:
+        styler = styler.map(style_role, subset=["Papel"])
+    if "Matchup" in df.columns:
+        styler = styler.map(style_matchup, subset=["Matchup"])
+    if "Sinal" in df.columns:
+        styler = styler.map(style_signal, subset=["Sinal"])
+    if "Oscilação" in df.columns:
+        styler = styler.map(style_oscillation, subset=["Oscilação"])
+    if "Jogador" in df.columns:
+        styler = styler.set_properties(subset=["Jogador"], **{"font-weight": "700"})
+    if center_cols:
+        styler = styler.set_properties(subset=center_cols, **{"text-align": "center"})
+    if quick_view:
+        quick_cols = [c for c in ["PRA Temp", "PRA L10", "Δ PRA L10"] if c in df.columns]
+        if quick_cols:
+            styler = styler.set_properties(subset=quick_cols, **{"font-weight": "700"})
 
-return styler
+    return styler
 
 def render_matchup_header(game_row: pd.Series) -> None:
     away_team_id = int(game_row["VISITOR_TEAM_ID"])
