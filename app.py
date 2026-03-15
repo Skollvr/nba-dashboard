@@ -24,7 +24,7 @@ st.set_page_config(page_title="NBA Dashboard MVP", page_icon="🏀", layout="wid
 
 TEAM_LOOKUP = {team["id"]: team for team in teams.get_teams()}
 TEAM_LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/primary/L/logo.svg"
-PLAYER_HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png"
+PLAYER_HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png
 
 SORT_OPTIONS = { "PRA L10": "L10_PRA", "Δ PRA L10 vs Temp": "DELTA_PRA_L10", "PRA L5": "L5_PRA", "Δ PRA L5 vs Temp": "DELTA_PRA_L5", "PTS L10": "L10_PTS", "REB L10": "L10_REB", "AST L10": "L10_AST", "PRA temporada": "SEASON_PRA", "PTS temporada": "SEASON_PTS", "REB temporada": "SEASON_REB", "AST temporada": "SEASON_AST", "Minutos por jogo": "SEASON_MIN", "Jogos na temporada": "SEASON_GP", "Nome do jogador": "PLAYER", }
 
