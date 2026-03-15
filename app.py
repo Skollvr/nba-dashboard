@@ -3075,7 +3075,6 @@ def main() -> None:
         int(selected_game["VISITOR_TEAM_ID"]),
         game_matchup=game_matchup,
     )
-
     home_df = merge_injury_report(
         home_df,
         injury_df,
@@ -3085,14 +3084,14 @@ def main() -> None:
     )
 
     render_matchup_header(selected_game)
-render_summary_cards(
+    render_summary_cards(
         away_df=away_df,
         home_df=home_df,
         min_games=min_games,
         min_minutes=min_minutes,
         role_filter=role_filter,
     )
-render_game_rankings(
+    render_game_rankings(
         away_df=away_df,
         home_df=home_df,
         min_games=min_games,
@@ -3103,9 +3102,9 @@ render_game_rankings(
         use_market_line=use_market_line,
     )
 
-tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
+    tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
 
-with tab1:
+    with tab1:
         render_team_section_v2(
             team_name=selected_game["away_team_name"],
             team_df=away_df,
@@ -3122,7 +3121,7 @@ with tab1:
             cards_per_row=cards_per_row,
         )
 
-with tab2:
+    with tab2:
         render_team_section_v2(
             team_name=selected_game["home_team_name"],
             team_df=home_df,
@@ -3139,7 +3138,7 @@ with tab2:
             cards_per_row=cards_per_row,
         )
 
-st.markdown(
+    st.markdown(
         """
         <div class="small-note">
         Nota: "Titular provável" neste MVP significa os 5 jogadores com mais minutos por jogo na temporada.
@@ -3302,7 +3301,13 @@ def render_team_section_v2(
             '<div class="section-note">Cards curtos no topo e painel fixo do jogador abaixo para facilitar consulta no celular.</div>',
             unsafe_allow_html=True,
         )
-        render_player_cards_grid(filtered_df, line_metric=line_metric, line_value=line_value, use_market_line=use_market_line, cards_per_row=cards_per_row)
+        render_player_cards_grid(
+            filtered_df,
+            line_metric=line_metric,
+            line_value=line_value,
+            use_market_line=use_market_line,
+            cards_per_row=cards_per_row,
+        )
 
         options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
         player_name = st.selectbox(
@@ -3334,7 +3339,6 @@ def render_team_section_v2(
 
     with lineup_tab:
         render_lineup_report_tab(team_df, team_name)
-
 
 if __name__ == "__main__":
     main()
