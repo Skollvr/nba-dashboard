@@ -3068,23 +3068,23 @@ def main() -> None:
 
     game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
 
-away_df = merge_injury_report(
-    away_df,
-    injury_df,
-    selected_game["away_team_name"],
-    int(selected_game["VISITOR_TEAM_ID"]),
-    game_matchup=game_matchup,
-)
+    away_df = merge_injury_report(
+        away_df,
+        injury_df,
+        selected_game["away_team_name"],
+        int(selected_game["VISITOR_TEAM_ID"]),
+        game_matchup=game_matchup,
+    )
 
-home_df = merge_injury_report(
-    home_df,
-    injury_df,
-    selected_game["home_team_name"],
-    int(selected_game["HOME_TEAM_ID"]),
-    game_matchup=game_matchup,
-)
+    home_df = merge_injury_report(
+        home_df,
+        injury_df,
+        selected_game["home_team_name"],
+        int(selected_game["HOME_TEAM_ID"]),
+        game_matchup=game_matchup,
+    )
 
-render_matchup_header(selected_game)
+    render_matchup_header(selected_game)
 render_summary_cards(
         away_df=away_df,
         home_df=home_df,
