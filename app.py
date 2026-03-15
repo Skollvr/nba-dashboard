@@ -1,5 +1,7 @@
 from datetime import date, datetime
+from io import BytesIO
 import os
+import re
 import time
 import unicodedata
 from typing import Optional
@@ -8,6 +10,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from pypdf import PdfReader
 import requests
 import streamlit as st
 
@@ -29,6 +32,7 @@ st.set_page_config(
 
 
 TEAM_LOOKUP = {team["id"]: team for team in teams.get_teams()}
+TEAM_ABBR_LOOKUP = {team["id"]: team.get("abbreviation", "") for team in teams.get_teams()}
 TEAM_LOGO_URL = "https://cdn.nba.com/logos/nba/{team_id}/primary/L/logo.svg"
 PLAYER_HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player_id}.png"
 
@@ -81,10 +85,27 @@ ODDS_METRIC_COLUMNS = {
     "FGA": ("BETMGM_FGA_LINE", "BETMGM_FGA_OVER_DEC", "BETMGM_FGA_UNDER_DEC", "BETMGM_FGA_UPDATED_AT"),
     "3PA": ("BETMGM_3PA_LINE", "BETMGM_3PA_OVER_DEC", "BETMGM_3PA_UNDER_DEC", "BETMGM_3PA_UPDATED_AT"),
 }
+
+INJURY_REPORT_PAGE = "https://official.nba.com/nba-injury-report-2025-26-season/"
+INACTIVE_STATUSES = {"Out", "Doubtful"}
+WATCHLIST_STATUSES = {"Questionable", "Probable"}
+
+PLAYER_STATUS_RE = re.compile(
+    r"(?P<player>[A-Za-zÀ-ÿ0-9'\.\-\s]+,\s+[A-Za-zÀ-ÿ0-9'\.\-\s]+)\s+"
+    r"(?P<status>Available|Out|Questionable|Probable|Doubtful)\b"
+    r"(?:\s+(?P<reason>.*))?$"
+)
+
+GAME_PREFIX_RE = re.compile(
+    r"^(?:(?P<game_date>\d{2}/\d{2}/\d{4})\s+)?"
+    r"(?P<game_time>\d{1,2}:\d{2})\s+\(ET\)\s+"
+    r"(?P<matchup>[A-Z]{2,3}@[A-Z]{2,3})\s+"
+    r"(?P<rest>.+)$"
+)
+
 APP_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 EASTERN_TIMEZONE = ZoneInfo("America/New_York")
 UTC_TIMEZONE = ZoneInfo("UTC")
-
 
 def get_brasilia_today() -> date:
     return datetime.now(APP_TIMEZONE).date()
@@ -230,6 +251,162 @@ def normalize_text(value: str) -> str:
     text = text.replace(".", " ").replace("-", " ").replace("'", "").replace(",", " ")
     return " ".join(text.split())
 
+    def normalize_person_name(value: str) -> str:
+    text = str(value or "").strip()
+    if "," in text:
+        last_part, first_part = text.split(",", 1)
+        text = f"{first_part.strip()} {last_part.strip()}"
+    return normalize_text(text)
+
+    def clean_injury_pdf_line(line: str) -> str:
+    line = str(line or "").strip()
+    line = re.sub(r"Injury Report:.*$", "", line).strip()
+    line = re.sub(r"Page\s+\d+\s+of\s+\d+$", "", line).strip()
+    return line
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_latest_injury_report_pdf_url() -> str:
+    response = requests.get(INJURY_REPORT_PAGE, timeout=30)
+    response.raise_for_status()
+    html = response.text
+
+    pdf_urls = re.findall(
+        r'https://ak-static\.cms\.nba\.com/referee/injury/Injury-Report_[^"]+\.pdf',
+        html,
+    )
+    if not pdf_urls:
+        return ""
+    return pdf_urls[-1]
+
+
+def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
+    reader = PdfReader(BytesIO(pdf_bytes))
+    lines: list[str] = []
+
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        page_lines = [clean_injury_pdf_line(x) for x in text.splitlines()]
+        page_lines = [x for x in page_lines if x]
+        lines.extend(page_lines)
+
+    return lines
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_latest_injury_report_df() -> pd.DataFrame:
+    pdf_url = fetch_latest_injury_report_pdf_url()
+    if not pdf_url:
+        return pd.DataFrame()
+
+    response = requests.get(pdf_url, timeout=45)
+    response.raise_for_status()
+
+    lines = extract_pdf_text_lines(response.content)
+    rows = []
+
+    current_game_date = ""
+    current_game_time = ""
+    current_matchup = ""
+    current_team = ""
+    current_row = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.startswith("Game Date Game Time Matchup Team Player Name Current Status Reason"):
+            continue
+
+        game_match = GAME_PREFIX_RE.match(line)
+        if game_match:
+            if game_match.group("game_date"):
+                current_game_date = game_match.group("game_date")
+            current_game_time = game_match.group("game_time")
+            current_matchup = game_match.group("matchup")
+            line = game_match.group("rest").strip()
+
+        if "NOT YET SUBMITTED" in line:
+            current_row = None
+            continue
+
+        player_match = PLAYER_STATUS_RE.search(line)
+        if player_match:
+            player_name = " ".join(player_match.group("player").split())
+            status = player_match.group("status").strip()
+            reason = (player_match.group("reason") or "").strip()
+
+            prefix = line[:player_match.start()].strip()
+            if prefix:
+                current_team = prefix
+
+            current_row = {
+                "GAME_DATE": current_game_date,
+                "GAME_TIME_ET": current_game_time,
+                "MATCHUP": current_matchup,
+                "TEAM_NAME_IR": current_team,
+                "PLAYER_NAME_IR": player_name,
+                "PLAYER_KEY_IR": normalize_person_name(player_name),
+                "INJ_STATUS": status,
+                "INJ_REASON": reason,
+                "INJ_REPORT_URL": pdf_url,
+            }
+            rows.append(current_row)
+        else:
+            if current_row is not None:
+                extra = line.strip()
+                if extra:
+                    current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {extra}'.strip()
+
+    injury_df = pd.DataFrame(rows)
+    if injury_df.empty:
+        return injury_df
+
+    injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
+    injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
+    return injury_df
+
+
+def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_name: str, team_id: int) -> pd.DataFrame:
+    if team_df.empty:
+        return team_df
+
+    enriched = team_df.copy()
+    enriched["INJ_STATUS"] = "Available"
+    enriched["INJ_REASON"] = ""
+    enriched["INJ_REPORT_URL"] = ""
+    enriched["IS_UNAVAILABLE"] = False
+
+    if injury_df.empty:
+        return enriched
+
+    team_abbr = TEAM_ABBR_LOOKUP.get(team_id, "")
+    target_names = {normalize_text(team_name), normalize_text(team_abbr)}
+    team_ir = injury_df[injury_df["TEAM_NAME_IR"].apply(normalize_text).isin(target_names)].copy()
+    if team_ir.empty:
+        return enriched
+
+    team_ir = team_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+
+    merged = enriched.merge(
+        team_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
+        left_on="PLAYER_KEY",
+        right_on="PLAYER_KEY_IR",
+        how="left",
+        suffixes=("", "_IR"),
+    )
+
+    merged["INJ_STATUS"] = merged["INJ_STATUS_IR"].fillna(merged["INJ_STATUS"])
+    merged["INJ_REASON"] = merged["INJ_REASON_IR"].fillna(merged["INJ_REASON"])
+    merged["INJ_REPORT_URL"] = merged["INJ_REPORT_URL_IR"].fillna(merged["INJ_REPORT_URL"])
+    merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
+
+    drop_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR"] if c in merged.columns]
+    if drop_cols:
+        merged = merged.drop(columns=drop_cols)
+
+    return merged
 
 def american_to_decimal(american_odds) -> Optional[float]:
     try:
@@ -2699,6 +2876,24 @@ def main() -> None:
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
+    try:
+        injury_df = fetch_latest_injury_report_df()
+    except Exception:
+        injury_df = pd.DataFrame()
+
+    away_df = merge_injury_report(
+        away_df,
+        injury_df,
+        selected_game["away_team_name"],
+        int(selected_game["VISITOR_TEAM_ID"]),
+    )
+    home_df = merge_injury_report(
+        home_df,
+        injury_df,
+        selected_game["home_team_name"],
+        int(selected_game["HOME_TEAM_ID"]),
+    )
+
     render_matchup_header(selected_game)
     render_summary_cards(
         away_df=away_df,
@@ -2766,30 +2961,45 @@ def main() -> None:
 
 
 def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
-    st.markdown('<div class="section-note">Aba reservada para o injury report oficial da NBA. Aqui entram status médicos reais, sem confundir rotação com disponibilidade.</div>', unsafe_allow_html=True)
-
-    st.info(
-        "Integração do injury report oficial da NBA será conectada aqui. Até essa ligação entrar, esta aba não usa heurística de minutos/rotação para evitar falsas leituras de lesão."
+    st.markdown(
+        '<div class="section-note">Status oficial do injury report da NBA para o elenco do time.</div>',
+        unsafe_allow_html=True,
     )
 
-    placeholder_df = pd.DataFrame(
-        {
-            "Jogador": team_df["PLAYER"].tolist(),
-            "Status oficial": ["—"] * len(team_df),
-            "Motivo": ["Aguardando integração oficial NBA"] * len(team_df),
-            "Última atualização": ["—"] * len(team_df),
+    if "INJ_STATUS" not in team_df.columns:
+        st.info("Injury report ainda não integrado nesta execução.")
+        return
+
+    report_df = team_df[["PLAYER", "INJ_STATUS", "INJ_REASON"]].copy()
+    report_df = report_df.rename(
+        columns={
+            "PLAYER": "Jogador",
+            "INJ_STATUS": "Status oficial",
+            "INJ_REASON": "Motivo",
         }
     )
-    st.dataframe(placeholder_df, use_container_width=True)
 
-    st.caption("Próximo passo: preencher esta aba com o injury report oficial da NBA e retirar automaticamente lesionados da leitura do confronto.")
+    st.dataframe(report_df, use_container_width=True)
+
+    unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
+    if not unavailable.empty:
+        st.warning(
+            f"{len(unavailable)} jogador(es) marcados como indisponíveis e que devem sair da leitura da provável escalação."
+        )
 
 
 def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
-    st.markdown('<div class="section-note">Estrutura de rotação do time separada da aba médica, para não misturar disponibilidade com provável quinteto.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="section-note">Estrutura de rotação do time já filtrada por indisponibilidade oficial quando o injury report estiver carregado.</div>',
+        unsafe_allow_html=True,
+    )
 
-    starters = team_df[team_df["ROLE"] == "Titular provável"].copy()
-    bench = team_df[team_df["ROLE"] != "Titular provável"].copy()
+    lineup_df = team_df.copy()
+    if "IS_UNAVAILABLE" in lineup_df.columns:
+        lineup_df = lineup_df[~lineup_df["IS_UNAVAILABLE"]].copy()
+
+    starters = lineup_df[lineup_df["ROLE"] == "Titular provável"].copy()
+    bench = lineup_df[lineup_df["ROLE"] != "Titular provável"].copy()
 
     top_cols = st.columns([1.2, 1.2, 1.6])
     with top_cols[0]:
@@ -2819,19 +3029,45 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
             unsafe_allow_html=True,
         )
     with top_cols[2]:
-        st.info("Esta aba mostra papel e rotação previstos com base na estrutura do elenco e no uso recente. O injury report oficial fica separado para evitar leituras erradas.")
+        st.info("Jogadores Out/Doubtful saem automaticamente da leitura quando o injury report oficial estiver carregado.")
 
     st.markdown("#### Provável escalação")
-    starter_view = starters[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND"]].copy() if not starters.empty else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND"])
-    starter_view = starter_view.rename(columns={"PLAYER": "Jogador", "POSITION": "Pos", "SEASON_MIN": "MIN", "SEASON_PRA": "PRA Temp", "L10_PRA": "PRA L10", "TREND": "Trend"})
+    starter_view = (
+        starters[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"]].copy()
+        if not starters.empty
+        else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"])
+    )
+    starter_view = starter_view.rename(
+        columns={
+            "PLAYER": "Jogador",
+            "POSITION": "Pos",
+            "SEASON_MIN": "MIN",
+            "SEASON_PRA": "PRA Temp",
+            "L10_PRA": "PRA L10",
+            "TREND": "Trend",
+            "INJ_STATUS": "Status",
+        }
+    )
     st.dataframe(style_table(starter_view, quick_view=True), use_container_width=True)
 
     st.markdown("#### Rotação / banco")
-    bench_view = bench[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND"]].copy() if not bench.empty else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND"])
-    bench_view = bench_view.rename(columns={"PLAYER": "Jogador", "POSITION": "Pos", "SEASON_MIN": "MIN", "SEASON_PRA": "PRA Temp", "L10_PRA": "PRA L10", "TREND": "Trend"})
+    bench_view = (
+        bench[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"]].copy()
+        if not bench.empty
+        else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"])
+    )
+    bench_view = bench_view.rename(
+        columns={
+            "PLAYER": "Jogador",
+            "POSITION": "Pos",
+            "SEASON_MIN": "MIN",
+            "SEASON_PRA": "PRA Temp",
+            "L10_PRA": "PRA L10",
+            "TREND": "Trend",
+            "INJ_STATUS": "Status",
+        }
+    )
     st.dataframe(style_table(bench_view, quick_view=True), use_container_width=True)
-
-    st.caption("Próxima camada: quando o injury report oficial entrar, esta aba pode ocultar automaticamente jogadores indisponíveis da provável escalação.")
 
 
 def render_team_section_v2(
@@ -2902,10 +3138,10 @@ def render_team_section_v2(
             st.dataframe(style_table(detail_df, quick_view=False), use_container_width=True)
 
     with injury_tab:
-        render_injury_report_tab(filtered_df, team_name)
+        render_injury_report_tab(team_df, team_name)
 
     with lineup_tab:
-        render_lineup_report_tab(filtered_df, team_name)
+        render_lineup_report_tab(team_df, team_name)
 
 
 if __name__ == "__main__":
