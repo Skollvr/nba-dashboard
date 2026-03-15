@@ -3081,9 +3081,9 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
 st.caption(f"Jogadores com status diferente de Available neste time: {len(flagged)}")
 
 unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
-    if not unavailable.empty:
-        st.warning(
-            f"{len(unavailable)} jogador(es) marcados como indisponíveis e que devem sair da leitura da provável escalação."
+if not unavailable.empty:
+st.warning(
+    f"{len(unavailable)} jogador(es) marcados como indisponíveis e que devem sair da leitura da provável escalação."
         )
 
 
