@@ -1892,14 +1892,14 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
         "Última atualização",
     }
     
-    format_map = {}
-    for col in df.columns:
-        if col == "GP":
-            format_map[col] = "{:.0f}"
-        elif col not in text_cols:
-            format_map[col] = "{:.1f}"
+  format_map = {}
+for col in df.columns:
+    if col in text_cols:
+        continue
+    if pd.api.types.is_numeric_dtype(df[col]):
+        format_map[col] = "{:.0f}" if col == "GP" else "{:.1f}"
 
-    styler = df.style.format(format_map, na_rep="-")
+styler = df.style.format(format_map, na_rep="-")
 
     pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10", "PRA adv pos", "Liga pos"] if c in df.columns]
     delta_cols = [c for c in ["Δ PRA L5", "Δ PRA L10"] if c in df.columns]
