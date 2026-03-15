@@ -1929,7 +1929,7 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
     if delta_cols:
         styler = styler.map(style_delta, subset=delta_cols)
     if hit_cols:
-        styler = styler.map(style_hit, subset=hit_cols)
+    styler = styler.map(style_hit_rate, subset=hit_cols)
     if center_cols:
         styler = styler.set_properties(subset=center_cols, **{"text-align": "center"})
     if "Jogador" in df.columns:
