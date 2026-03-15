@@ -1579,8 +1579,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if name == "main": main()
-
 def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None: st.markdown('<div class="section-note">Provável escalação e contexto operacional do time, sem poluir os cards iniciais.</div>', unsafe_allow_html=True)
 
 starters = team_df[team_df["ROLE"] == "Titular provável"].copy()
@@ -1680,3 +1678,5 @@ with table_tab:
 
 with injury_tab:
     render_injury_report_tab(filtered_df, team_name)
+
+if name == "main": main()
