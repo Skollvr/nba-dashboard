@@ -3085,7 +3085,7 @@ home_df = merge_injury_report(
 )
 
 render_matchup_header(selected_game)
-    render_summary_cards(
+     render_summary_cards(
         away_df=away_df,
         home_df=home_df,
         min_games=min_games,
