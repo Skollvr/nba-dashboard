@@ -3124,7 +3124,7 @@ render_game_rankings(
         use_market_line=use_market_line,
     )
 
-    tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
+tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
 
     with tab1:
         render_team_section_v2(
