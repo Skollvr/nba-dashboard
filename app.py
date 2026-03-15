@@ -259,6 +259,47 @@ def normalize_person_name(value: str) -> str:
         text = f"{first_part.strip()} {last_part.strip()}"
     return normalize_text(text)
 
+    def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
+    team_meta = TEAM_LOOKUP.get(team_id, {}) or {}
+
+    aliases = {
+        normalize_text(team_name),
+        normalize_text(team_meta.get("full_name", "")),
+        normalize_text(team_meta.get("abbreviation", "")),
+        normalize_text(team_meta.get("city", "")),
+        normalize_text(team_meta.get("nickname", "")),
+        normalize_text(team_meta.get("state", "")),
+    }
+
+    full_name = str(team_meta.get("full_name", "") or "")
+    city = str(team_meta.get("city", "") or "")
+    nickname = str(team_meta.get("nickname", "") or "")
+
+    if city and nickname:
+        aliases.add(normalize_text(f"{city} {nickname}"))
+    if nickname:
+        aliases.add(normalize_text(nickname))
+    if city:
+        aliases.add(normalize_text(city))
+
+    # aliases úteis para nomes que às vezes aparecem truncados/alternativos
+    special_aliases = {
+        "oklahoma city thunder": {"oklahoma city", "thunder", "okc"},
+        "portland trail blazers": {"portland", "trail blazers", "blazers", "por"},
+        "philadelphia 76ers": {"philadelphia", "76ers", "sixers", "phi"},
+        "phoenix suns": {"phoenix", "suns", "phx"},
+        "new york knicks": {"new york", "knicks", "nyk"},
+        "new orleans pelicans": {"new orleans", "pelicans", "nop"},
+        "san antonio spurs": {"san antonio", "spurs", "sas"},
+        "golden state warriors": {"golden state", "warriors", "gsw"},
+        "los angeles lakers": {"lakers", "lal"},
+        "los angeles clippers": {"clippers", "lac"},
+    }
+
+    normalized_full = normalize_text(full_name)
+    aliases.update(special_aliases.get(normalized_full, set()))
+
+    return {x for x in aliases if x}
 
 def clean_injury_pdf_line(line: str) -> str:
     line = str(line or "").strip()
@@ -266,7 +307,7 @@ def clean_injury_pdf_line(line: str) -> str:
     line = re.sub(r"Page\s+\d+\s+of\s+\d+$", "", line).strip()
     return line
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
     response = requests.get(INJURY_REPORT_PAGE, timeout=30)
     response.raise_for_status()
@@ -294,7 +335,7 @@ def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
     return lines
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_df() -> pd.DataFrame:
     pdf_url = fetch_latest_injury_report_pdf_url()
     if not pdf_url:
@@ -382,16 +423,33 @@ def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_nam
     if injury_df.empty:
         return enriched
 
-    team_abbr = TEAM_ABBR_LOOKUP.get(team_id, "")
-    target_names = {normalize_text(team_name), normalize_text(team_abbr)}
-    team_ir = injury_df[injury_df["TEAM_NAME_IR"].apply(normalize_text).isin(target_names)].copy()
-    if team_ir.empty:
+    team_abbr = str(TEAM_ABBR_LOOKUP.get(team_id, "") or "").upper().strip()
+    team_aliases = get_team_name_aliases(team_id, team_name)
+
+    team_ir = injury_df.copy()
+    if "TEAM_NAME_IR" in team_ir.columns:
+        team_ir["TEAM_NAME_IR_NORM"] = team_ir["TEAM_NAME_IR"].fillna("").apply(normalize_text)
+    else:
+        team_ir["TEAM_NAME_IR_NORM"] = ""
+
+    # 1) tenta pelo nome/cidade/nickname/sigla
+    matched_ir = team_ir[team_ir["TEAM_NAME_IR_NORM"].isin(team_aliases)].copy()
+
+    # 2) fallback pelo matchup do jogo (seguro porque o merge final ainda é por PLAYER_KEY)
+    if matched_ir.empty and team_abbr and "MATCHUP" in team_ir.columns:
+        matchup_mask = team_ir["MATCHUP"].fillna("").str.upper().str.contains(
+            rf"(^|@){re.escape(team_abbr)}($|@)",
+            regex=True,
+        )
+        matched_ir = team_ir[matchup_mask].copy()
+
+    if matched_ir.empty:
         return enriched
 
-    team_ir = team_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+    matched_ir = matched_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
 
     merged = enriched.merge(
-        team_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
+        matched_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
         left_on="PLAYER_KEY",
         right_on="PLAYER_KEY_IR",
         how="left",
@@ -403,12 +461,14 @@ def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_nam
     merged["INJ_REPORT_URL"] = merged["INJ_REPORT_URL_IR"].fillna(merged["INJ_REPORT_URL"])
     merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
 
-    drop_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR"] if c in merged.columns]
+    drop_cols = [
+        c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR", "TEAM_NAME_IR_NORM"]
+        if c in merged.columns
+    ]
     if drop_cols:
         merged = merged.drop(columns=drop_cols)
 
     return merged
-
 def american_to_decimal(american_odds) -> Optional[float]:
     try:
         odds_int = int(str(american_odds).replace("+", "").strip())
@@ -3015,6 +3075,9 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     )
 
     st.dataframe(report_df, use_container_width=True)
+
+    flagged = team_df[team_df["INJ_STATUS"] != "Available"].copy()
+st.caption(f"Jogadores com status diferente de Available neste time: {len(flagged)}")
 
     unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
     if not unavailable.empty:
