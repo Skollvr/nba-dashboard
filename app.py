@@ -1872,8 +1872,26 @@ def style_hit_rate(val) -> str:
 
 def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
     text_cols = {
-        "Jogador", "Pos", "Papel", "Trend", "Matchup", "Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA", "Oscilação", "Sinal"
+        "Jogador",
+        "Pos",
+        "Papel",
+        "Trend",
+        "Matchup",
+        "Hit PRA",
+        "Hit PTS",
+        "Hit REB",
+        "Hit AST",
+        "Hit 3PM",
+        "Hit FGA",
+        "Hit 3PA",
+        "Oscilação",
+        "Sinal",
+        "Status",
+        "Status oficial",
+        "Motivo",
+        "Última atualização",
     }
+    
     format_map = {}
     for col in df.columns:
         if col == "GP":
@@ -1886,8 +1904,13 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
     pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10", "PRA adv pos", "Liga pos"] if c in df.columns]
     delta_cols = [c for c in ["Δ PRA L5", "Δ PRA L10"] if c in df.columns]
     hit_cols = [c for c in ["Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA"] if c in df.columns]
-    center_cols = [c for c in ["Papel", "GP", "MIN", "Trend", "Matchup", "Oscilação", "Sinal", "Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA"] if c in df.columns]
-
+        center_cols = [
+        c for c in [
+            "Papel", "GP", "MIN", "Trend", "Matchup", "Oscilação", "Sinal",
+            "Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA",
+            "Status"
+        ] if c in df.columns
+    ]
     if pra_cols:
         styler = styler.map(style_pra, subset=pra_cols)
     if delta_cols:
