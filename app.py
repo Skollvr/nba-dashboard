@@ -3092,7 +3092,7 @@ render_summary_cards(
         min_minutes=min_minutes,
         role_filter=role_filter,
     )
-    render_game_rankings(
+render_game_rankings(
         away_df=away_df,
         home_df=home_df,
         min_games=min_games,
