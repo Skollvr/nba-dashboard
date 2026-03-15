@@ -3068,7 +3068,7 @@ def main() -> None:
 
 game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
 
-    away_df = merge_injury_report(
+away_df = merge_injury_report(
     away_df,
     injury_df,
     selected_game["away_team_name"],
