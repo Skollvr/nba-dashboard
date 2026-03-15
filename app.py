@@ -1891,49 +1891,49 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
         "Motivo",
         "Última atualização",
     }
-    
-  format_map = {}
-for col in df.columns:
-    if col in text_cols:
-        continue
-    if pd.api.types.is_numeric_dtype(df[col]):
-        format_map[col] = "{:.0f}" if col == "GP" else "{:.1f}"
 
-styler = df.style.format(format_map, na_rep="-")
+    format_map = {}
+    for col in df.columns:
+        if col in text_cols:
+            continue
+        if pd.api.types.is_numeric_dtype(df[col]):
+            format_map[col] = "{:.0f}" if col == "GP" else "{:.1f}"
+
+    styler = df.style.format(format_map, na_rep="-")
 
     pra_cols = [c for c in ["PRA Temp", "PRA L5", "PRA L10", "PRA adv pos", "Liga pos"] if c in df.columns]
     delta_cols = [c for c in ["Δ PRA L5", "Δ PRA L10"] if c in df.columns]
     hit_cols = [c for c in ["Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA"] if c in df.columns]
-        center_cols = [
+    center_cols = [
         c for c in [
-            "Papel", "GP", "MIN", "Trend", "Matchup", "Oscilação", "Sinal",
-            "Hit PRA", "Hit PTS", "Hit REB", "Hit AST", "Hit 3PM", "Hit FGA", "Hit 3PA",
-            "Status"
+            "Papel",
+            "GP",
+            "MIN",
+            "Trend",
+            "Matchup",
+            "Oscilação",
+            "Sinal",
+            "Hit PRA",
+            "Hit PTS",
+            "Hit REB",
+            "Hit AST",
+            "Hit 3PM",
+            "Hit FGA",
+            "Hit 3PA",
+            "Status",
         ] if c in df.columns
     ]
+
     if pra_cols:
         styler = styler.map(style_pra, subset=pra_cols)
     if delta_cols:
         styler = styler.map(style_delta, subset=delta_cols)
     if hit_cols:
-        styler = styler.map(style_hit_rate, subset=hit_cols)
-    if "Trend" in df.columns:
-        styler = styler.map(style_trend, subset=["Trend"])
-    if "Papel" in df.columns:
-        styler = styler.map(style_role, subset=["Papel"])
-    if "Matchup" in df.columns:
-        styler = styler.map(style_matchup, subset=["Matchup"])
-    if "Sinal" in df.columns:
-        styler = styler.map(style_signal, subset=["Sinal"])
-    if "Oscilação" in df.columns:
-        styler = styler.map(style_oscillation, subset=["Oscilação"])
-    if "Jogador" in df.columns:
-        styler = styler.set_properties(subset=["Jogador"], **{"font-weight": "700"})
+        styler = styler.map(style_hit, subset=hit_cols)
     if center_cols:
         styler = styler.set_properties(subset=center_cols, **{"text-align": "center"})
-    if quick_view:
-        quick_cols = [c for c in ["PRA Temp", "PRA L10", "Δ PRA L10"] if c in df.columns]
-        styler = styler.set_properties(subset=quick_cols, **{"font-weight": "700"})
+    if "Jogador" in df.columns:
+        styler = styler.set_properties(subset=["Jogador"], **{"text-align": "left"})
 
     return styler
 
