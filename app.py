@@ -2766,7 +2766,27 @@ def main() -> None:
 
 
 def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
-    st.markdown('<div class="section-note">Provável escalação e contexto operacional do time, sem poluir os cards iniciais.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-note">Aba reservada para o injury report oficial da NBA. Aqui entram status médicos reais, sem confundir rotação com disponibilidade.</div>', unsafe_allow_html=True)
+
+    st.info(
+        "Integração do injury report oficial da NBA será conectada aqui. Até essa ligação entrar, esta aba não usa heurística de minutos/rotação para evitar falsas leituras de lesão."
+    )
+
+    placeholder_df = pd.DataFrame(
+        {
+            "Jogador": team_df["PLAYER"].tolist(),
+            "Status oficial": ["—"] * len(team_df),
+            "Motivo": ["Aguardando integração oficial NBA"] * len(team_df),
+            "Última atualização": ["—"] * len(team_df),
+        }
+    )
+    st.dataframe(placeholder_df, use_container_width=True)
+
+    st.caption("Próximo passo: preencher esta aba com o injury report oficial da NBA e retirar automaticamente lesionados da leitura do confronto.")
+
+
+def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
+    st.markdown('<div class="section-note">Estrutura de rotação do time separada da aba médica, para não misturar disponibilidade com provável quinteto.</div>', unsafe_allow_html=True)
 
     starters = team_df[team_df["ROLE"] == "Titular provável"].copy()
     bench = team_df[team_df["ROLE"] != "Titular provável"].copy()
@@ -2799,7 +2819,7 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
             unsafe_allow_html=True,
         )
     with top_cols[2]:
-        st.info("Status oficial de lesão e lineup da NBA entram nesta aba. A estrutura já ficou separada para não virar um panfleto estatístico no card.")
+        st.info("Esta aba mostra papel e rotação previstos com base na estrutura do elenco e no uso recente. O injury report oficial fica separado para evitar leituras erradas.")
 
     st.markdown("#### Provável escalação")
     starter_view = starters[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND"]].copy() if not starters.empty else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND"])
@@ -2811,7 +2831,7 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     bench_view = bench_view.rename(columns={"PLAYER": "Jogador", "POSITION": "Pos", "SEASON_MIN": "MIN", "SEASON_PRA": "PRA Temp", "L10_PRA": "PRA L10", "TREND": "Trend"})
     st.dataframe(style_table(bench_view, quick_view=True), use_container_width=True)
 
-    st.caption("Próxima camada: status oficial do injury report da NBA e titulares confirmados/prováveis do dia nesta mesma aba.")
+    st.caption("Próxima camada: quando o injury report oficial entrar, esta aba pode ocultar automaticamente jogadores indisponíveis da provável escalação.")
 
 
 def render_team_section_v2(
@@ -2847,7 +2867,7 @@ def render_team_section_v2(
         unsafe_allow_html=True,
     )
 
-    cards_tab, table_tab, injury_tab = st.tabs(["Cards", "Tabela", "Relatório de Lesões"])
+    cards_tab, table_tab, injury_tab, lineup_tab = st.tabs(["Cards", "Tabela", "Injury Report", "Provável Escalação"])
 
     with cards_tab:
         st.markdown(
@@ -2883,6 +2903,9 @@ def render_team_section_v2(
 
     with injury_tab:
         render_injury_report_tab(filtered_df, team_name)
+
+    with lineup_tab:
+        render_lineup_report_tab(filtered_df, team_name)
 
 
 if __name__ == "__main__":
