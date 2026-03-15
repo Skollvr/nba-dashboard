@@ -430,29 +430,47 @@ def merge_injury_report(
     if injury_df.empty:
         return enriched
 
-    team_abbr = str(TEAM_ABBR_LOOKUP.get(team_id, "") or "").upper().strip()
+    target_matchup = str(game_matchup or "").upper().replace(" ", "")
     roster_keys = set(enriched["PLAYER_KEY"].fillna("").astype(str).tolist())
 
     work_ir = injury_df.copy()
-    work_ir["TEAM_NAME_IR_NORM"] = work_ir["TEAM_NAME_IR"].fillna("").apply(normalize_text)
-    work_ir["MATCHUP_NORM"] = work_ir["MATCHUP"].fillna("").str.upper().str.strip()
+    work_ir["MATCHUP_NORM"] = (
+        work_ir["MATCHUP"]
+        .fillna("")
+        .astype(str)
+        .str.upper()
+        .str.replace(" ", "", regex=False)
+    )
+    work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str)
 
-    team_aliases = get_team_name_aliases(team_id, team_name)
-
-    # 1) filtra pelo matchup do jogo, se disponível
-    if game_matchup:
-        work_ir = work_ir[work_ir["MATCHUP_NORM"] == str(game_matchup).upper().strip()].copy()
-
-    # 2) mantém linhas que batem por nome do time OU por jogador do elenco
-    work_ir = work_ir[
-        (work_ir["TEAM_NAME_IR_NORM"].isin(team_aliases)) |
-        (work_ir["PLAYER_KEY_IR"].isin(roster_keys))
-    ].copy()
+    if target_matchup:
+        work_ir = work_ir[work_ir["MATCHUP_NORM"] == target_matchup].copy()
 
     if work_ir.empty:
         return enriched
 
-    # 3) dedup final por jogador
+    work_ir = work_ir[work_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+
+    # fallback extra: recalcula a chave pelo nome cru, caso o PDF venha estranho
+    if work_ir.empty and "PLAYER_NAME_IR" in injury_df.columns:
+        fallback_ir = injury_df.copy()
+        fallback_ir["MATCHUP_NORM"] = (
+            fallback_ir["MATCHUP"]
+            .fillna("")
+            .astype(str)
+            .str.upper()
+            .str.replace(" ", "", regex=False)
+        )
+        fallback_ir["PLAYER_KEY_IR"] = fallback_ir["PLAYER_NAME_IR"].fillna("").apply(normalize_person_name)
+
+        if target_matchup:
+            fallback_ir = fallback_ir[fallback_ir["MATCHUP_NORM"] == target_matchup].copy()
+
+        work_ir = fallback_ir[fallback_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+
+    if work_ir.empty:
+        return enriched
+
     work_ir = work_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
 
     merged = enriched.merge(
@@ -469,14 +487,8 @@ def merge_injury_report(
     merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
 
     drop_cols = [
-        c for c in [
-            "PLAYER_KEY_IR",
-            "INJ_STATUS_IR",
-            "INJ_REASON_IR",
-            "INJ_REPORT_URL_IR",
-            "TEAM_NAME_IR_NORM",
-            "MATCHUP_NORM",
-        ] if c in merged.columns
+        c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR", "MATCHUP_NORM"]
+        if c in merged.columns
     ]
     if drop_cols:
         merged = merged.drop(columns=drop_cols)
@@ -3061,27 +3073,36 @@ def main() -> None:
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
-    try:
-        injury_df = fetch_latest_injury_report_df()
-    except Exception:
-        injury_df = pd.DataFrame()
+try:
+    injury_df = fetch_latest_injury_report_df()
+    debug_ir = injury_df[
+    injury_df["MATCHUP"].fillna("").astype(str).str.upper().str.replace(" ", "", regex=False)
+    == game_matchup.upper().replace(" ", "")
+].copy()
 
-    game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
+st.write(
+    debug_ir[["TEAM_NAME_IR", "PLAYER_NAME_IR", "PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON"]]
+)
+except Exception:
+    injury_df = pd.DataFrame()
 
-    away_df = merge_injury_report(
-        away_df,
-        injury_df,
-        selected_game["away_team_name"],
-        int(selected_game["VISITOR_TEAM_ID"]),
-        game_matchup=game_matchup,
-    )
-    home_df = merge_injury_report(
-        home_df,
-        injury_df,
-        selected_game["home_team_name"],
-        int(selected_game["HOME_TEAM_ID"]),
-        game_matchup=game_matchup,
-    )
+game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
+
+away_df = merge_injury_report(
+    away_df,
+    injury_df,
+    selected_game["away_team_name"],
+    int(selected_game["VISITOR_TEAM_ID"]),
+    game_matchup=game_matchup,
+)
+
+home_df = merge_injury_report(
+    home_df,
+    injury_df,
+    selected_game["home_team_name"],
+    int(selected_game["HOME_TEAM_ID"]),
+    game_matchup=game_matchup,
+)
 
     render_matchup_header(selected_game)
     render_summary_cards(
