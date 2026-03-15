@@ -3055,7 +3055,6 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-
 def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
         '<div class="section-note">Status oficial do injury report da NBA para o elenco do time.</div>',
@@ -3078,12 +3077,12 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.dataframe(report_df, use_container_width=True)
 
     flagged = team_df[team_df["INJ_STATUS"] != "Available"].copy()
-st.caption(f"Jogadores com status diferente de Available neste time: {len(flagged)}")
+    st.caption(f"Jogadores com status diferente de Available neste time: {len(flagged)}")
 
-unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
-if not unavailable.empty:
-st.warning(
-    f"{len(unavailable)} jogador(es) marcados como indisponíveis e que devem sair da leitura da provável escalação."
+    unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
+    if not unavailable.empty:
+        st.warning(
+            f"{len(unavailable)} jogador(es) marcados como indisponíveis e que devem sair da leitura da provável escalação."
         )
 
 
