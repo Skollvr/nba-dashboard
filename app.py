@@ -1679,4 +1679,4 @@ with table_tab:
 with injury_tab:
     render_injury_report_tab(filtered_df, team_name)
 
-if name == "main": main(
+if name == "main": main()
