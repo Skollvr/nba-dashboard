@@ -411,7 +411,13 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     return injury_df
 
 
-def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_name: str, team_id: int) -> pd.DataFrame:
+def merge_injury_report(
+    team_df: pd.DataFrame,
+    injury_df: pd.DataFrame,
+    team_name: str,
+    team_id: int,
+    game_matchup: str = "",
+) -> pd.DataFrame:
     if team_df.empty:
         return team_df
 
@@ -425,32 +431,32 @@ def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_nam
         return enriched
 
     team_abbr = str(TEAM_ABBR_LOOKUP.get(team_id, "") or "").upper().strip()
+    roster_keys = set(enriched["PLAYER_KEY"].fillna("").astype(str).tolist())
+
+    work_ir = injury_df.copy()
+    work_ir["TEAM_NAME_IR_NORM"] = work_ir["TEAM_NAME_IR"].fillna("").apply(normalize_text)
+    work_ir["MATCHUP_NORM"] = work_ir["MATCHUP"].fillna("").str.upper().str.strip()
+
     team_aliases = get_team_name_aliases(team_id, team_name)
 
-    team_ir = injury_df.copy()
-    if "TEAM_NAME_IR" in team_ir.columns:
-        team_ir["TEAM_NAME_IR_NORM"] = team_ir["TEAM_NAME_IR"].fillna("").apply(normalize_text)
-    else:
-        team_ir["TEAM_NAME_IR_NORM"] = ""
+    # 1) filtra pelo matchup do jogo, se disponível
+    if game_matchup:
+        work_ir = work_ir[work_ir["MATCHUP_NORM"] == str(game_matchup).upper().strip()].copy()
 
-    # 1) tenta pelo nome/cidade/nickname/sigla
-    matched_ir = team_ir[team_ir["TEAM_NAME_IR_NORM"].isin(team_aliases)].copy()
+    # 2) mantém linhas que batem por nome do time OU por jogador do elenco
+    work_ir = work_ir[
+        (work_ir["TEAM_NAME_IR_NORM"].isin(team_aliases)) |
+        (work_ir["PLAYER_KEY_IR"].isin(roster_keys))
+    ].copy()
 
-    # 2) fallback pelo matchup do jogo (seguro porque o merge final ainda é por PLAYER_KEY)
-    if matched_ir.empty and team_abbr and "MATCHUP" in team_ir.columns:
-        matchup_mask = team_ir["MATCHUP"].fillna("").str.upper().str.contains(
-            rf"(^|@){re.escape(team_abbr)}($|@)",
-            regex=True,
-        )
-        matched_ir = team_ir[matchup_mask].copy()
-
-    if matched_ir.empty:
+    if work_ir.empty:
         return enriched
 
-    matched_ir = matched_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+    # 3) dedup final por jogador
+    work_ir = work_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
 
     merged = enriched.merge(
-        matched_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
+        work_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
         left_on="PLAYER_KEY",
         right_on="PLAYER_KEY_IR",
         how="left",
@@ -463,8 +469,14 @@ def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_nam
     merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
 
     drop_cols = [
-        c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR", "TEAM_NAME_IR_NORM"]
-        if c in merged.columns
+        c for c in [
+            "PLAYER_KEY_IR",
+            "INJ_STATUS_IR",
+            "INJ_REASON_IR",
+            "INJ_REPORT_URL_IR",
+            "TEAM_NAME_IR_NORM",
+            "MATCHUP_NORM",
+        ] if c in merged.columns
     ]
     if drop_cols:
         merged = merged.drop(columns=drop_cols)
@@ -3054,18 +3066,23 @@ def main() -> None:
     except Exception:
         injury_df = pd.DataFrame()
 
+game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
+
     away_df = merge_injury_report(
-        away_df,
-        injury_df,
-        selected_game["away_team_name"],
-        int(selected_game["VISITOR_TEAM_ID"]),
-    )
-    home_df = merge_injury_report(
-        home_df,
-        injury_df,
-        selected_game["home_team_name"],
-        int(selected_game["HOME_TEAM_ID"]),
-    )
+    away_df,
+    injury_df,
+    selected_game["away_team_name"],
+    int(selected_game["VISITOR_TEAM_ID"]),
+    game_matchup=game_matchup,
+)
+
+home_df = merge_injury_report(
+    home_df,
+    injury_df,
+    selected_game["home_team_name"],
+    int(selected_game["HOME_TEAM_ID"]),
+    game_matchup=game_matchup,
+)
 
     render_matchup_header(selected_game)
     render_summary_cards(
