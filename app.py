@@ -3075,7 +3075,12 @@ def main() -> None:
 
 try:
     injury_df = fetch_latest_injury_report_df()
-    debug_ir = injury_df[
+except Exception:
+    injury_df = pd.DataFrame()
+
+game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
+
+debug_ir = injury_df[
     injury_df["MATCHUP"].fillna("").astype(str).str.upper().str.replace(" ", "", regex=False)
     == game_matchup.upper().replace(" ", "")
 ].copy()
@@ -3083,10 +3088,6 @@ try:
 st.write(
     debug_ir[["TEAM_NAME_IR", "PLAYER_NAME_IR", "PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON"]]
 )
-except Exception:
-    injury_df = pd.DataFrame()
-
-game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
 
 away_df = merge_injury_report(
     away_df,
