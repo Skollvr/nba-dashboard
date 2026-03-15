@@ -3105,7 +3105,7 @@ render_game_rankings(
 
 tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
 
-    with tab1:
+with tab1:
         render_team_section_v2(
             team_name=selected_game["away_team_name"],
             team_df=away_df,
@@ -3122,7 +3122,7 @@ tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_
             cards_per_row=cards_per_row,
         )
 
-    with tab2:
+with tab2:
         render_team_section_v2(
             team_name=selected_game["home_team_name"],
             team_df=home_df,
@@ -3139,7 +3139,7 @@ tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_
             cards_per_row=cards_per_row,
         )
 
-    st.markdown(
+st.markdown(
         """
         <div class="small-note">
         Nota: "Titular provável" neste MVP significa os 5 jogadores com mais minutos por jogo na temporada.
