@@ -259,7 +259,7 @@ def normalize_person_name(value: str) -> str:
         text = f"{first_part.strip()} {last_part.strip()}"
     return normalize_text(text)
 
-    def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
+   def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
     team_meta = TEAM_LOOKUP.get(team_id, {}) or {}
 
     aliases = {
@@ -282,7 +282,6 @@ def normalize_person_name(value: str) -> str:
     if city:
         aliases.add(normalize_text(city))
 
-    # aliases úteis para nomes que às vezes aparecem truncados/alternativos
     special_aliases = {
         "oklahoma city thunder": {"oklahoma city", "thunder", "okc"},
         "portland trail blazers": {"portland", "trail blazers", "blazers", "por"},
@@ -300,7 +299,7 @@ def normalize_person_name(value: str) -> str:
     aliases.update(special_aliases.get(normalized_full, set()))
 
     return {x for x in aliases if x}
-
+       
 def clean_injury_pdf_line(line: str) -> str:
     line = str(line or "").strip()
     line = re.sub(r"Injury Report:.*$", "", line).strip()
