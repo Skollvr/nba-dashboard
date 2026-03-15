@@ -260,7 +260,7 @@ def normalize_person_name(value: str) -> str:
     return normalize_text(text)
 
     
-   def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
+def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
     team_meta = TEAM_LOOKUP.get(team_id, {}) or {}
 
     aliases = {
