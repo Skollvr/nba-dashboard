@@ -7,6 +7,7 @@ import unicodedata
 from typing import Optional
 from zoneinfo import ZoneInfo
 from pandas.io.formats.style import Styler
+from nba_api.stats.endpoints import scoreboardv2
 
 import numpy as np
 import pandas as pd
@@ -1118,40 +1119,44 @@ def inject_css() -> None:
     )
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_games_for_date(target_date: date) -> pd.DataFrame:
     response = run_api_call_with_retry(
-        lambda: live_scoreboard.ScoreBoard(),
-        endpoint_name="LiveScoreBoard",
+        lambda: scoreboardv2.ScoreboardV2(
+            game_date=target_date.strftime("%Y-%m-%d"),
+            day_offset="0",
+            league_id="00",
+            timeout=45,
+        ),
+        endpoint_name="ScoreboardV2",
     )
-    payload = response.get_dict()
-    games_list = payload.get("scoreboard", {}).get("games", [])
-    if not games_list:
-        return pd.DataFrame()
 
-    filtered_games = []
-    for game in games_list:
-        game_dt_brasilia = get_game_datetime_brasilia(game)
-        if game_dt_brasilia is None or game_dt_brasilia.date() == target_date:
-            filtered_games.append(game)
-
-    if filtered_games:
-        games_list = filtered_games
+    game_header = response.game_header.get_data_frame()
+    if game_header.empty:
+        return pd.DataFrame(
+            columns=[
+                "GAME_ID",
+                "HOME_TEAM_ID",
+                "VISITOR_TEAM_ID",
+                "GAME_STATUS_TEXT",
+                "home_team_name",
+                "away_team_name",
+                "label",
+            ]
+        )
 
     rows = []
-    for game in games_list:
-        home_team = game.get("homeTeam", {})
-        away_team = game.get("awayTeam", {})
+    for _, row in game_header.iterrows():
+        home_team_id = int(row["HOME_TEAM_ID"])
+        away_team_id = int(row["VISITOR_TEAM_ID"])
 
-        home_team_id = int(home_team.get("teamId", 0) or 0)
-        away_team_id = int(away_team.get("teamId", 0) or 0)
-        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name") or f"{home_team.get('teamCity', '')} {home_team.get('teamName', '')}".strip()
-        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name") or f"{away_team.get('teamCity', '')} {away_team.get('teamName', '')}".strip()
-        game_status_text = game.get("gameStatusText", "Sem status")
+        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", str(home_team_id))
+        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", str(away_team_id))
+        game_status_text = row.get("GAME_STATUS_TEXT", "Sem status")
 
         rows.append(
             {
-                "GAME_ID": str(game.get("gameId", "")),
+                "GAME_ID": str(row["GAME_ID"]),
                 "HOME_TEAM_ID": home_team_id,
                 "VISITOR_TEAM_ID": away_team_id,
                 "GAME_STATUS_TEXT": game_status_text,
@@ -1161,18 +1166,7 @@ def get_games_for_date(target_date: date) -> pd.DataFrame:
             }
         )
 
-    games = pd.DataFrame(rows)
-    return games[
-        [
-            "GAME_ID",
-            "HOME_TEAM_ID",
-            "VISITOR_TEAM_ID",
-            "GAME_STATUS_TEXT",
-            "home_team_name",
-            "away_team_name",
-            "label",
-        ]
-    ].copy()
+    return pd.DataFrame(rows)
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
