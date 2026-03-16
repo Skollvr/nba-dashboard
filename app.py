@@ -6,6 +6,7 @@ import time
 import unicodedata
 from typing import Optional
 from zoneinfo import ZoneInfo
+from pandas.io.formats.style import Styler
 
 import numpy as np
 import pandas as pd
@@ -2030,7 +2031,7 @@ def style_hit_rate(val) -> str:
     if ratio <= 0.4:
         return "background-color: rgba(239,68,68,0.10); color: #fee2e2; font-weight: 700;"
     return "background-color: rgba(148,163,184,0.10); color: #e2e8f0; font-weight: 600;"
-def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
+def style_table(df: pd.DataFrame, quick_view: bool) -> Styler:
     text_cols = {
         "Jogador",
         "Pos",
