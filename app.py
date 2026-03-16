@@ -6,8 +6,6 @@ import time
 import unicodedata
 from typing import Optional
 from zoneinfo import ZoneInfo
-from pandas.io.formats.style import Styler
-from nba_api.stats.endpoints import scoreboardv2
 
 import numpy as np
 import pandas as pd
@@ -310,92 +308,849 @@ def clean_injury_pdf_line(line: str) -> str:
     line = re.sub(r"Page\s+\d+\s+of\s+\d+$", "", line).strip()
     return line
 
-def parse_injury_report_timestamp_from_url(pdf_url: str) -> dict:
-    if not pdf_url:
-        return {
-            "report_label_et": "—",
-            "report_label_brt": "—",
-            "report_dt_et": None,
-            "report_dt_brt": None,
-        }
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_latest_injury_report_pdf_url() -> str:
+    response = requests.get(INJURY_REPORT_PAGE, timeout=30)
+    response.raise_for_status()
+    html = response.text
 
-    match = re.search(
-        r"Injury-Report_(\d{4}-\d{2}-\d{2})_(\d{1,2})_(\d{2})(AM|PM)\.pdf",
-        str(pdf_url),
-        flags=re.IGNORECASE,
+    pdf_urls = re.findall(
+        r'https://ak-static\.cms\.nba\.com/referee/injury/Injury-Report_[^"]+\.pdf',
+        html,
     )
-    if not match:
-        return {
-            "report_label_et": "—",
-            "report_label_brt": "—",
-            "report_dt_et": None,
-            "report_dt_brt": None,
-        }
+    if not pdf_urls:
+        return ""
+    return pdf_urls[-1]
 
-    date_part = match.group(1)
-    hour_part = int(match.group(2))
-    minute_part = int(match.group(3))
-    ampm_part = match.group(4).upper()
 
-    if ampm_part == "AM":
-        hour_24 = 0 if hour_part == 12 else hour_part
-    else:
-        hour_24 = 12 if hour_part == 12 else hour_part + 12
+def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
+    reader = PdfReader(BytesIO(pdf_bytes))
+    lines: list[str] = []
 
-    dt_et = datetime.strptime(date_part, "%Y-%m-%d").replace(
-        hour=hour_24,
-        minute=minute_part,
-        second=0,
-        microsecond=0,
-        tzinfo=EASTERN_TIMEZONE,
-    )
-    dt_brt = dt_et.astimezone(APP_TIMEZONE)
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        page_lines = [clean_injury_pdf_line(x) for x in text.splitlines()]
+        page_lines = [x for x in page_lines if x]
+        lines.extend(page_lines)
 
-    return {
-        "report_label_et": dt_et.strftime("%d/%m %I:%M %p ET"),
-        "report_label_brt": dt_brt.strftime("%d/%m %H:%M BRT"),
-        "report_dt_et": dt_et,
-        "report_dt_brt": dt_brt,
-    }
+    return lines
+
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_games_for_date(target_date: date) -> pd.DataFrame:
-    response = run_api_call_with_retry(
-        lambda: scoreboardv2.ScoreboardV2(
-            game_date=target_date.strftime("%Y-%m-%d"),
-            day_offset="0",
-            league_id="00",
-            timeout=45,
-        ),
-        endpoint_name="ScoreboardV2",
+def fetch_latest_injury_report_df() -> pd.DataFrame:
+    pdf_url = fetch_latest_injury_report_pdf_url()
+    if not pdf_url:
+        return pd.DataFrame()
+
+    response = requests.get(pdf_url, timeout=45)
+    response.raise_for_status()
+
+    lines = extract_pdf_text_lines(response.content)
+    rows = []
+
+    current_game_date = ""
+    current_game_time = ""
+    current_matchup = ""
+    current_team = ""
+    current_row = None
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.startswith("Game Date Game Time Matchup Team Player Name Current Status Reason"):
+            continue
+
+        game_match = GAME_PREFIX_RE.match(line)
+        if game_match:
+            if game_match.group("game_date"):
+                current_game_date = game_match.group("game_date")
+            current_game_time = game_match.group("game_time")
+            current_matchup = game_match.group("matchup")
+            line = game_match.group("rest").strip()
+
+        if "NOT YET SUBMITTED" in line:
+            current_row = None
+            continue
+
+        player_match = PLAYER_STATUS_RE.search(line)
+        if player_match:
+            player_name = " ".join(player_match.group("player").split())
+            status = player_match.group("status").strip()
+            reason = (player_match.group("reason") or "").strip()
+
+            prefix = line[:player_match.start()].strip()
+            if prefix:
+                current_team = prefix
+
+            current_row = {
+                "GAME_DATE": current_game_date,
+                "GAME_TIME_ET": current_game_time,
+                "MATCHUP": current_matchup,
+                "TEAM_NAME_IR": current_team,
+                "PLAYER_NAME_IR": player_name,
+                "PLAYER_KEY_IR": normalize_person_name(player_name),
+                "INJ_STATUS": status,
+                "INJ_REASON": reason,
+                "INJ_REPORT_URL": pdf_url,
+            }
+            rows.append(current_row)
+        else:
+            if current_row is not None:
+                extra = line.strip()
+                if extra:
+                    current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {extra}'.strip()
+
+    injury_df = pd.DataFrame(rows)
+    if injury_df.empty:
+        return injury_df
+
+    injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
+    injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
+    return injury_df
+
+
+def merge_injury_report(
+    team_df: pd.DataFrame,
+    injury_df: pd.DataFrame,
+    team_name: str,
+    team_id: int,
+    game_matchup: str = "",
+) -> pd.DataFrame:
+    if team_df.empty:
+        return team_df
+
+    enriched = team_df.copy()
+    enriched["INJ_STATUS"] = "Available"
+    enriched["INJ_REASON"] = ""
+    enriched["INJ_REPORT_URL"] = ""
+    enriched["IS_UNAVAILABLE"] = False
+
+    if injury_df.empty:
+        return enriched
+
+    target_matchup = str(game_matchup or "").upper().replace(" ", "")
+    roster_keys = set(enriched["PLAYER_KEY"].fillna("").astype(str).tolist())
+
+    work_ir = injury_df.copy()
+    work_ir["MATCHUP_NORM"] = (
+        work_ir["MATCHUP"]
+        .fillna("")
+        .astype(str)
+        .str.upper()
+        .str.replace(" ", "", regex=False)
+    )
+    work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str)
+
+    if target_matchup:
+        work_ir = work_ir[work_ir["MATCHUP_NORM"] == target_matchup].copy()
+
+    if work_ir.empty:
+        return enriched
+
+    work_ir = work_ir[work_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+
+    # fallback extra: recalcula a chave pelo nome cru, caso o PDF venha estranho
+    if work_ir.empty and "PLAYER_NAME_IR" in injury_df.columns:
+        fallback_ir = injury_df.copy()
+        fallback_ir["MATCHUP_NORM"] = (
+            fallback_ir["MATCHUP"]
+            .fillna("")
+            .astype(str)
+            .str.upper()
+            .str.replace(" ", "", regex=False)
+        )
+        fallback_ir["PLAYER_KEY_IR"] = fallback_ir["PLAYER_NAME_IR"].fillna("").apply(normalize_person_name)
+
+        if target_matchup:
+            fallback_ir = fallback_ir[fallback_ir["MATCHUP_NORM"] == target_matchup].copy()
+
+        work_ir = fallback_ir[fallback_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+
+    if work_ir.empty:
+        return enriched
+
+    work_ir = work_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+
+    merged = enriched.merge(
+        work_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
+        left_on="PLAYER_KEY",
+        right_on="PLAYER_KEY_IR",
+        how="left",
+        suffixes=("", "_IR"),
     )
 
-    game_header = response.game_header.get_data_frame()
-    if game_header.empty:
-        return pd.DataFrame(
-            columns=[
-                "GAME_ID",
-                "HOME_TEAM_ID",
-                "VISITOR_TEAM_ID",
-                "GAME_STATUS_TEXT",
-                "home_team_name",
-                "away_team_name",
-                "label",
-            ]
-        )
+    merged["INJ_STATUS"] = merged["INJ_STATUS_IR"].fillna(merged["INJ_STATUS"])
+    merged["INJ_REASON"] = merged["INJ_REASON_IR"].fillna(merged["INJ_REASON"])
+    merged["INJ_REPORT_URL"] = merged["INJ_REPORT_URL_IR"].fillna(merged["INJ_REPORT_URL"])
+    merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
+
+    drop_cols = [
+        c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR", "MATCHUP_NORM"]
+        if c in merged.columns
+    ]
+    if drop_cols:
+        merged = merged.drop(columns=drop_cols)
+
+    return merged
+def american_to_decimal(american_odds) -> Optional[float]:
+    try:
+        odds_int = int(str(american_odds).replace("+", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+    if odds_int > 0:
+        return round(1 + (odds_int / 100), 2)
+    if odds_int < 0:
+        return round(1 + (100 / abs(odds_int)), 2)
+    return None
+
+
+def get_odds_api_key() -> str:
+    secrets_obj = getattr(st, "secrets", None)
+    if secrets_obj:
+        for key_name in ["SPORTSGAMEODDS_API_KEY", "sportsgameodds_api_key"]:
+            if key_name in secrets_obj:
+                return str(secrets_obj[key_name]).strip()
+    return os.getenv("SPORTSGAMEODDS_API_KEY", "").strip()
+
+
+def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 3, delay: float = 1.2):
+    last_error = None
+    for attempt in range(retries):
+        try:
+            return fetch_fn()
+        except Exception as exc:
+            last_error = exc
+            if attempt < retries - 1:
+                time.sleep(delay * (attempt + 1))
+    raise RuntimeError(f"Falha ao consultar {endpoint_name} após {retries} tentativas.") from last_error
+
+
+def calculate_projection(
+    season_value: float,
+    l10_value: float,
+    l5_value: float,
+    opp_allowed: float,
+    league_allowed: float,
+) -> float:
+    matchup_adjusted = float(season_value) + (float(opp_allowed) - float(league_allowed))
+    projection = (
+        PROJECTION_WEIGHTS["season"] * float(season_value)
+        + PROJECTION_WEIGHTS["l10"] * float(l10_value)
+        + PROJECTION_WEIGHTS["l5"] * float(l5_value)
+        + PROJECTION_WEIGHTS["matchup"] * matchup_adjusted
+    )
+    return max(0.0, projection)
+
+
+def get_metric_projection_column(metric: str) -> str:
+    return {
+        "PRA": "PROJ_PRA",
+        "PTS": "PROJ_PTS",
+        "REB": "PROJ_REB",
+        "AST": "PROJ_AST",
+        "3PM": "PROJ_3PM",
+        "FGA": "PROJ_FGA",
+        "3PA": "PROJ_3PA",
+    }[metric]
+
+
+def get_metric_recent_list_column(metric: str) -> str:
+    return {
+        "PRA": "RECENT_PRA_L10",
+        "PTS": "RECENT_PTS_L10",
+        "REB": "RECENT_REB_L10",
+        "AST": "RECENT_AST_L10",
+        "3PM": "RECENT_3PM_L10",
+        "FGA": "RECENT_FGA_L10",
+        "3PA": "RECENT_3PA_L10",
+    }[metric]
+
+
+def classify_line_edge(edge: float) -> str:
+    if edge >= 1.5:
+        return "Acima"
+    if edge <= -1.5:
+        return "Abaixo"
+    return "Justa"
+
+
+def get_metric_hit_text_column(metric: str) -> str:
+    return {
+        "PRA": "HIT_RATE_L10_TEXT",
+        "PTS": "PTS_HIT_RATE_L10_TEXT",
+        "REB": "REB_HIT_RATE_L10_TEXT",
+        "AST": "AST_HIT_RATE_L10_TEXT",
+        "3PM": "THREE_PM_HIT_RATE_L10_TEXT",
+        "FGA": "FGA_HIT_RATE_L10_TEXT",
+        "3PA": "THREE_PA_HIT_RATE_L10_TEXT",
+    }[metric]
+
+
+def get_metric_hit_rate_column(metric: str) -> str:
+    return {
+        "PRA": "HIT_RATE_L10",
+        "PTS": "PTS_HIT_RATE_L10",
+        "REB": "REB_HIT_RATE_L10",
+        "AST": "AST_HIT_RATE_L10",
+        "3PM": "THREE_PM_HIT_RATE_L10",
+        "FGA": "FGA_HIT_RATE_L10",
+        "3PA": "THREE_PA_HIT_RATE_L10",
+    }[metric]
+
+
+def get_metric_market_columns(metric: str) -> tuple[str, str, str, str]:
+    return ODDS_METRIC_COLUMNS[metric]
+
+
+def get_market_line_for_metric(row: pd.Series, metric: str) -> dict:
+    line_col, over_col, under_col, updated_col = get_metric_market_columns(metric)
+    return {
+        "line": row.get(line_col),
+        "over_dec": row.get(over_col),
+        "under_dec": row.get(under_col),
+        "updated_at": row.get(updated_col),
+    }
+
+
+def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_line: bool = False) -> dict:
+    projection_col = get_metric_projection_column(metric)
+    recent_list_col = get_metric_recent_list_column(metric)
+
+    projection = float(row.get(projection_col, 0.0))
+    market_info = get_market_line_for_metric(row, metric)
+    market_line = pd.to_numeric(market_info.get("line"), errors="coerce")
+    use_market = bool(use_market_line and pd.notna(market_line))
+    active_line = float(market_line) if use_market else float(line_value)
+
+    edge = projection - active_line
+    recent_values = row.get(recent_list_col, [])
+    if not isinstance(recent_values, list):
+        recent_values = []
+
+    hit_l10 = sum(float(v) >= active_line for v in recent_values)
+    hit_l5 = sum(float(v) >= active_line for v in recent_values[:5])
+
+    return {
+        "projection": projection,
+        "edge": edge,
+        "label": classify_line_edge(edge),
+        "line_value": active_line,
+        "line_source": "BetMGM" if use_market else "Manual",
+        "has_market_line": use_market,
+        "over_dec": market_info.get("over_dec") if use_market else None,
+        "under_dec": market_info.get("under_dec") if use_market else None,
+        "updated_at": market_info.get("updated_at") if use_market else "",
+        "hit_l10": format_ratio_text(hit_l10, len(recent_values)),
+        "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
+    }
+
+
+def inject_css() -> None:
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 1.1rem;
+            padding-bottom: 2rem;
+        }
+        .main-title {
+            font-size: 2.1rem;
+            font-weight: 800;
+            margin-bottom: 0.15rem;
+        }
+        .subtitle {
+            color: #94a3b8;
+            margin-bottom: 1rem;
+        }
+        .matchup-shell {
+            background: linear-gradient(180deg, rgba(17,24,39,0.92), rgba(15,23,42,0.92));
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 22px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 1rem;
+        }
+        .center-vs {
+            text-align: center;
+            color: #cbd5e1;
+            font-size: 0.9rem;
+            font-weight: 700;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            margin-top: 0.75rem;
+        }
+        .status-chip {
+            display: inline-block;
+            padding: 0.32rem 0.7rem;
+            border-radius: 999px;
+            background: rgba(139,92,246,0.12);
+            border: 1px solid rgba(139,92,246,0.22);
+            color: #e9d5ff;
+            font-size: 0.84rem;
+            font-weight: 600;
+        }
+        .team-title {
+            font-size: 1.35rem;
+            font-weight: 800;
+            margin-bottom: 0.15rem;
+        }
+        .team-sub {
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+        .summary-card {
+            background: rgba(15,23,42,0.75);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 18px;
+            padding: 0.9rem 1rem;
+            min-height: 112px;
+            margin-bottom: 0.35rem;
+        }
+        .summary-label {
+            color: #94a3b8;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.45rem;
+        }
+        .summary-value {
+            font-size: 1.55rem;
+            font-weight: 800;
+            line-height: 1.1;
+            color: #f8fafc;
+            margin-bottom: 0.3rem;
+        }
+        .summary-meta {
+            color: #cbd5e1;
+            font-size: 0.9rem;
+        }
+        .info-pill {
+            display: inline-block;
+            padding: 0.35rem 0.6rem;
+            border-radius: 999px;
+            background: rgba(15,23,42,.65);
+            border: 1px solid rgba(148,163,184,.18);
+            color: #cbd5e1;
+            font-size: 0.85rem;
+            margin-right: 0.35rem;
+            margin-bottom: 0.35rem;
+        }
+        .section-note {
+            color: #cbd5e1;
+            font-size: 0.92rem;
+            margin-bottom: 0.55rem;
+        }
+        .small-note {
+            color: #94a3b8;
+            font-size: 0.88rem;
+        }
+        .badge-row {
+            display: flex;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+            margin-top: 0.2rem;
+            margin-bottom: 0.15rem;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.22rem 0.48rem;
+            border-radius: 999px;
+            font-size: 0.74rem;
+            font-weight: 700;
+        }
+        .badge-starter {
+            background: rgba(139,92,246,0.12);
+            color: #f3e8ff;
+            border: 1px solid rgba(139,92,246,0.18);
+        }
+        .badge-bench {
+            background: rgba(148,163,184,0.10);
+            color: #cbd5e1;
+            border: 1px solid rgba(148,163,184,0.14);
+        }
+        .badge-good {
+            background: rgba(34,197,94,0.10);
+            color: #dcfce7;
+            border: 1px solid rgba(34,197,94,0.16);
+        }
+        .badge-bad {
+            background: rgba(239,68,68,0.10);
+            color: #fee2e2;
+            border: 1px solid rgba(239,68,68,0.16);
+        }
+        .badge-neutral {
+            background: rgba(148,163,184,0.10);
+            color: #e2e8f0;
+            border: 1px solid rgba(148,163,184,0.14);
+        }
+        .player-headline-card {
+            background: linear-gradient(180deg, rgba(76,29,149,0.36), rgba(15,23,42,0.92));
+            border: 1px solid rgba(167,139,250,0.22);
+            border-radius: 18px;
+            padding: 0.8rem 0.9rem;
+            margin-top: 0.3rem;
+            margin-bottom: 0.3rem;
+        }
+        .player-headline-label {
+            color: #c4b5fd;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.15rem;
+        }
+        .player-headline-value {
+            color: #f8fafc;
+            font-size: 1.85rem;
+            font-weight: 900;
+            line-height: 1;
+            margin-bottom: 0.35rem;
+        }
+        .player-headline-sub {
+            color: #e2e8f0;
+            font-size: 0.86rem;
+            line-height: 1.35;
+        }
+        .player-quick-grid {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 0.55rem;
+            margin-top: 0.9rem;
+            margin-bottom: 0.15rem;
+        }
+        .quick-stat {
+            background: rgba(15,23,42,0.74);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 16px;
+            padding: 0.72rem 0.78rem;
+            min-height: 84px;
+        }
+        .quick-stat-primary {
+            background: linear-gradient(180deg, rgba(76,29,149,0.58), rgba(30,41,59,0.9));
+            border: 1px solid rgba(167,139,250,0.28);
+        }
+        .quick-stat-up {
+            background: linear-gradient(180deg, rgba(21,128,61,0.38), rgba(30,41,59,0.9));
+            border: 1px solid rgba(74,222,128,0.24);
+        }
+        .quick-stat-down {
+            background: linear-gradient(180deg, rgba(153,27,27,0.34), rgba(30,41,59,0.9));
+            border: 1px solid rgba(248,113,113,0.22);
+        }
+        .quick-stat-label {
+            color: #94a3b8;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.32rem;
+        }
+        .quick-stat-value {
+            color: #f8fafc;
+            font-size: 1.28rem;
+            font-weight: 800;
+            line-height: 1.05;
+            margin-bottom: 0.28rem;
+        }
+        .quick-stat-meta {
+            color: #cbd5e1;
+            font-size: 0.77rem;
+            line-height: 1.25;
+        }
+        .detail-box {
+            background: rgba(15,23,42,0.74);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 18px;
+            padding: 0.82rem;
+            margin-bottom: 0.75rem;
+        }
+        .detail-box-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .detail-box-title {
+            color: #f8fafc;
+            font-size: 0.95rem;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+        }
+        .delta-pill-row {
+            display: flex;
+            gap: 0.35rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .delta-pill {
+            display: inline-block;
+            padding: 0.2rem 0.42rem;
+            border-radius: 999px;
+            font-size: 0.69rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .delta-up {
+            background: rgba(34,197,94,0.12);
+            color: #dcfce7;
+            border: 1px solid rgba(34,197,94,0.16);
+        }
+        .delta-down {
+            background: rgba(239,68,68,0.12);
+            color: #fee2e2;
+            border: 1px solid rgba(239,68,68,0.16);
+        }
+        .delta-flat {
+            background: rgba(148,163,184,0.10);
+            color: #e2e8f0;
+            border: 1px solid rgba(148,163,184,0.14);
+        }
+        .detail-mini-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.45rem;
+        }
+        .detail-mini {
+            background: rgba(2,6,23,0.35);
+            border: 1px solid rgba(148,163,184,.10);
+            border-radius: 14px;
+            padding: 0.52rem 0.58rem;
+        }
+        .detail-mini-highlight {
+            background: rgba(30,41,59,0.82);
+            border: 1px solid rgba(139,92,246,0.22);
+        }
+        .detail-mini-label {
+            color: #94a3b8;
+            font-size: 0.69rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.2rem;
+        }
+        .detail-mini-value {
+            color: #f8fafc;
+            font-size: 1rem;
+            font-weight: 800;
+            line-height: 1.05;
+        }
+        .hero-note {
+            color: #94a3b8;
+            font-size: 0.82rem;
+            margin-top: 0.55rem;
+            line-height: 1.35;
+        }
+        .matchup-chip {
+            display: inline-block;
+            padding: 0.28rem 0.54rem;
+            border-radius: 999px;
+            font-size: 0.73rem;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+        }
+        .matchup-good {
+            background: rgba(34,197,94,0.12);
+            color: #dcfce7;
+            border: 1px solid rgba(34,197,94,0.16);
+        }
+        .matchup-neutral {
+            background: rgba(148,163,184,0.10);
+            color: #e2e8f0;
+            border: 1px solid rgba(148,163,184,0.14);
+        }
+        .matchup-bad {
+            background: rgba(239,68,68,0.12);
+            color: #fee2e2;
+            border: 1px solid rgba(239,68,68,0.16);
+        }
+        .ranking-shell {
+            background: rgba(15,23,42,0.72);
+            border: 1px solid rgba(148,163,184,.12);
+            border-radius: 20px;
+            padding: 0.9rem 1rem 0.65rem 1rem;
+            margin-top: 0.85rem;
+            margin-bottom: 0.85rem;
+        }
+        .ranking-row {
+            display: grid;
+            grid-template-columns: 44px 1.6fr 0.9fr 0.9fr 0.9fr;
+            gap: 0.45rem;
+            align-items: center;
+            padding: 0.58rem 0.1rem;
+            border-bottom: 1px solid rgba(148,163,184,.08);
+        }
+        .ranking-row:last-child {
+            border-bottom: none;
+        }
+        .ranking-rank {
+            width: 32px;
+            height: 32px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(139,92,246,0.16);
+            color: #f3e8ff;
+            font-size: 0.78rem;
+            font-weight: 800;
+        }
+        .ranking-player {
+            color: #f8fafc;
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.15;
+        }
+        .ranking-sub {
+            color: #94a3b8;
+            font-size: 0.77rem;
+            margin-top: 0.08rem;
+        }
+        .ranking-stat {
+            text-align: center;
+        }
+        .ranking-stat-label {
+            color: #94a3b8;
+            font-size: 0.66rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.08rem;
+        }
+        .ranking-stat-value {
+            color: #f8fafc;
+            font-size: 0.92rem;
+            font-weight: 800;
+        }
+        .ranking-good .ranking-stat-value {
+            color: #86efac;
+        }
+        .ranking-bad .ranking-stat-value {
+            color: #fca5a5;
+        }
+        .focus-shell {
+            background: linear-gradient(180deg, rgba(17,24,39,0.94), rgba(15,23,42,0.94));
+            border: 1px solid rgba(148,163,184,.14);
+            border-radius: 22px;
+            padding: 1rem 1rem 0.75rem 1rem;
+            margin-top: 1rem;
+            margin-bottom: 0.75rem;
+        }
+        .focus-title {
+            color: #f8fafc;
+            font-size: 1.2rem;
+            font-weight: 800;
+            margin-bottom: 0.15rem;
+        }
+        .focus-sub {
+            color: #94a3b8;
+            font-size: 0.88rem;
+            margin-bottom: 0.5rem;
+        }
+        .micro-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.45rem;
+            margin-top: 0.65rem;
+            margin-bottom: 0.1rem;
+        }
+        .micro-stat {
+            background: rgba(2,6,23,0.34);
+            border: 1px solid rgba(148,163,184,.10);
+            border-radius: 14px;
+            padding: 0.52rem 0.58rem;
+        }
+        .micro-stat-emph {
+            background: linear-gradient(180deg, rgba(76,29,149,0.46), rgba(30,41,59,0.9));
+            border: 1px solid rgba(167,139,250,0.24);
+        }
+        .micro-stat-good {
+            background: linear-gradient(180deg, rgba(21,128,61,0.34), rgba(30,41,59,0.9));
+            border: 1px solid rgba(74,222,128,0.22);
+        }
+        .micro-stat-bad {
+            background: linear-gradient(180deg, rgba(153,27,27,0.34), rgba(30,41,59,0.9));
+            border: 1px solid rgba(248,113,113,0.22);
+        }
+        .micro-label {
+            color: #94a3b8;
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 0.18rem;
+        }
+        .micro-value {
+            color: #f8fafc;
+            font-size: 1.02rem;
+            font-weight: 800;
+            line-height: 1.05;
+            margin-bottom: 0.15rem;
+        }
+        .micro-meta {
+            color: #cbd5e1;
+            font-size: 0.73rem;
+            line-height: 1.2;
+        }
+        @media (max-width: 1200px) {
+            .player-quick-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+        @media (max-width: 760px) {
+            .ranking-row {
+                grid-template-columns: 38px 1.5fr 0.8fr 0.8fr;
+            }
+            .ranking-row .ranking-stat:last-child {
+                display: none;
+            }
+            .micro-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .player-quick-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .detail-mini-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_games_for_date(target_date: date) -> pd.DataFrame:
+    response = run_api_call_with_retry(
+        lambda: live_scoreboard.ScoreBoard(),
+        endpoint_name="LiveScoreBoard",
+    )
+    payload = response.get_dict()
+    games_list = payload.get("scoreboard", {}).get("games", [])
+    if not games_list:
+        return pd.DataFrame()
+
+    filtered_games = []
+    for game in games_list:
+        game_dt_brasilia = get_game_datetime_brasilia(game)
+        if game_dt_brasilia is None or game_dt_brasilia.date() == target_date:
+            filtered_games.append(game)
+
+    if filtered_games:
+        games_list = filtered_games
 
     rows = []
-    for _, row in game_header.iterrows():
-        home_team_id = int(row["HOME_TEAM_ID"])
-        away_team_id = int(row["VISITOR_TEAM_ID"])
+    for game in games_list:
+        home_team = game.get("homeTeam", {})
+        away_team = game.get("awayTeam", {})
 
-        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", str(home_team_id))
-        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", str(away_team_id))
-        game_status_text = row.get("GAME_STATUS_TEXT", "Sem status")
+        home_team_id = int(home_team.get("teamId", 0) or 0)
+        away_team_id = int(away_team.get("teamId", 0) or 0)
+        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name") or f"{home_team.get('teamCity', '')} {home_team.get('teamName', '')}".strip()
+        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name") or f"{away_team.get('teamCity', '')} {away_team.get('teamName', '')}".strip()
+        game_status_text = game.get("gameStatusText", "Sem status")
 
         rows.append(
             {
-                "GAME_ID": str(row["GAME_ID"]),
+                "GAME_ID": str(game.get("gameId", "")),
                 "HOME_TEAM_ID": home_team_id,
                 "VISITOR_TEAM_ID": away_team_id,
                 "GAME_STATUS_TEXT": game_status_text,
@@ -405,7 +1160,18 @@ def get_games_for_date(target_date: date) -> pd.DataFrame:
             }
         )
 
-    return pd.DataFrame(rows)
+    games = pd.DataFrame(rows)
+    return games[
+        [
+            "GAME_ID",
+            "HOME_TEAM_ID",
+            "VISITOR_TEAM_ID",
+            "GAME_STATUS_TEXT",
+            "home_team_name",
+            "away_team_name",
+            "label",
+        ]
+    ].copy()
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -1264,7 +2030,7 @@ def style_hit_rate(val) -> str:
     if ratio <= 0.4:
         return "background-color: rgba(239,68,68,0.10); color: #fee2e2; font-weight: 700;"
     return "background-color: rgba(148,163,184,0.10); color: #e2e8f0; font-weight: 600;"
-def style_table(df: pd.DataFrame, quick_view: bool) -> Styler:
+def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
     text_cols = {
         "Jogador",
         "Pos",
@@ -2404,29 +3170,6 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
         st.info("Injury report ainda não integrado nesta execução.")
         return
 
-    report_url = ""
-    if "INJ_REPORT_URL" in team_df.columns:
-        valid_urls = team_df["INJ_REPORT_URL"].dropna().astype(str)
-        valid_urls = valid_urls[valid_urls.str.strip() != ""]
-        if not valid_urls.empty:
-            report_url = valid_urls.iloc[0]
-
-    report_meta = parse_injury_report_timestamp_from_url(report_url)
-
-    top_cols = st.columns([1.4, 1.2, 1.4])
-    with top_cols[0]:
-        st.caption(f"PDF oficial: {report_meta['report_label_et']}")
-    with top_cols[1]:
-        st.caption(f"Brasília: {report_meta['report_label_brt']}")
-    with top_cols[2]:
-        if report_url:
-            st.caption("Fonte oficial carregada")
-        else:
-            st.caption("Fonte oficial não identificada")
-
-    if "INJ_MATCHUP_FOUND" in team_df.columns and not bool(team_df["INJ_MATCHUP_FOUND"].any()):
-        st.warning("Não encontrei linhas do injury report oficial para este matchup. O app não deve assumir disponibilidade oficial aqui.")
-
     report_df = team_df[["PLAYER", "INJ_STATUS", "INJ_REASON"]].copy()
     report_df = report_df.rename(
         columns={
@@ -2437,6 +3180,9 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     )
 
     st.dataframe(report_df, use_container_width=True)
+
+    flagged = team_df[team_df["INJ_STATUS"] != "Available"].copy()
+    st.caption(f"Jogadores com status diferente de Available neste time: {len(flagged)}")
 
     unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
     if not unavailable.empty:
