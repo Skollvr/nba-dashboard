@@ -6,6 +6,7 @@ import time
 import unicodedata
 from typing import Optional
 from zoneinfo import ZoneInfo
+from pandas.io.formats.style import Styler
 
 import numpy as np
 import pandas as pd
@@ -14,7 +15,7 @@ from pypdf import PdfReader
 import requests
 import streamlit as st
 
-from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
+from nba_api.stats.endpoints import scoreboardv2
 from nba_api.stats.endpoints import (
     commonteamroster,
     leaguedashplayerstats,
@@ -308,6 +309,33 @@ def clean_injury_pdf_line(line: str) -> str:
     line = re.sub(r"Page\s+\d+\s+of\s+\d+$", "", line).strip()
     return line
 
+def parse_report_dt_from_url(pdf_url: str) -> datetime | None:
+    match = re.search(
+        r"Injury-Report_(\d{4}-\d{2}-\d{2})_(\d{1,2})_(\d{2})(AM|PM)\.pdf",
+        str(pdf_url),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    date_part = match.group(1)
+    hour_part = int(match.group(2))
+    minute_part = int(match.group(3))
+    ampm_part = match.group(4).upper()
+
+    if ampm_part == "AM":
+        hour_24 = 0 if hour_part == 12 else hour_part
+    else:
+        hour_24 = 12 if hour_part == 12 else hour_part + 12
+
+    return datetime.strptime(date_part, "%Y-%m-%d").replace(
+        hour=hour_24,
+        minute=minute_part,
+        second=0,
+        microsecond=0,
+        tzinfo=EASTERN_TIMEZONE,
+    )
+    
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
     response = requests.get(INJURY_REPORT_PAGE, timeout=30)
@@ -320,7 +348,18 @@ def fetch_latest_injury_report_pdf_url() -> str:
     )
     if not pdf_urls:
         return ""
-    return pdf_urls[-1]
+
+    dated_urls = []
+    for url in pdf_urls:
+        dt = parse_report_dt_from_url(url)
+        if dt is not None:
+            dated_urls.append((dt, url))
+
+    if dated_urls:
+        dated_urls.sort(key=lambda x: x[0], reverse=True)
+        return dated_urls[0][1]
+
+    return pdf_urls[0]
 
 
 def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
@@ -1117,40 +1156,44 @@ def inject_css() -> None:
     )
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def get_games_for_date(target_date: date) -> pd.DataFrame:
     response = run_api_call_with_retry(
-        lambda: live_scoreboard.ScoreBoard(),
-        endpoint_name="LiveScoreBoard",
+        lambda: scoreboardv2.ScoreboardV2(
+            game_date=target_date.strftime("%Y-%m-%d"),
+            day_offset="0",
+            league_id="00",
+            timeout=45,
+        ),
+        endpoint_name="ScoreboardV2",
     )
-    payload = response.get_dict()
-    games_list = payload.get("scoreboard", {}).get("games", [])
-    if not games_list:
-        return pd.DataFrame()
 
-    filtered_games = []
-    for game in games_list:
-        game_dt_brasilia = get_game_datetime_brasilia(game)
-        if game_dt_brasilia is None or game_dt_brasilia.date() == target_date:
-            filtered_games.append(game)
-
-    if filtered_games:
-        games_list = filtered_games
+    game_header = response.game_header.get_data_frame()
+    if game_header.empty:
+        return pd.DataFrame(
+            columns=[
+                "GAME_ID",
+                "HOME_TEAM_ID",
+                "VISITOR_TEAM_ID",
+                "GAME_STATUS_TEXT",
+                "home_team_name",
+                "away_team_name",
+                "label",
+            ]
+        )
 
     rows = []
-    for game in games_list:
-        home_team = game.get("homeTeam", {})
-        away_team = game.get("awayTeam", {})
+    for _, row in game_header.iterrows():
+        home_team_id = int(row["HOME_TEAM_ID"])
+        away_team_id = int(row["VISITOR_TEAM_ID"])
 
-        home_team_id = int(home_team.get("teamId", 0) or 0)
-        away_team_id = int(away_team.get("teamId", 0) or 0)
-        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name") or f"{home_team.get('teamCity', '')} {home_team.get('teamName', '')}".strip()
-        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name") or f"{away_team.get('teamCity', '')} {away_team.get('teamName', '')}".strip()
-        game_status_text = game.get("gameStatusText", "Sem status")
+        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", str(home_team_id))
+        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", str(away_team_id))
+        game_status_text = row.get("GAME_STATUS_TEXT", "Sem status")
 
         rows.append(
             {
-                "GAME_ID": str(game.get("gameId", "")),
+                "GAME_ID": str(row["GAME_ID"]),
                 "HOME_TEAM_ID": home_team_id,
                 "VISITOR_TEAM_ID": away_team_id,
                 "GAME_STATUS_TEXT": game_status_text,
@@ -1160,19 +1203,7 @@ def get_games_for_date(target_date: date) -> pd.DataFrame:
             }
         )
 
-    games = pd.DataFrame(rows)
-    return games[
-        [
-            "GAME_ID",
-            "HOME_TEAM_ID",
-            "VISITOR_TEAM_ID",
-            "GAME_STATUS_TEXT",
-            "home_team_name",
-            "away_team_name",
-            "label",
-        ]
-    ].copy()
-
+    return pd.DataFrame(rows)
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
