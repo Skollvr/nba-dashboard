@@ -310,6 +310,54 @@ def clean_injury_pdf_line(line: str) -> str:
     line = re.sub(r"Page\s+\d+\s+of\s+\d+$", "", line).strip()
     return line
 
+def parse_injury_report_timestamp_from_url(pdf_url: str) -> dict:
+    if not pdf_url:
+        return {
+            "report_label_et": "—",
+            "report_label_brt": "—",
+            "report_dt_et": None,
+            "report_dt_brt": None,
+        }
+
+    match = re.search(
+        r"Injury-Report_(\d{4}-\d{2}-\d{2})_(\d{1,2})_(\d{2})(AM|PM)\.pdf",
+        str(pdf_url),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return {
+            "report_label_et": "—",
+            "report_label_brt": "—",
+            "report_dt_et": None,
+            "report_dt_brt": None,
+        }
+
+    date_part = match.group(1)
+    hour_part = int(match.group(2))
+    minute_part = int(match.group(3))
+    ampm_part = match.group(4).upper()
+
+    if ampm_part == "AM":
+        hour_24 = 0 if hour_part == 12 else hour_part
+    else:
+        hour_24 = 12 if hour_part == 12 else hour_part + 12
+
+    dt_et = datetime.strptime(date_part, "%Y-%m-%d").replace(
+        hour=hour_24,
+        minute=minute_part,
+        second=0,
+        microsecond=0,
+        tzinfo=EASTERN_TIMEZONE,
+    )
+    dt_brt = dt_et.astimezone(APP_TIMEZONE)
+
+    return {
+        "report_label_et": dt_et.strftime("%d/%m %I:%M %p ET"),
+        "report_label_brt": dt_brt.strftime("%d/%m %H:%M BRT"),
+        "report_dt_et": dt_et,
+        "report_dt_brt": dt_brt,
+    }
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
     response = requests.get(INJURY_REPORT_PAGE, timeout=30)
@@ -3169,6 +3217,26 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
         st.info("Injury report ainda não integrado nesta execução.")
         return
 
+    report_url = ""
+    if "INJ_REPORT_URL" in team_df.columns:
+        valid_urls = team_df["INJ_REPORT_URL"].dropna().astype(str)
+        valid_urls = valid_urls[valid_urls.str.strip() != ""]
+        if not valid_urls.empty:
+            report_url = valid_urls.iloc[0]
+
+    report_meta = parse_injury_report_timestamp_from_url(report_url)
+
+    top_cols = st.columns([1.4, 1.2, 1.4])
+    with top_cols[0]:
+        st.caption(f"PDF oficial: {report_meta['report_label_et']}")
+    with top_cols[1]:
+        st.caption(f"Brasília: {report_meta['report_label_brt']}")
+    with top_cols[2]:
+        if report_url:
+            st.caption("Fonte oficial carregada")
+        else:
+            st.caption("Fonte oficial não identificada")
+
     if "INJ_MATCHUP_FOUND" in team_df.columns and not bool(team_df["INJ_MATCHUP_FOUND"].any()):
         st.warning("Não encontrei linhas do injury report oficial para este matchup. O app não deve assumir disponibilidade oficial aqui.")
 
@@ -3182,15 +3250,6 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     )
 
     st.dataframe(report_df, use_container_width=True)
-
-    unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
-    if not unavailable.empty:
-        st.warning(
-            f"{len(unavailable)} jogador(es) marcados como indisponíveis e que devem sair da leitura da provável escalação."
-        )
-
-    flagged = team_df[team_df["INJ_STATUS"] != "Available"].copy()
-    st.caption(f"Jogadores com status diferente de Available neste time: {len(flagged)}")
 
     unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
     if not unavailable.empty:
