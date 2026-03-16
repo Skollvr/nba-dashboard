@@ -3235,7 +3235,7 @@ def main() -> None:
     if not valid_urls.empty:
         injury_report_url = valid_urls.iloc[0]
 
-injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
+    injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
 
     game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
 
