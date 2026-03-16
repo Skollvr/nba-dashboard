@@ -3059,7 +3059,7 @@ def main() -> None:
 
     odds_df = pd.DataFrame()
     if api_key_available:
-        try:
+    try:
             odds_events = fetch_nba_odds_events()
             selected_odds_event = find_matching_odds_event(
                 odds_events,
@@ -3070,50 +3070,41 @@ def main() -> None:
         except Exception:
             odds_df = pd.DataFrame()
 
-    away_df = merge_betmgm_odds(away_df, odds_df)
+away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
-try:
-    injury_df = fetch_latest_injury_report_df()
-except Exception:
-    injury_df = pd.DataFrame()
+    try:
+        injury_df = fetch_latest_injury_report_df()
+    except Exception:
+        injury_df = pd.DataFrame()
 
-game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
+    game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
 
-debug_ir = injury_df[
-    injury_df["MATCHUP"].fillna("").astype(str).str.upper().str.replace(" ", "", regex=False)
-    == game_matchup.upper().replace(" ", "")
-].copy()
+    away_df = merge_injury_report(
+        away_df,
+        injury_df,
+        selected_game["away_team_name"],
+        int(selected_game["VISITOR_TEAM_ID"]),
+        game_matchup=game_matchup,
+    )
 
-st.write(
-    debug_ir[["TEAM_NAME_IR", "PLAYER_NAME_IR", "PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON"]]
-)
+    home_df = merge_injury_report(
+        home_df,
+        injury_df,
+        selected_game["home_team_name"],
+        int(selected_game["HOME_TEAM_ID"]),
+        game_matchup=game_matchup,
+    )
 
-away_df = merge_injury_report(
-    away_df,
-    injury_df,
-    selected_game["away_team_name"],
-    int(selected_game["VISITOR_TEAM_ID"]),
-    game_matchup=game_matchup,
-)
-
-home_df = merge_injury_report(
-    home_df,
-    injury_df,
-    selected_game["home_team_name"],
-    int(selected_game["HOME_TEAM_ID"]),
-    game_matchup=game_matchup,
-)
-
-render_matchup_header(selected_game)
-render_summary_cards(
+    render_matchup_header(selected_game)
+    render_summary_cards(
         away_df=away_df,
         home_df=home_df,
         min_games=min_games,
         min_minutes=min_minutes,
         role_filter=role_filter,
     )
-render_game_rankings(
+    render_game_rankings(
         away_df=away_df,
         home_df=home_df,
         min_games=min_games,
@@ -3124,9 +3115,9 @@ render_game_rankings(
         use_market_line=use_market_line,
     )
 
-tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
+    tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
 
-with tab1:
+    with tab1:
         render_team_section_v2(
             team_name=selected_game["away_team_name"],
             team_df=away_df,
@@ -3143,7 +3134,7 @@ with tab1:
             cards_per_row=cards_per_row,
         )
 
-with tab2:
+    with tab2:
         render_team_section_v2(
             team_name=selected_game["home_team_name"],
             team_df=home_df,
@@ -3160,7 +3151,7 @@ with tab2:
             cards_per_row=cards_per_row,
         )
 
-st.markdown(
+    st.markdown(
         """
         <div class="small-note">
         Nota: "Titular provável" neste MVP significa os 5 jogadores com mais minutos por jogo na temporada.
