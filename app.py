@@ -335,7 +335,45 @@ def parse_report_dt_from_url(pdf_url: str) -> datetime | None:
         microsecond=0,
         tzinfo=EASTERN_TIMEZONE,
     )
-    
+
+def parse_injury_report_timestamp_from_url(pdf_url: str) -> dict:
+    if not pdf_url:
+        return {
+            "report_label_et": "—",
+            "report_label_brt": "—",
+            "report_dt_et": None,
+            "report_dt_brt": None,
+        }
+
+    dt_et = parse_report_dt_from_url(pdf_url)
+    if dt_et is None:
+        return {
+            "report_label_et": "—",
+            "report_label_brt": "—",
+            "report_dt_et": None,
+            "report_dt_brt": None,
+        }
+
+    dt_brt = dt_et.astimezone(APP_TIMEZONE)
+
+    return {
+        "report_label_et": dt_et.strftime("%d/%m %I:%M %p ET"),
+        "report_label_brt": dt_brt.strftime("%d/%m %H:%M BRT"),
+        "report_dt_et": dt_et,
+        "report_dt_brt": dt_brt,
+    }
+
+
+TEAM_NAME_LOOKUP_NORM = {
+    normalize_text(team["full_name"]): team["full_name"]
+    for team in teams.get_teams()
+}
+
+
+def resolve_team_line(line: str) -> str:
+    clean_line = str(line or "").replace("NOT YET SUBMITTED", "").strip()
+    return TEAM_NAME_LOOKUP_NORM.get(normalize_text(clean_line), "")
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
     response = requests.get(INJURY_REPORT_PAGE, timeout=30)
@@ -409,6 +447,13 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
             current_matchup = game_match.group("matchup")
             line = game_match.group("rest").strip()
 
+        resolved_team = resolve_team_line(line)
+        if resolved_team:
+            current_team = resolved_team
+            if "NOT YET SUBMITTED" in line:
+                current_row = None
+            continue
+
         if "NOT YET SUBMITTED" in line:
             current_row = None
             continue
@@ -461,10 +506,11 @@ def merge_injury_report(
         return team_df
 
     enriched = team_df.copy()
-    enriched["INJ_STATUS"] = "Available"
+    enriched["INJ_STATUS"] = "—"
     enriched["INJ_REASON"] = ""
     enriched["INJ_REPORT_URL"] = ""
     enriched["IS_UNAVAILABLE"] = False
+    enriched["INJ_MATCHUP_FOUND"] = False
 
     if injury_df.empty:
         return enriched
@@ -490,7 +536,6 @@ def merge_injury_report(
 
     work_ir = work_ir[work_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
 
-    # fallback extra: recalcula a chave pelo nome cru, caso o PDF venha estranho
     if work_ir.empty and "PLAYER_NAME_IR" in injury_df.columns:
         fallback_ir = injury_df.copy()
         fallback_ir["MATCHUP_NORM"] = (
@@ -511,6 +556,9 @@ def merge_injury_report(
         return enriched
 
     work_ir = work_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+
+    enriched["INJ_STATUS"] = "Available"
+    enriched["INJ_MATCHUP_FOUND"] = True
 
     merged = enriched.merge(
         work_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
