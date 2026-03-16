@@ -1471,6 +1471,78 @@ def get_position_opponent_profile(season: str, opponent_team_id: int, position_g
         "MATCHUP_DIFF": matchup_diff,
         "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
     }
+
+    def weighted_profile(df: pd.DataFrame) -> dict:
+        if df.empty or "GP" not in df.columns:
+            return {
+                "PTS": 0.0,
+                "REB": 0.0,
+                "AST": 0.0,
+                "FG3M": 0.0,
+                "FGA": 0.0,
+                "FG3A": 0.0,
+                "PRA": 0.0,
+                "GP": 0.0,
+            }
+
+        work_df = df.copy()
+        for col in ["GP", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
+            work_df[col] = pd.to_numeric(work_df[col], errors="coerce").fillna(0.0)
+
+        total_gp = float(work_df["GP"].sum())
+        if total_gp <= 0:
+            return {
+                "PTS": 0.0,
+                "REB": 0.0,
+                "AST": 0.0,
+                "FG3M": 0.0,
+                "FGA": 0.0,
+                "FG3A": 0.0,
+                "PRA": 0.0,
+                "GP": 0.0,
+            }
+
+        pts = float((work_df["PTS"] * work_df["GP"]).sum() / total_gp)
+        reb = float((work_df["REB"] * work_df["GP"]).sum() / total_gp)
+        ast = float((work_df["AST"] * work_df["GP"]).sum() / total_gp)
+        fg3m = float((work_df["FG3M"] * work_df["GP"]).sum() / total_gp)
+        fga = float((work_df["FGA"] * work_df["GP"]).sum() / total_gp)
+        fg3a = float((work_df["FG3A"] * work_df["GP"]).sum() / total_gp)
+
+        return {
+            "PTS": pts,
+            "REB": reb,
+            "AST": ast,
+            "FG3M": fg3m,
+            "FGA": fga,
+            "FG3A": fg3a,
+            "PRA": pts + reb + ast,
+            "GP": total_gp,
+        }
+
+    opp_profile = weighted_profile(fetch(position_group, opponent_team_id))
+    league_profile = weighted_profile(fetch(position_group, 0))
+    matchup_diff = opp_profile["PRA"] - league_profile["PRA"]
+
+    return {
+        "POSITION_GROUP": position_group,
+        "OPP_PTS_ALLOWED": opp_profile["PTS"],
+        "OPP_REB_ALLOWED": opp_profile["REB"],
+        "OPP_AST_ALLOWED": opp_profile["AST"],
+        "OPP_PRA_ALLOWED": opp_profile["PRA"],
+        "OPP_3PM_ALLOWED": opp_profile["FG3M"],
+        "OPP_FGA_ALLOWED": opp_profile["FGA"],
+        "OPP_3PA_ALLOWED": opp_profile["FG3A"],
+        "LEAGUE_PTS_BASELINE": league_profile["PTS"],
+        "LEAGUE_REB_BASELINE": league_profile["REB"],
+        "LEAGUE_AST_BASELINE": league_profile["AST"],
+        "LEAGUE_3PM_BASELINE": league_profile["FG3M"],
+        "LEAGUE_FGA_BASELINE": league_profile["FGA"],
+        "LEAGUE_3PA_BASELINE": league_profile["FG3A"],
+        "LEAGUE_PRA_BASELINE": league_profile["PRA"],
+        "MATCHUP_DIFF": matchup_diff,
+        "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
+    }
     def weighted_profile(df: pd.DataFrame) -> dict:
         if df.empty or "GP" not in df.columns:
             return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
@@ -3156,6 +3228,17 @@ def main() -> None:
     except Exception:
         injury_df = pd.DataFrame()
 
+    injury_report_url = ""
+    if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
+        valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
+        valid_urls = valid_urls[valid_urls.str.strip() != ""]
+        if not valid_urls.empty:
+        injury_report_url = valid_urls.iloc[0]
+
+injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url) 
+
+injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
+
     game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
 
     away_df = merge_injury_report(
@@ -3175,6 +3258,9 @@ def main() -> None:
     )
 
     render_matchup_header(selected_game)
+    st.caption(
+    f"Injury report oficial carregado: {injury_report_meta['report_label_et']} • {injury_report_meta['report_label_brt']}"
+)
     render_summary_cards(
         away_df=away_df,
         home_df=home_df,
