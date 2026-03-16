@@ -3223,7 +3223,7 @@ def main() -> None:
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
-        try:
+    try:
         injury_df = fetch_latest_injury_report_df()
     except Exception:
         injury_df = pd.DataFrame()
@@ -3254,6 +3254,8 @@ def main() -> None:
         int(selected_game["HOME_TEAM_ID"]),
         game_matchup=game_matchup,
     )
+
+    render_matchup_header(selected_game)
 
     render_matchup_header(selected_game)
     st.caption(
