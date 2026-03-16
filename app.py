@@ -3223,7 +3223,7 @@ def main() -> None:
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
-    try:
+        try:
         injury_df = fetch_latest_injury_report_df()
     except Exception:
         injury_df = pd.DataFrame()
@@ -3232,8 +3232,8 @@ def main() -> None:
     if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
         valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
         valid_urls = valid_urls[valid_urls.str.strip() != ""]
-    if not valid_urls.empty:
-        injury_report_url = valid_urls.iloc[0]
+        if not valid_urls.empty:
+            injury_report_url = valid_urls.iloc[0]
 
     injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
 
