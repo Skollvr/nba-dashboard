@@ -1,0 +1,363 @@
+--- a/app.py
++++ b/app.py
+@@
+-from nba_api.live.nba.endpoints import scoreboard as live_scoreboard
++from nba_api.stats.endpoints import scoreboardv2
+@@
+ import pandas as pd
++from pandas.io.formats.style import Styler
+@@
+ def clean_injury_pdf_line(line: str) -> str:
+     line = str(line or "").strip()
+     line = re.sub(r"Injury Report:.*$", "", line).strip()
+     line = re.sub(r"Page\s+\d+\s+of\s+\d+$", "", line).strip()
+     return line
++
++
++def parse_report_dt_from_url(pdf_url: str) -> datetime | None:
++    match = re.search(
++        r"Injury-Report_(\d{4}-\d{2}-\d{2})_(\d{1,2})_(\d{2})(AM|PM)\.pdf",
++        str(pdf_url),
++        flags=re.IGNORECASE,
++    )
++    if not match:
++        return None
++
++    date_part = match.group(1)
++    hour_part = int(match.group(2))
++    minute_part = int(match.group(3))
++    ampm_part = match.group(4).upper()
++
++    if ampm_part == "AM":
++        hour_24 = 0 if hour_part == 12 else hour_part
++    else:
++        hour_24 = 12 if hour_part == 12 else hour_part + 12
++
++    return datetime.strptime(date_part, "%Y-%m-%d").replace(
++        hour=hour_24,
++        minute=minute_part,
++        second=0,
++        microsecond=0,
++        tzinfo=EASTERN_TIMEZONE,
++    )
++
++
++def parse_injury_report_timestamp_from_url(pdf_url: str) -> dict:
++    if not pdf_url:
++        return {
++            "report_label_et": "—",
++            "report_label_brt": "—",
++            "report_dt_et": None,
++            "report_dt_brt": None,
++        }
++
++    dt_et = parse_report_dt_from_url(pdf_url)
++    if dt_et is None:
++        return {
++            "report_label_et": "—",
++            "report_label_brt": "—",
++            "report_dt_et": None,
++            "report_dt_brt": None,
++        }
++
++    dt_brt = dt_et.astimezone(APP_TIMEZONE)
++    return {
++        "report_label_et": dt_et.strftime("%d/%m %I:%M %p ET"),
++        "report_label_brt": dt_brt.strftime("%d/%m %H:%M BRT"),
++        "report_dt_et": dt_et,
++        "report_dt_brt": dt_brt,
++    }
++
++
++TEAM_NAME_LOOKUP_NORM = {
++    normalize_text(team["full_name"]): team["full_name"]
++    for team in teams.get_teams()
++}
++
++
++def resolve_team_line(line: str) -> str:
++    clean_line = str(line or "").replace("NOT YET SUBMITTED", "").strip()
++    return TEAM_NAME_LOOKUP_NORM.get(normalize_text(clean_line), "")
+@@
+ @st.cache_data(ttl=300, show_spinner=False)
+ def fetch_latest_injury_report_pdf_url() -> str:
+     response = requests.get(INJURY_REPORT_PAGE, timeout=30)
+     response.raise_for_status()
+     html = response.text
+ 
+     pdf_urls = re.findall(
+         r'https://ak-static\.cms\.nba\.com/referee/injury/Injury-Report_[^"]+\.pdf',
+         html,
+     )
+     if not pdf_urls:
+         return ""
+-    return pdf_urls[-1]
++
++    dated_urls = []
++    for url in pdf_urls:
++        dt = parse_report_dt_from_url(url)
++        if dt is not None:
++            dated_urls.append((dt, url))
++
++    if dated_urls:
++        dated_urls.sort(key=lambda x: x[0], reverse=True)
++        return dated_urls[0][1]
++
++    return pdf_urls[0]
+@@
+ @st.cache_data(ttl=300, show_spinner=False)
+ def fetch_latest_injury_report_df() -> pd.DataFrame:
+     pdf_url = fetch_latest_injury_report_pdf_url()
+     if not pdf_url:
+         return pd.DataFrame()
+@@
+     for raw_line in lines:
+         line = raw_line.strip()
+         if not line:
+             continue
+@@
+         game_match = GAME_PREFIX_RE.match(line)
+         if game_match:
+             if game_match.group("game_date"):
+                 current_game_date = game_match.group("game_date")
+             current_game_time = game_match.group("game_time")
+             current_matchup = game_match.group("matchup")
+             line = game_match.group("rest").strip()
+ 
++        resolved_team = resolve_team_line(line)
++        if resolved_team:
++            current_team = resolved_team
++            if "NOT YET SUBMITTED" in line:
++                current_row = None
++            continue
++
+         if "NOT YET SUBMITTED" in line:
+             current_row = None
+             continue
+@@
+ def merge_injury_report(
+     team_df: pd.DataFrame,
+     injury_df: pd.DataFrame,
+     team_name: str,
+     team_id: int,
+     game_matchup: str = "",
+ ) -> pd.DataFrame:
+     if team_df.empty:
+         return team_df
+ 
+     enriched = team_df.copy()
+-    enriched["INJ_STATUS"] = "Available"
++    enriched["INJ_STATUS"] = "—"
+     enriched["INJ_REASON"] = ""
+     enriched["INJ_REPORT_URL"] = ""
+     enriched["IS_UNAVAILABLE"] = False
++    enriched["INJ_MATCHUP_FOUND"] = False
+ 
+     if injury_df.empty:
+         return enriched
+ 
+     target_matchup = str(game_matchup or "").upper().replace(" ", "")
+@@
+     if work_ir.empty:
+         return enriched
+ 
+     work_ir = work_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+ 
++    enriched["INJ_STATUS"] = "Available"
++    enriched["INJ_MATCHUP_FOUND"] = True
++
+     merged = enriched.merge(
+         work_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
+         left_on="PLAYER_KEY",
+         right_on="PLAYER_KEY_IR",
+         how="left",
+@@
+-@st.cache_data(ttl=1800, show_spinner=False)
++@st.cache_data(ttl=300, show_spinner=False)
+ def get_games_for_date(target_date: date) -> pd.DataFrame:
+     response = run_api_call_with_retry(
+-        lambda: live_scoreboard.ScoreBoard(),
+-        endpoint_name="LiveScoreBoard",
++        lambda: scoreboardv2.ScoreboardV2(
++            game_date=target_date.strftime("%Y-%m-%d"),
++            day_offset="0",
++            league_id="00",
++            timeout=45,
++        ),
++        endpoint_name="ScoreboardV2",
+     )
+-    payload = response.get_dict()
+-    games_list = payload.get("scoreboard", {}).get("games", [])
+-    if not games_list:
+-        return pd.DataFrame()
+-
+-    filtered_games = []
+-    for game in games_list:
+-        game_utc = game.get("gameEt")
+-        game_dt_local = None
+-        if game_utc:
+-            try:
+-                game_dt_local = datetime.fromisoformat(game_utc.replace("Z", "+00:00")).astimezone(APP_TIMEZONE)
+-            except ValueError:
+-                game_dt_local = None
+-
+-        if game_dt_local and game_dt_local.date() != target_date:
+-            continue
+-
+-        away_team_id = int(game["awayTeam"]["teamId"])
+-        home_team_id = int(game["homeTeam"]["teamId"])
+-        away_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", game["awayTeam"]["teamName"])
+-        home_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", game["homeTeam"]["teamName"])
+-        status_text = game.get("gameStatusText", "Sem status")
+-
+-        filtered_games.append(
+-            {
+-                "GAME_ID": str(game["gameId"]),
+-                "HOME_TEAM_ID": home_team_id,
+-                "VISITOR_TEAM_ID": away_team_id,
+-                "GAME_STATUS_TEXT": status_text,
+-                "home_team_name": home_name,
+-                "away_team_name": away_name,
+-                "label": f"{away_name} @ {home_name} • {status_text}",
+-            }
+-        )
+-
+-    return pd.DataFrame(filtered_games)
++    game_header = response.game_header.get_data_frame()
++    if game_header.empty:
++        return pd.DataFrame(
++            columns=[
++                "GAME_ID",
++                "HOME_TEAM_ID",
++                "VISITOR_TEAM_ID",
++                "GAME_STATUS_TEXT",
++                "home_team_name",
++                "away_team_name",
++                "label",
++            ]
++        )
++
++    rows = []
++    for _, row in game_header.iterrows():
++        home_team_id = int(row["HOME_TEAM_ID"])
++        away_team_id = int(row["VISITOR_TEAM_ID"])
++
++        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", str(home_team_id))
++        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", str(away_team_id))
++        game_status_text = row.get("GAME_STATUS_TEXT", "Sem status")
++
++        rows.append(
++            {
++                "GAME_ID": str(row["GAME_ID"]),
++                "HOME_TEAM_ID": home_team_id,
++                "VISITOR_TEAM_ID": away_team_id,
++                "GAME_STATUS_TEXT": game_status_text,
++                "home_team_name": home_team_name,
++                "away_team_name": away_team_name,
++                "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
++            }
++        )
++
++    return pd.DataFrame(rows)
+@@
+-def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
++def style_table(df: pd.DataFrame, quick_view: bool) -> Styler:
+     text_cols = {
+         "Jogador",
+         "Pos",
+         "Papel",
+         "Trend",
+         "Matchup",
+         "Hit PRA",
+         "Hit PTS",
+         "Hit REB",
+         "Hit AST",
+         "Hit 3PM",
+         "Hit FGA",
+         "Hit 3PA",
+         "Oscilação",
+         "Sinal",
++        "Status",
++        "Status oficial",
++        "Motivo",
++        "Última atualização",
+     }
+ 
+     format_map = {}
+     for col in df.columns:
+-        if col == "GP":
+-            format_map[col] = "{:.0f}"
+-        elif col not in text_cols:
+-            format_map[col] = "{:.1f}"
++        if col in text_cols:
++            continue
++        if pd.api.types.is_numeric_dtype(df[col]):
++            format_map[col] = "{:.0f}" if col == "GP" else "{:.1f}"
+@@
+-    if hit_cols:
+-        styler = styler.map(style_hit, subset=hit_cols)
++    if hit_cols:
++        styler = styler.map(style_hit_rate, subset=hit_cols)
+@@
+     center_cols = [
+         c for c in [
+             "Papel",
+             "GP",
+             "MIN",
+             "Trend",
+             "Matchup",
+             "Oscilação",
+             "Sinal",
+             "Hit PRA",
+             "Hit PTS",
+             "Hit REB",
+             "Hit AST",
+             "Hit 3PM",
+             "Hit FGA",
+             "Hit 3PA",
++            "Status",
+         ] if c in df.columns
+     ]
+@@
+ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
+     st.markdown(
+         '<div class="section-note">Status oficial do injury report da NBA para o elenco do time.</div>',
+         unsafe_allow_html=True,
+     )
+@@
+-    report_df = team_df[["PLAYER", "INJ_STATUS", "INJ_REASON"]].copy()
++    report_url = ""
++    if "INJ_REPORT_URL" in team_df.columns:
++        valid_urls = team_df["INJ_REPORT_URL"].dropna().astype(str)
++        valid_urls = valid_urls[valid_urls.str.strip() != ""]
++        if not valid_urls.empty:
++            report_url = valid_urls.iloc[0]
++
++    report_meta = parse_injury_report_timestamp_from_url(report_url)
++
++    top_cols = st.columns([1.4, 1.2, 1.4])
++    with top_cols[0]:
++        st.caption(f"PDF oficial: {report_meta['report_label_et']}")
++    with top_cols[1]:
++        st.caption(f"Brasília: {report_meta['report_label_brt']}")
++    with top_cols[2]:
++        if report_url:
++            st.caption("Fonte oficial carregada")
++        else:
++            st.caption("Fonte oficial não identificada")
++
++    if "INJ_MATCHUP_FOUND" in team_df.columns and not bool(team_df["INJ_MATCHUP_FOUND"].any()):
++        st.warning("Não encontrei linhas do injury report oficial para este matchup. O app não deve assumir disponibilidade oficial aqui.")
++
++    report_df = team_df[["PLAYER", "INJ_STATUS", "INJ_REASON"]].copy()
+     report_df = report_df.rename(
+         columns={
+             "PLAYER": "Jogador",
+             "INJ_STATUS": "Status oficial",
+             "INJ_REASON": "Motivo",
+@@
+     unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
+     if not unavailable.empty:
+         st.warning(
+             f"{len(unavailable)} jogador(es) marcados como indisponíveis e que devem sair da leitura da provável escalação."
+         )
