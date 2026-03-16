@@ -2109,7 +2109,7 @@ def style_hit_rate(val) -> str:
     if ratio <= 0.4:
         return "background-color: rgba(239,68,68,0.10); color: #fee2e2; font-weight: 700;"
     return "background-color: rgba(148,163,184,0.10); color: #e2e8f0; font-weight: 600;"
-def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Styler:
+def style_table(df: pd.DataFrame, quick_view: bool) -> Styler:
     text_cols = {
         "Jogador",
         "Pos",
@@ -2189,7 +2189,6 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> pd.io.formats.style.Style
             styler = styler.set_properties(subset=quick_cols, **{"font-weight": "700"})
 
     return styler
-
 def render_matchup_header(game_row: pd.Series) -> None:
     away_team_id = int(game_row["VISITOR_TEAM_ID"])
     home_team_id = int(game_row["HOME_TEAM_ID"])
@@ -3249,6 +3248,29 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
         st.info("Injury report ainda não integrado nesta execução.")
         return
 
+    report_url = ""
+    if "INJ_REPORT_URL" in team_df.columns:
+        valid_urls = team_df["INJ_REPORT_URL"].dropna().astype(str)
+        valid_urls = valid_urls[valid_urls.str.strip() != ""]
+        if not valid_urls.empty:
+            report_url = valid_urls.iloc[0]
+
+    report_meta = parse_injury_report_timestamp_from_url(report_url)
+
+    top_cols = st.columns([1.4, 1.2, 1.4])
+    with top_cols[0]:
+        st.caption(f"PDF oficial: {report_meta['report_label_et']}")
+    with top_cols[1]:
+        st.caption(f"Brasília: {report_meta['report_label_brt']}")
+    with top_cols[2]:
+        if report_url:
+            st.caption("Fonte oficial carregada")
+        else:
+            st.caption("Fonte oficial não identificada")
+
+    if "INJ_MATCHUP_FOUND" in team_df.columns and not bool(team_df["INJ_MATCHUP_FOUND"].any()):
+        st.warning("Não encontrei linhas do injury report oficial para este matchup. O app não deve assumir disponibilidade oficial aqui.")
+
     report_df = team_df[["PLAYER", "INJ_STATUS", "INJ_REASON"]].copy()
     report_df = report_df.rename(
         columns={
@@ -3259,9 +3281,6 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     )
 
     st.dataframe(report_df, use_container_width=True)
-
-    flagged = team_df[team_df["INJ_STATUS"] != "Available"].copy()
-    st.caption(f"Jogadores com status diferente de Available neste time: {len(flagged)}")
 
     unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
     if not unavailable.empty:
