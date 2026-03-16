@@ -424,10 +424,11 @@ def merge_injury_report(
         return team_df
 
     enriched = team_df.copy()
-    enriched["INJ_STATUS"] = "Available"
+    enriched["INJ_STATUS"] = "—"
     enriched["INJ_REASON"] = ""
     enriched["INJ_REPORT_URL"] = ""
     enriched["IS_UNAVAILABLE"] = False
+    enriched["INJ_MATCHUP_FOUND"] = False
 
     if injury_df.empty:
         return enriched
@@ -453,7 +454,6 @@ def merge_injury_report(
 
     work_ir = work_ir[work_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
 
-    # fallback extra: recalcula a chave pelo nome cru, caso o PDF venha estranho
     if work_ir.empty and "PLAYER_NAME_IR" in injury_df.columns:
         fallback_ir = injury_df.copy()
         fallback_ir["MATCHUP_NORM"] = (
@@ -474,6 +474,10 @@ def merge_injury_report(
         return enriched
 
     work_ir = work_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+
+    # aqui sim o matchup foi encontrado; jogadores sem linha explícita viram Available
+    enriched["INJ_STATUS"] = "Available"
+    enriched["INJ_MATCHUP_FOUND"] = True
 
     merged = enriched.merge(
         work_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
@@ -3165,6 +3169,9 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
         st.info("Injury report ainda não integrado nesta execução.")
         return
 
+    if "INJ_MATCHUP_FOUND" in team_df.columns and not bool(team_df["INJ_MATCHUP_FOUND"].any()):
+        st.warning("Não encontrei linhas do injury report oficial para este matchup. O app não deve assumir disponibilidade oficial aqui.")
+
     report_df = team_df[["PLAYER", "INJ_STATUS", "INJ_REASON"]].copy()
     report_df = report_df.rename(
         columns={
@@ -3175,6 +3182,12 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     )
 
     st.dataframe(report_df, use_container_width=True)
+
+    unavailable = team_df[team_df["INJ_STATUS"].isin(["Out", "Doubtful"])]
+    if not unavailable.empty:
+        st.warning(
+            f"{len(unavailable)} jogador(es) marcados como indisponíveis e que devem sair da leitura da provável escalação."
+        )
 
     flagged = team_df[team_df["INJ_STATUS"] != "Available"].copy()
     st.caption(f"Jogadores com status diferente de Available neste time: {len(flagged)}")
