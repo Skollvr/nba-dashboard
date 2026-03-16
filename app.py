@@ -3232,10 +3232,8 @@ def main() -> None:
     if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
         valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
         valid_urls = valid_urls[valid_urls.str.strip() != ""]
-        if not valid_urls.empty:
+    if not valid_urls.empty:
         injury_report_url = valid_urls.iloc[0]
-
-injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url) 
 
 injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
 
