@@ -3160,7 +3160,6 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-
 def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
         '<div class="section-note">Status oficial do injury report da NBA para o elenco do time.</div>',
