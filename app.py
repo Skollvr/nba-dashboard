@@ -2607,4 +2607,4 @@ def render_team_section_v2(
         render_lineup_report_tab(team_df, team_name)
 
 if __name__ == "__main__":
-    main(
+    main()
