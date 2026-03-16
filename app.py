@@ -3059,7 +3059,7 @@ def main() -> None:
 
     odds_df = pd.DataFrame()
     if api_key_available:
-    try:
+        try:
             odds_events = fetch_nba_odds_events()
             selected_odds_event = find_matching_odds_event(
                 odds_events,
@@ -3070,7 +3070,7 @@ def main() -> None:
         except Exception:
             odds_df = pd.DataFrame()
 
-away_df = merge_betmgm_odds(away_df, odds_df)
+    away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
     try:
