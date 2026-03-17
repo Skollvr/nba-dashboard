@@ -494,6 +494,82 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
     return injury_df
 
+@st.cache_data(ttl=900, show_spinner=False)
+def get_matchup_context(
+    away_team_id: int,
+    home_team_id: int,
+    away_team_name: str,
+    home_team_name: str,
+    season: str,
+    include_market: bool,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    away_df = build_team_table(away_team_id, season)
+    home_df = build_team_table(home_team_id, season)
+
+    away_df = enrich_team_with_context(
+        team_df=away_df,
+        team_id=away_team_id,
+        opponent_team_id=home_team_id,
+        opponent_team_name=home_team_name,
+        season=season,
+    )
+    home_df = enrich_team_with_context(
+        team_df=home_df,
+        team_id=home_team_id,
+        opponent_team_id=away_team_id,
+        opponent_team_name=away_team_name,
+        season=season,
+    )
+
+    away_df["TEAM_NAME"] = away_team_name
+    home_df["TEAM_NAME"] = home_team_name
+
+    odds_df = pd.DataFrame()
+    if include_market:
+        odds_events = fetch_nba_odds_events()
+        selected_odds_event = find_matching_odds_event(
+            odds_events,
+            home_team_name=home_team_name,
+            away_team_name=away_team_name,
+        )
+        odds_df = extract_betmgm_player_props(selected_odds_event)
+
+    away_df = merge_betmgm_odds(away_df, odds_df)
+    home_df = merge_betmgm_odds(home_df, odds_df)
+
+    try:
+        injury_df = fetch_latest_injury_report_df()
+    except Exception:
+        injury_df = pd.DataFrame()
+
+    injury_report_url = ""
+    if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
+        valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
+        valid_urls = valid_urls[valid_urls.str.strip() != ""]
+        if not valid_urls.empty:
+            injury_report_url = valid_urls.iloc[0]
+
+    injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
+
+    game_matchup = f"{TEAM_ABBR_LOOKUP[int(away_team_id)]}@{TEAM_ABBR_LOOKUP[int(home_team_id)]}"
+
+    away_df = merge_injury_report(
+        away_df,
+        injury_df,
+        away_team_name,
+        away_team_id,
+        game_matchup=game_matchup,
+    )
+
+    home_df = merge_injury_report(
+        home_df,
+        injury_df,
+        home_team_name,
+        home_team_id,
+        game_matchup=game_matchup,
+    )
+
+    return away_df, home_df, injury_report_meta    
 
 def merge_injury_report(
     team_df: pd.DataFrame,
