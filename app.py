@@ -494,7 +494,6 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
     injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
     return injury_df
-
 @st.cache_data(ttl=900, show_spinner=False)
 def get_matchup_context(
     away_team_id: int,
@@ -3532,12 +3531,12 @@ def main() -> None:
     except Exception as exc:
         st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
-        return   
+        return    
         
    
 
     render_matchup_header(selected_game)
-    st.caption("Injury report oficial será carregado após os destaques e rankings do confronto.")
+    st.caption("Injury report oficial temporariamente desativado para teste de performance.")    
     
         
     render_summary_cards(
