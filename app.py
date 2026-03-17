@@ -3271,7 +3271,6 @@ def main() -> None:
     if api_key_available:
         try:
             odds_events = fetch_nba_odds_events()
-            st.write("Qtd eventos odds:", len(odds_events))
 
             selected_odds_event = find_matching_odds_event(
                 odds_events,
@@ -3279,28 +3278,7 @@ def main() -> None:
                 away_team_name=selected_game["away_team_name"],
             )
 
-            st.write(
-                "Jogo app:",
-                selected_game["away_team_name"],
-                "@",
-                selected_game["home_team_name"],
-            )
-            st.write("Evento odds encontrado:", selected_odds_event is not None)
-
-            if selected_odds_event:
-                teams_payload = selected_odds_event.get("teams", {})
-                st.write(
-                    "Evento odds matched:",
-                    teams_payload.get("away", {}).get("names", {}).get("long", ""),
-                    "@",
-                    teams_payload.get("home", {}).get("names", {}).get("long", ""),
-                )
-
             odds_df = extract_betmgm_player_props(selected_odds_event)
-            st.write("Qtd linhas odds_df:", len(odds_df))
-
-            if not odds_df.empty:
-                st.write(odds_df.head(10))
 
         except Exception as exc:
             st.error(f"Erro ao buscar odds BetMGM: {exc}")
@@ -3308,56 +3286,6 @@ def main() -> None:
 
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
-
-    debug_line_col = ODDS_METRIC_COLUMNS[line_metric][0]
-
-    st.write("DEBUG BETMGM", {
-        "use_market_line": use_market_line,
-        "selected_game": f"{selected_game['away_team_name']} @ {selected_game['home_team_name']}",
-        "event_found": selected_odds_event is not None,
-        "odds_rows": len(odds_df),
-        "away_market_lines": int(away_df[debug_line_col].notna().sum()) if debug_line_col in away_df.columns else 0,
-        "home_market_lines": int(home_df[debug_line_col].notna().sum()) if debug_line_col in home_df.columns else 0,
-    })
-
-    if debug_line_col in away_df.columns:
-        away_sample_cols = [c for c in ["PLAYER_NAME", "PLAYER_KEY", debug_line_col] if c in away_df.columns]
-        st.write("AWAY MERGE SAMPLE COLS", away_sample_cols)
-        st.write("AWAY DF COLS", away_df.columns.tolist())
-        st.write("AWAY MERGE SAMPLE", away_df[away_sample_cols].head(12))
-
-    if debug_line_col in home_df.columns:
-        home_sample_cols = [c for c in ["PLAYER_NAME", "PLAYER_KEY", debug_line_col] if c in home_df.columns]
-        st.write("HOME MERGE SAMPLE COLS", home_sample_cols)
-        st.write("HOME DF COLS", home_df.columns.tolist())
-        st.write("HOME MERGE SAMPLE", home_df[home_sample_cols].head(12))
-
-    if not odds_df.empty and debug_line_col in odds_df.columns:
-        odds_sample_cols = [c for c in ["PLAYER_NAME_ODDS", "PLAYER_KEY_ODDS", debug_line_col] if c in odds_df.columns]
-        st.write("ODDS SAMPLE COLS", odds_sample_cols)
-        st.write("ODDS DF COLS", odds_df.columns.tolist())
-        st.write("ODDS SAMPLE", odds_df[odds_sample_cols].head(12))    
-    
-    merged_players_df = pd.concat([away_df, home_df], ignore_index=True)
-
-    for test_key in ["bam adebayo", "lamelo ball"]:
-        test_row = merged_players_df[merged_players_df["PLAYER_KEY"] == test_key]
-
-        if not test_row.empty:
-            row = test_row.iloc[0]
-            line_ctx = get_line_context(
-                row,
-                line_metric,
-                line_value,
-                use_market_line=use_market_line,
-            )
-
-            st.write(f"LINE CONTEXT TEST - {test_key}", {
-                "player_key": test_key,
-                "market_col": ODDS_METRIC_COLUMNS[line_metric][0],
-                "market_raw": row.get(ODDS_METRIC_COLUMNS[line_metric][0]),
-                "line_ctx": line_ctx,
-            })
 
     try:
         injury_df = fetch_latest_injury_report_df()
