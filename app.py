@@ -3337,6 +3337,27 @@ def main() -> None:
         st.write("ODDS SAMPLE COLS", odds_sample_cols)
         st.write("ODDS DF COLS", odds_df.columns.tolist())
         st.write("ODDS SAMPLE", odds_df[odds_sample_cols].head(12))    
+    
+    merged_players_df = pd.concat([away_df, home_df], ignore_index=True)
+
+    for test_key in ["bam adebayo", "lamelo ball"]:
+        test_row = merged_players_df[merged_players_df["PLAYER_KEY"] == test_key]
+
+        if not test_row.empty:
+            row = test_row.iloc[0]
+            line_ctx = get_line_context(
+                row=row,
+                line_metric=line_metric,
+                manual_line_value=line_value,
+                use_market_line=use_market_line,
+            )
+
+            st.write(f"LINE CONTEXT TEST - {test_key}", {
+                "player_key": test_key,
+                "market_col": ODDS_METRIC_COLUMNS[line_metric][0],
+                "market_raw": row.get(ODDS_METRIC_COLUMNS[line_metric][0]),
+                "line_ctx": line_ctx,
+            })
 
     try:
         injury_df = fetch_latest_injury_report_df()
