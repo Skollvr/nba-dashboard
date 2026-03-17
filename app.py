@@ -3557,14 +3557,7 @@ def main() -> None:
         use_market_line=use_market_line,
     )
 
-    away_df_injury, home_df_injury, injury_report_meta = get_matchup_injury_context(
-        away_team_id=int(selected_game["VISITOR_TEAM_ID"]),
-        home_team_id=int(selected_game["HOME_TEAM_ID"]),
-        away_team_name=selected_game["away_team_name"],
-        home_team_name=selected_game["home_team_name"],
-        away_df=away_df,
-        home_df=home_df,
-    )
+
 
     selected_team_view = st.segmented_control(
         "Time em análise",
@@ -3576,7 +3569,7 @@ def main() -> None:
     if selected_team_view == selected_game["away_team_name"]:
         render_team_section_v2(
             team_name=selected_game["away_team_name"],
-            team_df=away_df_injury,
+            team_df=away_df,
             season=season,
             min_games=min_games,
             min_minutes=min_minutes,
@@ -3592,7 +3585,7 @@ def main() -> None:
     else:
         render_team_section_v2(
             team_name=selected_game["home_team_name"],
-            team_df=home_df_injury,
+            team_df=home_df,
             season=season,
             min_games=min_games,
             min_minutes=min_minutes,
