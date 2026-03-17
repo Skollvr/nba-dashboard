@@ -2775,31 +2775,65 @@ def render_game_rankings(
         return
 
     projection_col = get_metric_projection_column(line_metric)
-    hit_text_col = get_metric_hit_text_column(line_metric)
-    hit_rate_col = get_metric_hit_rate_column(line_metric)
+
+    def parse_ratio_text(text: str) -> float:
+        try:
+            hit, sample = str(text).split("/")
+            sample_n = max(float(sample), 1.0)
+            return float(hit) / sample_n
+        except (TypeError, ValueError, ZeroDivisionError):
+            return 0.0
 
     rank_df = combined.copy()
-    rank_df["RANK_PROJ"] = pd.to_numeric(rank_df[projection_col], errors="coerce").fillna(0.0)
-    rank_df["RANK_HIT_TEXT"] = rank_df[hit_text_col].fillna("-")
-    rank_df["RANK_HIT_RATE"] = pd.to_numeric(rank_df[hit_rate_col], errors="coerce").fillna(0.0)
-    rank_df["RANK_LINE"] = rank_df.apply(lambda row: get_line_context(row, line_metric, line_value, use_market_line=use_market_line)["line_value"], axis=1)
-    rank_df["RANK_EDGE"] = rank_df["RANK_PROJ"] - rank_df["RANK_LINE"]
 
-    proj_df = rank_df.sort_values(["RANK_PROJ", "RANK_HIT_RATE"], ascending=[False, False]).head(5)
-    edge_df = rank_df.sort_values(["RANK_EDGE", "RANK_HIT_RATE"], ascending=[False, False]).head(5)
-    consistency_df = rank_df.sort_values(["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"], ascending=[False, True, False]).head(5)
+    rank_df["RANK_PROJ"] = pd.to_numeric(rank_df[projection_col], errors="coerce").fillna(0.0)
+
+    rank_df["LINE_CONTEXT"] = rank_df.apply(
+        lambda row: get_line_context(
+            row,
+            line_metric,
+            line_value,
+            use_market_line=use_market_line,
+        ),
+        axis=1,
+    )
+
+    rank_df["RANK_LINE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("line_value", 0.0)))
+    rank_df["RANK_EDGE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("edge", 0.0)))
+    rank_df["RANK_HIT_TEXT"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10", "-"))
+    rank_df["RANK_HIT_RATE"] = rank_df["RANK_HIT_TEXT"].apply(parse_ratio_text)
+
+    if "LINE_CONTEXT" in rank_df.columns:
+        rank_df = rank_df.drop(columns=["LINE_CONTEXT"])
+
+    proj_df = rank_df.sort_values(
+        ["RANK_PROJ", "RANK_HIT_RATE"],
+        ascending=[False, False],
+    ).head(5)
+
+    edge_df = rank_df.sort_values(
+        ["RANK_EDGE", "RANK_HIT_RATE"],
+        ascending=[False, False],
+    ).head(5)
+
+    consistency_df = rank_df.sort_values(
+        ["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"],
+        ascending=[False, True, False],
+    ).head(5)
 
     st.subheader(f"Ranking do confronto — {line_metric}")
     st.caption("Bloco compacto para bater o olho rápido, usando BetMGM quando houver linha disponível.")
+
     tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
 
     with tab_proj:
         st.markdown(render_compact_ranking_html(proj_df, mode="projection"), unsafe_allow_html=True)
+
     with tab_edge:
         st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
+
     with tab_cons:
         st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
-
 
 def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str) -> None:
     log = get_player_log(player_id, season)
