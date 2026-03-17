@@ -3474,8 +3474,7 @@ def main() -> None:
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
     try:
-        away_df, home_df, injury_report_meta, = 
-        get_matchup_context(
+        away_df, home_df, injury_report_meta = get_matchup_context(
             away_team_id=int(selected_game["VISITOR_TEAM_ID"]),
             home_team_id=int(selected_game["HOME_TEAM_ID"]),
             away_team_name=selected_game["away_team_name"],
