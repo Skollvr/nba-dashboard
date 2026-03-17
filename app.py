@@ -3587,8 +3587,6 @@ def render_team_section_v2(
         st.info("Nenhum jogador desse time passou pelos filtros atuais.")
         return
 
-    summary_df, detail_df = build_display_dataframes(filtered_df)
-
     st.markdown(f"### {team_name}")
 
     line_info_text = (
@@ -3600,15 +3598,16 @@ def render_team_section_v2(
     st.markdown(
         f'<div><span class="info-pill">Jogadores: {len(filtered_df)}</span><span class="info-pill">{line_info_text}</span><span class="info-pill">Modo mercado: {"BetMGM quando houver" if use_market_line else "Manual"}</span></div>',
         unsafe_allow_html=True,
-    ) 
+    )
 
-    cards_tab, table_tab, injury_tab, lineup_tab = st.tabs(["Cards", "Tabela", "Injury Report", "Provável Escalação"])
+    cards_tab, injury_tab, lineup_tab = st.tabs(["Cards", "Injury Report", "Provável Escalação"])
 
     with cards_tab:
         st.markdown(
-            '<div class="section-note">Cards curtos no topo e painel fixo do jogador abaixo para facilitar consulta no celular.</div>',
+            '<div class="section-note">Cards curtos no topo e painel detalhado do jogador sob demanda, para não carregar tranqueira à toa.</div>',
             unsafe_allow_html=True,
         )
+
         render_player_cards_grid(
             filtered_df,
             line_metric=line_metric,
@@ -3623,24 +3622,23 @@ def render_team_section_v2(
             options["PLAYER"].tolist(),
             key=f"player_focus_v2_{team_name}_{chart_mode}_{line_metric}",
         )
-        selected_row = filtered_df.loc[filtered_df["PLAYER"] == player_name].iloc[0]
-        render_player_focus_panel(selected_row, line_metric, line_value, use_market_line, season, chart_mode)
 
-    with table_tab:
-        st.markdown(
-            '<div class="section-note">Visão de comparação rápida do elenco, sem abrir card por card feito investigador privado.</div>',
-            unsafe_allow_html=True,
+        show_focus_panel = st.toggle(
+            f"Mostrar análise detalhada — {team_name}",
+            value=False,
+            key=f"show_focus_panel_{team_name}_{line_metric}_{chart_mode}",
         )
-        mode = st.radio(
-            f"Modo da tabela — {team_name}",
-            ["Resumo", "Completa"],
-            horizontal=True,
-            key=f"table_mode_{team_name}",
-        )
-        if mode == "Resumo":
-            st.dataframe(style_table(summary_df, quick_view=True), use_container_width=True)
-        else:
-            st.dataframe(style_table(detail_df, quick_view=False), use_container_width=True)
+
+        if show_focus_panel:
+            selected_row = filtered_df.loc[filtered_df["PLAYER"] == player_name].iloc[0]
+            render_player_focus_panel(
+                selected_row,
+                line_metric,
+                line_value,
+                use_market_line,
+                season,
+                chart_mode,
+            )
 
     with injury_tab:
         render_injury_report_tab(team_df, team_name)
