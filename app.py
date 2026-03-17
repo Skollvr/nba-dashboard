@@ -3474,7 +3474,8 @@ def main() -> None:
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
     try:
-        away_df, home_df, injury_report_meta = get_matchup_context(
+        away_df, home_df, injury_report_meta, = 
+        get_matchup_context(
             away_team_id=int(selected_game["VISITOR_TEAM_ID"]),
             home_team_id=int(selected_game["HOME_TEAM_ID"]),
             away_team_name=selected_game["away_team_name"],
@@ -3482,6 +3483,9 @@ def main() -> None:
             season=season,
             include_market=api_key_available,
         )
+        
+        st.write("DEBUG TIMINGS", matchup_timings)
+        
     except Exception as exc:
         st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
