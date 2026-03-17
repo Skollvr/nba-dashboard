@@ -553,13 +553,6 @@ def get_matchup_injury_context(
         injury_df = fetch_latest_injury_report_df()
     except Exception:
         injury_df = pd.DataFrame()
-        
-st.write("IR rows", len(injury_df))
-if not injury_df.empty:
-    st.write(
-        injury_df[["MATCHUP", "TEAM_NAME_IR", "PLAYER_NAME_IR", "INJ_STATUS"]]
-        .head(30)
-    )        
 
     injury_report_url = ""
     if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
