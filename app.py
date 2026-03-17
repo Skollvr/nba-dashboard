@@ -3233,9 +3233,9 @@ def main() -> None:
     selected_odds_event = None
 
     if api_key_available:
-    try:
-        odds_events = fetch_nba_odds_events()
-        st.write("Qtd eventos odds:", len(odds_events))
+        try:
+            odds_events = fetch_nba_odds_events()
+            st.write("Qtd eventos odds:", len(odds_events))
 
         selected_odds_event = find_matching_odds_event(
             odds_events,
