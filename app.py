@@ -3380,9 +3380,14 @@ def main() -> None:
         use_market_line=use_market_line,
     )
 
-    tab1, tab2 = st.tabs([selected_game["away_team_name"], selected_game["home_team_name"]])
+    selected_team_view = st.segmented_control(
+        "Time em análise",
+        options=[selected_game["away_team_name"], selected_game["home_team_name"]],
+        default=selected_game["away_team_name"],
+        key=f"team_view_{selected_game['GAME_ID']}",
+    )
 
-    with tab1:
+    if selected_team_view == selected_game["away_team_name"]:
         render_team_section_v2(
             team_name=selected_game["away_team_name"],
             team_df=away_df,
@@ -3398,8 +3403,7 @@ def main() -> None:
             use_market_line=use_market_line,
             cards_per_row=cards_per_row,
         )
-
-    with tab2:
+    else:
         render_team_section_v2(
             team_name=selected_game["home_team_name"],
             team_df=home_df,
