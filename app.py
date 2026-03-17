@@ -3321,22 +3321,22 @@ def main() -> None:
     })
 
     if debug_line_col in away_df.columns:
-        st.write(
-            "AWAY MERGE SAMPLE",
-            away_df[["PLAYER_NAME", "PLAYER_KEY", debug_line_col]].head(12)
-        )
+        away_sample_cols = [c for c in ["PLAYER_NAME", "PLAYER_KEY", debug_line_col] if c in away_df.columns]
+        st.write("AWAY MERGE SAMPLE COLS", away_sample_cols)
+        st.write("AWAY DF COLS", away_df.columns.tolist())
+        st.write("AWAY MERGE SAMPLE", away_df[away_sample_cols].head(12))
 
     if debug_line_col in home_df.columns:
-        st.write(
-            "HOME MERGE SAMPLE",
-            home_df[["PLAYER_NAME", "PLAYER_KEY", debug_line_col]].head(12)
-        )
+        home_sample_cols = [c for c in ["PLAYER_NAME", "PLAYER_KEY", debug_line_col] if c in home_df.columns]
+        st.write("HOME MERGE SAMPLE COLS", home_sample_cols)
+        st.write("HOME DF COLS", home_df.columns.tolist())
+        st.write("HOME MERGE SAMPLE", home_df[home_sample_cols].head(12))
 
-    if not odds_df.empty:
-        st.write(
-            "ODDS SAMPLE",
-            odds_df[["PLAYER_NAME_ODDS", "PLAYER_KEY_ODDS", debug_line_col]].head(12)
-        )   
+    if not odds_df.empty and debug_line_col in odds_df.columns:
+        odds_sample_cols = [c for c in ["PLAYER_NAME_ODDS", "PLAYER_KEY_ODDS", debug_line_col] if c in odds_df.columns]
+        st.write("ODDS SAMPLE COLS", odds_sample_cols)
+        st.write("ODDS DF COLS", odds_df.columns.tolist())
+        st.write("ODDS SAMPLE", odds_df[odds_sample_cols].head(12))    
 
     try:
         injury_df = fetch_latest_injury_report_df()
