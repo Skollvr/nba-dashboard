@@ -3241,28 +3241,28 @@ def main() -> None:
                 odds_events,
                 home_team_name=selected_game["home_team_name"],
                 away_team_name=selected_game["away_team_name"],
-        )
-
-        st.write("Jogo app:", selected_game["away_team_name"], "@", selected_game["home_team_name"])
-        st.write("Evento odds encontrado:", selected_odds_event is not None)
-
-        if selected_odds_event:
-            teams_payload = selected_odds_event.get("teams", {})
-            st.write(
-                "Evento odds matched:",
-                teams_payload.get("away", {}).get("names", {}).get("long", ""),
-                "@",
-                teams_payload.get("home", {}).get("names", {}).get("long", ""),
             )
 
-        odds_df = extract_betmgm_player_props(selected_odds_event)
-        st.write("Qtd linhas odds_df:", len(odds_df))
-        if not odds_df.empty:
-            st.write(odds_df.head(10))
-    except Exception as exc:
-        st.error(f"Erro ao buscar odds BetMGM: {exc}")
-        odds_df = pd.DataFrame()
+            st.write("Jogo app:", selected_game["away_team_name"], "@", selected_game["home_team_name"])
+            st.write("Evento odds encontrado:", selected_odds_event is not None)
 
+            if selected_odds_event:
+                teams_payload = selected_odds_event.get("teams", {})
+                st.write(
+                    "Evento odds matched:",
+                    teams_payload.get("away", {}).get("names", {}).get("long", ""),
+                    "@",
+                    teams_payload.get("home", {}).get("names", {}).get("long", ""),
+                )
+
+            odds_df = extract_betmgm_player_props(selected_odds_event)
+            st.write("Qtd linhas odds_df:", len(odds_df))
+            if not odds_df.empty:
+                st.write(odds_df.head(10))
+
+        except Exception as exc:
+            st.error(f"Erro ao buscar odds BetMGM: {exc}")
+            odds_df = pd.DataFrame()
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
