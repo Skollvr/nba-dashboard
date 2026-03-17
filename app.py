@@ -3316,84 +3316,18 @@ def main() -> None:
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
     try:
-        away_df = build_team_table(int(selected_game["VISITOR_TEAM_ID"]), season)
-        home_df = build_team_table(int(selected_game["HOME_TEAM_ID"]), season)
-
-        away_df = enrich_team_with_context(
-            team_df=away_df,
-            team_id=int(selected_game["VISITOR_TEAM_ID"]),
-            opponent_team_id=int(selected_game["HOME_TEAM_ID"]),
-            opponent_team_name=selected_game["home_team_name"],
+        away_df, home_df, injury_report_meta = get_matchup_context(
+            away_team_id=int(selected_game["VISITOR_TEAM_ID"]),
+            home_team_id=int(selected_game["HOME_TEAM_ID"]),
+            away_team_name=selected_game["away_team_name"],
+            home_team_name=selected_game["home_team_name"],
             season=season,
-        )
-        home_df = enrich_team_with_context(
-            team_df=home_df,
-            team_id=int(selected_game["HOME_TEAM_ID"]),
-            opponent_team_id=int(selected_game["VISITOR_TEAM_ID"]),
-            opponent_team_name=selected_game["away_team_name"],
-            season=season,
+            include_market=api_key_available,
         )
     except Exception as exc:
         st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
         return
-
-    away_df["TEAM_NAME"] = selected_game["away_team_name"]
-    home_df["TEAM_NAME"] = selected_game["home_team_name"]
-
-    odds_df = pd.DataFrame()
-    selected_odds_event = None
-
-    if api_key_available:
-        try:
-            odds_events = fetch_nba_odds_events()
-
-            selected_odds_event = find_matching_odds_event(
-                odds_events,
-                home_team_name=selected_game["home_team_name"],
-                away_team_name=selected_game["away_team_name"],
-            )
-
-            odds_df = extract_betmgm_player_props(selected_odds_event)
-
-        except Exception as exc:
-            st.error(f"Erro ao buscar odds BetMGM: {exc}")
-            odds_df = pd.DataFrame()
-
-    away_df = merge_betmgm_odds(away_df, odds_df)
-    home_df = merge_betmgm_odds(home_df, odds_df)
-
-    try:
-        injury_df = fetch_latest_injury_report_df()
-    except Exception:
-        injury_df = pd.DataFrame()
-
-    injury_report_url = ""
-    if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
-        valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
-        valid_urls = valid_urls[valid_urls.str.strip() != ""]
-        if not valid_urls.empty:
-            injury_report_url = valid_urls.iloc[0]
-
-    injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
-
-    game_matchup = f"{TEAM_ABBR_LOOKUP[int(selected_game['VISITOR_TEAM_ID'])]}@{TEAM_ABBR_LOOKUP[int(selected_game['HOME_TEAM_ID'])]}"
-
-    away_df = merge_injury_report(
-        away_df,
-        injury_df,
-        selected_game["away_team_name"],
-        int(selected_game["VISITOR_TEAM_ID"]),
-        game_matchup=game_matchup,
-    )
-
-    home_df = merge_injury_report(
-        home_df,
-        injury_df,
-        selected_game["home_team_name"],
-        int(selected_game["HOME_TEAM_ID"]),
-        game_matchup=game_matchup,
-    )
 
     render_matchup_header(selected_game)
     st.caption(
