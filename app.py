@@ -3237,10 +3237,10 @@ def main() -> None:
             odds_events = fetch_nba_odds_events()
             st.write("Qtd eventos odds:", len(odds_events))
 
-        selected_odds_event = find_matching_odds_event(
-            odds_events,
-            home_team_name=selected_game["home_team_name"],
-            away_team_name=selected_game["away_team_name"],
+            selected_odds_event = find_matching_odds_event(
+                odds_events,
+                home_team_name=selected_game["home_team_name"],
+                away_team_name=selected_game["away_team_name"],
         )
 
         st.write("Jogo app:", selected_game["away_team_name"], "@", selected_game["home_team_name"])
