@@ -3064,11 +3064,20 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
     )
 
 
-def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool, season: str, chart_mode: str) -> None:
+def render_player_focus_panel(
+    row: pd.Series,
+    line_metric: str,
+    line_value: float,
+    use_market_line: bool,
+    season: str,
+    chart_mode: str,
+) -> None:
     st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
+
     top_left, top_right = st.columns([1, 5])
     with top_left:
         st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
+
     with top_right:
         st.markdown(f'<div class="focus-title">{row["PLAYER"]}</div>', unsafe_allow_html=True)
         position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
@@ -3076,15 +3085,23 @@ def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: floa
             f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])} • Time {row["TEAM_NAME"]}</div>',
             unsafe_allow_html=True,
         )
-        render_badges(row["ROLE"], row.get("FORM_SIGNAL", "→ Estável"), row.get("OSC_CLASS", "-"), row.get("MATCHUP_LABEL", "Neutro"))
+        render_badges(
+            row["ROLE"],
+            row.get("FORM_SIGNAL", "→ Estável"),
+            row.get("OSC_CLASS", "-"),
+            row.get("MATCHUP_LABEL", "Neutro"),
+        )
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
 
-    overview_tab, detail_tab, chart_tab = st.tabs(["Resumo", "Detalhamento", "Gráfico"])
+    overview_tab, detail_tab = st.tabs(["Resumo", "Detalhamento"])
 
     with overview_tab:
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
         st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
-        st.markdown(render_manual_line_detail_box_html(row, line_metric, line_value, use_market_line), unsafe_allow_html=True)
+        st.markdown(
+            render_manual_line_detail_box_html(row, line_metric, line_value, use_market_line),
+            unsafe_allow_html=True,
+        )
 
     with detail_tab:
         first_cols = st.columns(2)
@@ -3097,7 +3114,10 @@ def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: floa
         ]
         for col, item in zip([*first_cols, *second_cols], detail_items):
             with col:
-                st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
+                st.markdown(
+                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                    unsafe_allow_html=True,
+                )
 
         extra_cols = st.columns(3)
         extra_detail_items = [
@@ -3107,14 +3127,23 @@ def render_player_focus_panel(row: pd.Series, line_metric: str, line_value: floa
         ]
         for col, item in zip(extra_cols, extra_detail_items):
             with col:
-                st.markdown(render_detail_metric_box_html(item[0], item[1], item[2], item[3]), unsafe_allow_html=True)
+                st.markdown(
+                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                    unsafe_allow_html=True,
+                )
 
         st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
 
-    with chart_tab:
+    show_chart = st.toggle(
+        f"Mostrar gráfico — {row['PLAYER']}",
+        value=False,
+        key=f"focus_chart_{int(row['PLAYER_ID'])}_{chart_mode}",
+    )
+
+    if show_chart:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode)
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
