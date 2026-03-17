@@ -1251,7 +1251,18 @@ def get_games_for_date(target_date: date) -> pd.DataFrame:
             }
         )
 
-    return pd.DataFrame(rows)
+    games_df = pd.DataFrame(rows)
+
+    if games_df.empty:
+        return games_df
+
+    games_df = (
+        games_df
+        .drop_duplicates(subset=["GAME_ID"], keep="first")
+        .reset_index(drop=True)
+    )
+
+    return games_df
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
@@ -3266,6 +3277,16 @@ if api_key_available:
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
+        debug_line_col = ODDS_METRIC_COLUMNS[line_metric][0]
+
+        st.write("DEBUG BETMGM", {
+        "use_market_line": use_market_line,
+        "selected_game": f"{selected_game['away_team_name']} @ {selected_game['home_team_name']}",
+        "event_found": selected_odds_event is not None,
+        "odds_rows": len(odds_df),
+        "away_market_lines": int(away_df[debug_line_col].notna().sum()) if debug_line_col in away_df.columns else 0,
+        "home_market_lines": int(home_df[debug_line_col].notna().sum()) if debug_line_col in home_df.columns else 0,
+})
     try:
         injury_df = fetch_latest_injury_report_df()
     except Exception:
@@ -3298,10 +3319,8 @@ if api_key_available:
         game_matchup=game_matchup,
     )
 
-    render_matchup_header(selected_game)
-
-    render_matchup_header(selected_game)
-    st.caption(
+render_matchup_header(selected_game)
+st.caption(
     f"Injury report oficial carregado: {injury_report_meta['report_label_et']} • {injury_report_meta['report_label_brt']}"
 )
     render_summary_cards(
