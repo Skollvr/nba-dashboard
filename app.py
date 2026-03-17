@@ -3600,9 +3600,14 @@ def render_team_section_v2(
         unsafe_allow_html=True,
     )
 
-    cards_tab, injury_tab, lineup_tab = st.tabs(["Cards", "Injury Report", "Provável Escalação"])
+    section_view = st.segmented_control(
+        f"Seção — {team_name}",
+        options=["Cards", "Injury Report", "Provável Escalação"],
+        default="Cards",
+        key=f"team_section_view_{team_name}",
+    )
 
-    with cards_tab:
+    if section_view == "Cards":
         st.markdown(
             '<div class="section-note">Cards curtos no topo e painel detalhado do jogador sob demanda, para não carregar tranqueira à toa.</div>',
             unsafe_allow_html=True,
@@ -3640,11 +3645,11 @@ def render_team_section_v2(
                 chart_mode,
             )
 
-    with injury_tab:
+    elif section_view == "Injury Report":
         render_injury_report_tab(team_df, team_name)
 
-    with lineup_tab:
+    else:
         render_lineup_report_tab(team_df, team_name)
-
+    
 if __name__ == "__main__":
     main()
