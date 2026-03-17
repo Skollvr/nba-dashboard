@@ -553,6 +553,13 @@ def get_matchup_injury_context(
         injury_df = fetch_latest_injury_report_df()
     except Exception:
         injury_df = pd.DataFrame()
+        
+st.write("IR rows", len(injury_df))
+if not injury_df.empty:
+    st.write(
+        injury_df[["MATCHUP", "TEAM_NAME_IR", "PLAYER_NAME_IR", "INJ_STATUS"]]
+        .head(30)
+    )        
 
     injury_report_url = ""
     if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
@@ -603,66 +610,124 @@ def merge_injury_report(
     if injury_df.empty:
         return enriched
 
-    target_matchup = str(game_matchup or "").upper().replace(" ", "")
     roster_keys = set(enriched["PLAYER_KEY"].fillna("").astype(str).tolist())
+    target_matchup = str(game_matchup or "").upper().replace(" ", "")
+    team_aliases = get_team_name_aliases(team_id, team_name)
 
     work_ir = injury_df.copy()
-    work_ir["MATCHUP_NORM"] = (
-        work_ir["MATCHUP"]
-        .fillna("")
-        .astype(str)
-        .str.upper()
-        .str.replace(" ", "", regex=False)
-    )
-    work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str)
 
-    if target_matchup:
-        work_ir = work_ir[work_ir["MATCHUP_NORM"] == target_matchup].copy()
-
-    if work_ir.empty:
-        return enriched
-
-    work_ir = work_ir[work_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
-
-    if work_ir.empty and "PLAYER_NAME_IR" in injury_df.columns:
-        fallback_ir = injury_df.copy()
-        fallback_ir["MATCHUP_NORM"] = (
-            fallback_ir["MATCHUP"]
+    if "MATCHUP" in work_ir.columns:
+        work_ir["MATCHUP_NORM"] = (
+            work_ir["MATCHUP"]
             .fillna("")
             .astype(str)
             .str.upper()
             .str.replace(" ", "", regex=False)
         )
+    else:
+        work_ir["MATCHUP_NORM"] = ""
+
+    if "TEAM_NAME_IR" in work_ir.columns:
+        work_ir["TEAM_NAME_IR_NORM"] = work_ir["TEAM_NAME_IR"].fillna("").astype(str).apply(normalize_text)
+    else:
+        work_ir["TEAM_NAME_IR_NORM"] = ""
+
+    work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str)
+
+    # 1) Tentativa principal: matchup exato + roster
+    matchup_ir = work_ir.copy()
+    if target_matchup:
+        matchup_ir = matchup_ir[matchup_ir["MATCHUP_NORM"] == target_matchup].copy()
+
+    matchup_ir = matchup_ir[matchup_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+
+    # 2) Fallback: aliases do time + roster
+    if matchup_ir.empty:
+        team_ir = work_ir.copy()
+        if team_aliases:
+            team_ir = team_ir[team_ir["TEAM_NAME_IR_NORM"].isin(team_aliases)].copy()
+
+        team_ir = team_ir[team_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+        work_match = team_ir
+        matchup_found = False
+    else:
+        work_match = matchup_ir
+        matchup_found = True
+
+    # 3) Fallback final por PLAYER_NAME_IR normalizado
+    if work_match.empty and "PLAYER_NAME_IR" in injury_df.columns:
+        fallback_ir = injury_df.copy()
+
+        if "MATCHUP" in fallback_ir.columns:
+            fallback_ir["MATCHUP_NORM"] = (
+                fallback_ir["MATCHUP"]
+                .fillna("")
+                .astype(str)
+                .str.upper()
+                .str.replace(" ", "", regex=False)
+            )
+        else:
+            fallback_ir["MATCHUP_NORM"] = ""
+
+        if "TEAM_NAME_IR" in fallback_ir.columns:
+            fallback_ir["TEAM_NAME_IR_NORM"] = fallback_ir["TEAM_NAME_IR"].fillna("").astype(str).apply(normalize_text)
+        else:
+            fallback_ir["TEAM_NAME_IR_NORM"] = ""
+
         fallback_ir["PLAYER_KEY_IR"] = fallback_ir["PLAYER_NAME_IR"].fillna("").apply(normalize_person_name)
 
+        fallback_matchup = fallback_ir.copy()
         if target_matchup:
-            fallback_ir = fallback_ir[fallback_ir["MATCHUP_NORM"] == target_matchup].copy()
+            fallback_matchup = fallback_matchup[fallback_matchup["MATCHUP_NORM"] == target_matchup].copy()
+        fallback_matchup = fallback_matchup[fallback_matchup["PLAYER_KEY_IR"].isin(roster_keys)].copy()
 
-        work_ir = fallback_ir[fallback_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+        if fallback_matchup.empty:
+            fallback_team = fallback_ir.copy()
+            if team_aliases:
+                fallback_team = fallback_team[fallback_team["TEAM_NAME_IR_NORM"].isin(team_aliases)].copy()
+            fallback_team = fallback_team[fallback_team["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+            work_match = fallback_team
+            matchup_found = False
+        else:
+            work_match = fallback_matchup
+            matchup_found = True
 
-    if work_ir.empty:
+    if work_match.empty:
         return enriched
 
-    work_ir = work_ir.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+    work_match = work_match.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
 
     enriched["INJ_STATUS"] = "Available"
-    enriched["INJ_MATCHUP_FOUND"] = True
+    enriched["INJ_MATCHUP_FOUND"] = matchup_found
+
+    merge_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"] if c in work_match.columns]
 
     merged = enriched.merge(
-        work_ir[["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"]],
+        work_match[merge_cols],
         left_on="PLAYER_KEY",
         right_on="PLAYER_KEY_IR",
         how="left",
         suffixes=("", "_IR"),
     )
 
-    merged["INJ_STATUS"] = merged["INJ_STATUS_IR"].fillna(merged["INJ_STATUS"])
-    merged["INJ_REASON"] = merged["INJ_REASON_IR"].fillna(merged["INJ_REASON"])
-    merged["INJ_REPORT_URL"] = merged["INJ_REPORT_URL_IR"].fillna(merged["INJ_REPORT_URL"])
+    if "INJ_STATUS_IR" in merged.columns:
+        merged["INJ_STATUS"] = merged["INJ_STATUS_IR"].fillna(merged["INJ_STATUS"])
+    if "INJ_REASON_IR" in merged.columns:
+        merged["INJ_REASON"] = merged["INJ_REASON_IR"].fillna(merged["INJ_REASON"])
+    if "INJ_REPORT_URL_IR" in merged.columns:
+        merged["INJ_REPORT_URL"] = merged["INJ_REPORT_URL_IR"].fillna(merged["INJ_REPORT_URL"])
+
     merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
 
     drop_cols = [
-        c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR", "MATCHUP_NORM"]
+        c for c in [
+            "PLAYER_KEY_IR",
+            "INJ_STATUS_IR",
+            "INJ_REASON_IR",
+            "INJ_REPORT_URL_IR",
+            "MATCHUP_NORM",
+            "TEAM_NAME_IR_NORM",
+        ]
         if c in merged.columns
     ]
     if drop_cols:
