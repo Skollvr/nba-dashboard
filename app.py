@@ -540,6 +540,49 @@ def get_matchup_context(
 
     return away_df, home_df
 
+@st.cache_data(ttl=900, show_spinner=False)
+def get_matchup_injury_context(
+    away_team_id: int,
+    home_team_id: int,
+    away_team_name: str,
+    home_team_name: str,
+    away_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    try:
+        injury_df = fetch_latest_injury_report_df()
+    except Exception:
+        injury_df = pd.DataFrame()
+
+    injury_report_url = ""
+    if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
+        valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
+        valid_urls = valid_urls[valid_urls.str.strip() != ""]
+        if not valid_urls.empty:
+            injury_report_url = valid_urls.iloc[0]
+
+    injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
+
+    game_matchup = f"{TEAM_ABBR_LOOKUP[int(away_team_id)]}@{TEAM_ABBR_LOOKUP[int(home_team_id)]}"
+
+    away_injury_df = merge_injury_report(
+        away_df,
+        injury_df,
+        away_team_name,
+        away_team_id,
+        game_matchup=game_matchup,
+    )
+
+    home_injury_df = merge_injury_report(
+        home_df,
+        injury_df,
+        home_team_name,
+        home_team_id,
+        game_matchup=game_matchup,
+    )
+
+    return away_injury_df, home_injury_df, injury_report_meta
+
 def merge_injury_report(
     team_df: pd.DataFrame,
     injury_df: pd.DataFrame,
@@ -3420,7 +3463,7 @@ def main() -> None:
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
     try:
-        away_df, home_df, injury_report_meta, matchup_timings = get_matchup_context(        
+        away_df, home_df = get_matchup_context(
             away_team_id=int(selected_game["VISITOR_TEAM_ID"]),
             home_team_id=int(selected_game["HOME_TEAM_ID"]),
             away_team_name=selected_game["away_team_name"],
@@ -3428,18 +3471,17 @@ def main() -> None:
             season=season,
             include_market=api_key_available,
         )
-        
-        st.write("DEBUG TIMINGS", matchup_timings)
-        
     except Exception as exc:
         st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
-        return
+        return   
+        
+   
 
     render_matchup_header(selected_game)
-    st.caption(
-    f"Injury report oficial carregado: {injury_report_meta['report_label_et']} • {injury_report_meta['report_label_brt']}"
-)
+    st.caption("Injury report oficial será carregado após os destaques e rankings do confronto.")
+    
+        
     render_summary_cards(
         away_df=away_df,
         home_df=home_df,
@@ -3458,6 +3500,15 @@ def main() -> None:
         use_market_line=use_market_line,
     )
 
+    away_df_injury, home_df_injury, injury_report_meta = get_matchup_injury_context(
+        away_team_id=int(selected_game["VISITOR_TEAM_ID"]),
+        home_team_id=int(selected_game["HOME_TEAM_ID"]),
+        away_team_name=selected_game["away_team_name"],
+        home_team_name=selected_game["home_team_name"],
+        away_df=away_df,
+        home_df=home_df,
+    )
+
     selected_team_view = st.segmented_control(
         "Time em análise",
         options=[selected_game["away_team_name"], selected_game["home_team_name"]],
@@ -3468,7 +3519,7 @@ def main() -> None:
     if selected_team_view == selected_game["away_team_name"]:
         render_team_section_v2(
             team_name=selected_game["away_team_name"],
-            team_df=away_df,
+            team_df=away_df_injury,
             season=season,
             min_games=min_games,
             min_minutes=min_minutes,
@@ -3484,7 +3535,7 @@ def main() -> None:
     else:
         render_team_section_v2(
             team_name=selected_game["home_team_name"],
-            team_df=home_df,
+            team_df=home_df_injury,
             season=season,
             min_games=min_games,
             min_minutes=min_minutes,
@@ -3497,7 +3548,7 @@ def main() -> None:
             use_market_line=use_market_line,
             cards_per_row=cards_per_row,
         )
-
+    
     st.markdown(
         """
         <div class="small-note">
