@@ -1675,7 +1675,7 @@ def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
         player_name = f"{first_name} {last_name}".strip() or player_info.get("name") or item.get("marketName", "")
         line_value = item.get("bookOverUnder") or bookmaker_data.get("overUnder")
         side = item.get("sideID")
-        key = normalize_text(player_name)
+        key = normalize_person_name(player_name)
 
         if key not in rows:
             rows[key] = {
@@ -2008,18 +2008,54 @@ def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFr
         return team_df
 
     enriched = team_df.copy()
-    for _, cols in ODDS_METRIC_COLUMNS.items():
-        for col in cols:
-            if col not in enriched.columns:
-                enriched[col] = None
+
+    # Garante as colunas esperadas quando não houver odds
+    all_odds_cols = [col for cols in ODDS_METRIC_COLUMNS.values() for col in cols]
 
     if odds_df.empty:
+        for col in all_odds_cols:
+            if col not in enriched.columns:
+                enriched[col] = None
         return enriched
 
-    merged = enriched.merge(odds_df, left_on="PLAYER_KEY", right_on="PLAYER_KEY_ODDS", how="left")
-    for col in ["PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"]:
-        if col in merged.columns:
-            merged = merged.drop(columns=[col])
+    # Chave canônica de merge
+    enriched["_PLAYER_KEY_MERGE"] = (
+        enriched["PLAYER_KEY"]
+        .fillna("")
+        .astype(str)
+        .apply(normalize_person_name)
+    )
+
+    odds_work = odds_df.copy()
+    odds_work["_PLAYER_KEY_MERGE"] = (
+        odds_work["PLAYER_KEY_ODDS"]
+        .fillna("")
+        .astype(str)
+        .apply(normalize_person_name)
+    )
+
+    # Mantém só o necessário do lado das odds
+    odds_keep_cols = ["_PLAYER_KEY_MERGE", "PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"] + [
+        col for col in all_odds_cols if col in odds_work.columns
+    ]
+    odds_work = odds_work[[c for c in odds_keep_cols if c in odds_work.columns]].copy()
+
+    # Remove colunas BetMGM antigas do team_df para evitar sufixos _x/_y
+    existing_betmgm_cols = [col for col in all_odds_cols if col in enriched.columns]
+    if existing_betmgm_cols:
+        enriched = enriched.drop(columns=existing_betmgm_cols)
+
+    merged = enriched.merge(odds_work, on="_PLAYER_KEY_MERGE", how="left")
+
+    drop_cols = [c for c in ["_PLAYER_KEY_MERGE", "PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"] if c in merged.columns]
+    if drop_cols:
+        merged = merged.drop(columns=drop_cols)
+
+    # Garante presença das colunas mesmo se nenhuma linha casar
+    for col in all_odds_cols:
+        if col not in merged.columns:
+            merged[col] = None
+
     return merged
 
 
