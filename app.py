@@ -3266,6 +3266,35 @@ def main() -> None:
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
+debug_line_col = ODDS_METRIC_COLUMNS[line_metric][0]
+
+st.write("DEBUG BETMGM", {
+    "use_market_line": use_market_line,
+    "selected_game": f"{selected_game['away_team_name']} @ {selected_game['home_team_name']}",
+    "event_found": selected_odds_event is not None,
+    "odds_rows": len(odds_df),
+    "away_market_lines": int(away_df[debug_line_col].notna().sum()) if debug_line_col in away_df.columns else 0,
+    "home_market_lines": int(home_df[debug_line_col].notna().sum()) if debug_line_col in home_df.columns else 0,
+})
+
+if debug_line_col in away_df.columns:
+    st.write(
+        "AWAY MERGE SAMPLE",
+        away_df[["PLAYER_NAME", "PLAYER_KEY", debug_line_col]].head(12)
+    )
+
+if debug_line_col in home_df.columns:
+    st.write(
+        "HOME MERGE SAMPLE",
+        home_df[["PLAYER_NAME", "PLAYER_KEY", debug_line_col]].head(12)
+    )
+
+if not odds_df.empty:
+    st.write(
+        "ODDS SAMPLE",
+        odds_df[["PLAYER_NAME_ODDS", "PLAYER_KEY_ODDS", debug_line_col]].head(12)
+    )
+
     try:
         injury_df = fetch_latest_injury_report_df()
     except Exception:
