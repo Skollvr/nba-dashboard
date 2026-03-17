@@ -3230,9 +3230,9 @@ def main() -> None:
     home_df["TEAM_NAME"] = selected_game["home_team_name"]
 
     odds_df = pd.DataFrame()
-selected_odds_event = None
+    selected_odds_event = None
 
-if api_key_available:
+    if api_key_available:
     try:
         odds_events = fetch_nba_odds_events()
         st.write("Qtd eventos odds:", len(odds_events))
