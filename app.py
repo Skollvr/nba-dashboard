@@ -3786,56 +3786,44 @@ def render_team_section_v2(
         unsafe_allow_html=True,
     )
 
-    section_view = st.segmented_control(
-        f"Seção — {team_name}",
-        options=["Cards", "Injury Report", "Provável Escalação"],
-        default="Cards",
-        key=f"team_section_view_{team_name}",
+    st.markdown(
+        '<div class="section-note">Cards curtos no topo e painel detalhado do jogador sob demanda, para não carregar tranqueira à toa.</div>',
+        unsafe_allow_html=True,
     )
 
-    if section_view == "Cards":
-        st.markdown(
-            '<div class="section-note">Cards curtos no topo e painel detalhado do jogador sob demanda, para não carregar tranqueira à toa.</div>',
-            unsafe_allow_html=True,
+    render_player_cards_grid(
+        filtered_df,
+        line_metric=line_metric,
+        line_value=line_value,
+        use_market_line=use_market_line,
+        cards_per_row=cards_per_row,
+    )
+
+    options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
+    player_name = st.selectbox(
+        f"Jogador em foco — {team_name}",
+        options["PLAYER"].tolist(),
+        key=f"player_focus_v2_{team_name}_{chart_mode}_{line_metric}",
+    )
+
+    show_focus_panel = st.toggle(
+        f"Mostrar análise detalhada — {team_name}",
+        value=False,
+        key=f"show_focus_panel_{team_name}_{line_metric}_{chart_mode}",
+    )
+
+    if show_focus_panel:
+        selected_row = filtered_df.loc[filtered_df["PLAYER"] == player_name].iloc[0]
+        render_player_focus_panel(
+            selected_row,
+            line_metric,
+            line_value,
+            use_market_line,
+            season,
+            chart_mode,
         )
 
-        render_player_cards_grid(
-            filtered_df,
-            line_metric=line_metric,
-            line_value=line_value,
-            use_market_line=use_market_line,
-            cards_per_row=cards_per_row,
-        )
-
-        options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
-        player_name = st.selectbox(
-            f"Jogador em foco — {team_name}",
-            options["PLAYER"].tolist(),
-            key=f"player_focus_v2_{team_name}_{chart_mode}_{line_metric}",
-        )
-
-        show_focus_panel = st.toggle(
-            f"Mostrar análise detalhada — {team_name}",
-            value=False,
-            key=f"show_focus_panel_{team_name}_{line_metric}_{chart_mode}",
-        )
-
-        if show_focus_panel:
-            selected_row = filtered_df.loc[filtered_df["PLAYER"] == player_name].iloc[0]
-            render_player_focus_panel(
-                selected_row,
-                line_metric,
-                line_value,
-                use_market_line,
-                season,
-                chart_mode,
-            )
-
-    elif section_view == "Injury Report":
-        render_injury_report_tab(team_df, team_name)
-
-    else:
-        render_lineup_report_tab(team_df, team_name)
+    st.info("Injury Report e Provável Escalação estão temporariamente desativados para teste de performance.") 
     
 if __name__ == "__main__":
     main()
