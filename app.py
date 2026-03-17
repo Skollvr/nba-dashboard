@@ -3302,6 +3302,7 @@ if api_key_available:
 st.caption(
     f"Injury report oficial carregado: {injury_report_meta['report_label_et']} • {injury_report_meta['report_label_brt']}"
 )
+    
     render_summary_cards(
         away_df=away_df,
         home_df=home_df,
