@@ -1614,12 +1614,34 @@ def find_matching_odds_event(events: list[dict], home_team_name: str, away_team_
     target_home = normalize_text(home_team_name)
     target_away = normalize_text(away_team_name)
 
+    def aliases(name: str) -> set[str]:
+        base = normalize_text(name)
+        alias_map = {
+            "la clippers": {"los angeles clippers", "clippers", "lac"},
+            "los angeles clippers": {"la clippers", "clippers", "lac"},
+            "los angeles lakers": {"lakers", "lal"},
+            "new york knicks": {"knicks", "nyk"},
+            "golden state warriors": {"warriors", "gsw"},
+            "oklahoma city thunder": {"oklahoma city", "thunder", "okc"},
+            "phoenix suns": {"suns", "phx"},
+            "philadelphia 76ers": {"76ers", "sixers", "phi"},
+            "new orleans pelicans": {"pelicans", "nop"},
+            "san antonio spurs": {"spurs", "sas"},
+            "portland trail blazers": {"trail blazers", "blazers", "por"},
+        }
+        return {base, *alias_map.get(base, set())}
+
+    home_aliases = aliases(home_team_name)
+    away_aliases = aliases(away_team_name)
+
     for event in events:
         teams_payload = event.get("teams", {})
         event_home = normalize_text(teams_payload.get("home", {}).get("names", {}).get("long", ""))
         event_away = normalize_text(teams_payload.get("away", {}).get("names", {}).get("long", ""))
-        if event_home == target_home and event_away == target_away:
+
+        if event_home in home_aliases and event_away in away_aliases:
             return event
+
     return None
 
 
@@ -3208,17 +3230,38 @@ def main() -> None:
     home_df["TEAM_NAME"] = selected_game["home_team_name"]
 
     odds_df = pd.DataFrame()
-    if api_key_available:
-        try:
-            odds_events = fetch_nba_odds_events()
-            selected_odds_event = find_matching_odds_event(
-                odds_events,
-                home_team_name=selected_game["home_team_name"],
-                away_team_name=selected_game["away_team_name"],
+selected_odds_event = None
+
+if api_key_available:
+    try:
+        odds_events = fetch_nba_odds_events()
+        st.write("Qtd eventos odds:", len(odds_events))
+
+        selected_odds_event = find_matching_odds_event(
+            odds_events,
+            home_team_name=selected_game["home_team_name"],
+            away_team_name=selected_game["away_team_name"],
+        )
+
+        st.write("Jogo app:", selected_game["away_team_name"], "@", selected_game["home_team_name"])
+        st.write("Evento odds encontrado:", selected_odds_event is not None)
+
+        if selected_odds_event:
+            teams_payload = selected_odds_event.get("teams", {})
+            st.write(
+                "Evento odds matched:",
+                teams_payload.get("away", {}).get("names", {}).get("long", ""),
+                "@",
+                teams_payload.get("home", {}).get("names", {}).get("long", ""),
             )
-            odds_df = extract_betmgm_player_props(selected_odds_event)
-        except Exception:
-            odds_df = pd.DataFrame()
+
+        odds_df = extract_betmgm_player_props(selected_odds_event)
+        st.write("Qtd linhas odds_df:", len(odds_df))
+        if not odds_df.empty:
+            st.write(odds_df.head(10))
+    except Exception as exc:
+        st.error(f"Erro ao buscar odds BetMGM: {exc}")
+        odds_df = pd.DataFrame()
 
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
