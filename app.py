@@ -3346,9 +3346,9 @@ def main() -> None:
         if not test_row.empty:
             row = test_row.iloc[0]
             line_ctx = get_line_context(
-                row=row,
-                line_metric=line_metric,
-                manual_line_value=line_value,
+                row,
+                line_metric,
+                line_value,
                 use_market_line=use_market_line,
             )
 
