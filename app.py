@@ -3619,10 +3619,17 @@ def render_team_section_v2(
     summary_df, detail_df = build_display_dataframes(filtered_df)
 
     st.markdown(f"### {team_name}")
-    st.markdown(
-        f'<div><span class="info-pill">Jogadores: {len(filtered_df)}</span><span class="info-pill">Linha ativa: {line_metric} {format_number(line_value)}</span><span class="info-pill">Modo mercado: {"BetMGM quando houver" if use_market_line else "Manual"}</span></div>',
-        unsafe_allow_html=True,
+
+    line_info_text = (
+        f"Linha ativa: {line_metric} • mercado por jogador (BetMGM quando houver)"
+        if use_market_line
+        else f"Linha ativa: {line_metric} {format_number(line_value)} • manual"
     )
+
+    st.markdown(
+        f'<div><span class="info-pill">Jogadores: {len(filtered_df)}</span><span class="info-pill">{line_info_text}</span><span class="info-pill">Modo mercado: {"BetMGM quando houver" if use_market_line else "Manual"}</span></div>',
+        unsafe_allow_html=True,
+    ) 
 
     cards_tab, table_tab, injury_tab, lineup_tab = st.tabs(["Cards", "Tabela", "Injury Report", "Provável Escalação"])
 
