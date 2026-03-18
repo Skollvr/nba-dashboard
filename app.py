@@ -3546,7 +3546,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-        with st.sidebar:
+    with st.sidebar:
         st.header("Configurações")
         selected_date = get_brasilia_today()
         st.caption(f"Jogos do dia em Brasília • {selected_date.strftime('%d/%m/%Y')}")
