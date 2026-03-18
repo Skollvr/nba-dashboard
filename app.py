@@ -891,11 +891,12 @@ def inject_css() -> None:
         .main-title {
             font-size: 2.35rem;
             font-weight: 800;
-            line-height: 1.05;
+            line-height: 1.2;
             letter-spacing: -0.03em;
             color: #f8fbff;
-            margin: 0 0 0.35rem 0;
-            padding-top: 0.15rem;
+            margin: 0 0 0.45rem 0;
+            padding-top: 0;
+            overflow: hidden;
         }
 
         .subtitle {
