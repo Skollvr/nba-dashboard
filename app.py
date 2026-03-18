@@ -3530,21 +3530,21 @@ def render_team_section_legacy(
 def main() -> None:
     inject_css()
 
-st.markdown('<div class="main-title">NBA Props Dashboard</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="subtitle">Escolha o jogo, defina a métrica e compare projeção, consistência e linha ativa por jogador.</div>',
-    unsafe_allow_html=True,
-)
-st.markdown(
-    """
-    <div class="hero-pills">
-        <span class="hero-pill">Projeções</span>
-        <span class="hero-pill">Linha manual / BetMGM</span>
-        <span class="hero-pill">Leitura rápida mobile</span>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    st.markdown('<div class="main-title">NBA Props Dashboard</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Escolha o jogo, defina a métrica e compare projeção, consistência e linha ativa por jogador.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <div class="hero-pills">
+            <span class="hero-pill">Projeções</span>
+            <span class="hero-pill">Linha manual / BetMGM</span>
+            <span class="hero-pill">Leitura rápida mobile</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     with st.sidebar:
         st.header("Configurações")
