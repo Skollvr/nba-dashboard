@@ -889,13 +889,40 @@ def inject_css() -> None:
             padding-bottom: 2rem;
         }
         .main-title {
-            font-size: 2.1rem;
+            font-size: 2.35rem;
             font-weight: 800;
-            margin-bottom: 0.15rem;
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+            color: #f8fbff;
+            margin: 0 0 0.35rem 0;
+            padding-top: 0.15rem;
         }
+
         .subtitle {
-            color: #94a3b8;
-            margin-bottom: 1rem;
+            font-size: 1rem;
+            line-height: 1.55;
+            color: #9db0c9;
+            max-width: 820px;
+            margin: 0 0 0.9rem 0;
+        }
+        .hero-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin: 0 0 1.25rem 0;
+        }
+
+        .hero-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.42rem 0.8rem;
+            border-radius: 999px;
+            background: rgba(143, 107, 255, 0.14);
+            border: 1px solid rgba(143, 107, 255, 0.28);
+            color: #d9cbff;
+            font-size: 0.78rem;
+            font-weight: 600;
+            letter-spacing: 0.01em;
         }
         .matchup-shell {
             background: linear-gradient(180deg, rgba(17,24,39,0.92), rgba(15,23,42,0.92));
@@ -1342,6 +1369,27 @@ def inject_css() -> None:
             .detail-mini-grid {
                 grid-template-columns: 1fr;
             }
+
+        @media (max-width: 768px) {
+            .main-title {
+            font-size: 1.9rem;
+            }
+
+        .subtitle {
+            font-size: 0.92rem;
+            margin-bottom: 0.8rem;
+            }
+
+        .hero-pills {
+            gap: 0.4rem;
+            margin-bottom: 1rem;
+            }
+
+        .hero-pill {
+            font-size: 0.72rem;
+            padding: 0.38rem 0.7rem;
+            }
+        }            
         }
         </style>
         """,
@@ -3482,11 +3530,21 @@ def render_team_section_legacy(
 def main() -> None:
     inject_css()
 
-    st.markdown('<div class="main-title">NBA Dashboard MVP</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="subtitle">Jogos do dia com leitura de PTS, REB, AST e PRA em cards ou tabela, agora com linha manual e BetMGM quando disponível.</div>',
-        unsafe_allow_html=True,
-    )
+st.markdown('<div class="main-title">NBA Props Dashboard</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="subtitle">Escolha o jogo, defina a métrica e compare projeção, consistência e linha ativa por jogador.</div>',
+    unsafe_allow_html=True,
+)
+st.markdown(
+    """
+    <div class="hero-pills">
+        <span class="hero-pill">Projeções</span>
+        <span class="hero-pill">Linha manual / BetMGM</span>
+        <span class="hero-pill">Leitura rápida mobile</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
     with st.sidebar:
         st.header("Configurações")
