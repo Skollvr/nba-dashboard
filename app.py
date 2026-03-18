@@ -885,9 +885,10 @@ def inject_css() -> None:
         """
         <style>
         .block-container {
-            padding-top: 1.1rem;
+            padding-top: 2rem;
             padding-bottom: 2rem;
         }
+
         .main-title {
             font-size: 2.35rem;
             font-weight: 800;
@@ -895,17 +896,16 @@ def inject_css() -> None:
             letter-spacing: -0.03em;
             color: #f8fbff;
             margin: 0 0 0.45rem 0;
-            padding-top: 0;
-            overflow: hidden;
+            padding-top: 0.4rem;
         }
 
         .subtitle {
-            font-size: 1rem;
-            line-height: 1.55;
-            color: #9db0c9;
-            max-width: 820px;
-            margin: 0 0 0.9rem 0;
-        }
+           font-size: 1rem;
+           line-height: 1.55;
+           color: #9db0c9;
+           max-width: 820px;
+           margin: 0 0 0.9rem 0;
+       } 
         .hero-pills {
             display: flex;
             flex-wrap: wrap;
