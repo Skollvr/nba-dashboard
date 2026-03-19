@@ -27,7 +27,7 @@ from nba_api.stats.static import teams
 
 
 st.set_page_config(
-    page_title="NBA Dashboard MVP",
+    page_title="NBA Props Dashboard",
     page_icon="🏀",
     layout="wide",
 )
