@@ -3576,7 +3576,7 @@ def render_player_focus_panel(
             st.info("Sem histórico suficiente para gerar o gráfico.")
             
     with market_tab:
-        # 1. MAPEAMENTO DE SEGURANÇA (Para converter nomes em Siglas)
+        # 1. MAPEAMENTO COMPLETO
         team_map = {
             'Hawks': 'ATL', 'Celtics': 'BOS', 'Nets': 'BKN', 'Hornets': 'CHA', 'Bulls': 'CHI', 
             'Cavaliers': 'CLE', 'Mavericks': 'DAL', 'Nuggets': 'DEN', 'Pistons': 'DET', 
@@ -3587,31 +3587,32 @@ def render_player_focus_panel(
             'Spurs': 'SAS', 'Raptors': 'TOR', 'Jazz': 'UTA', 'Wizards': 'WAS', 'Trail Blazers': 'POR'
         }
 
-        # 2. TENTA IDENTIFICAR O ADVERSÁRIO
+        # 2. BUSCA BRUTA (Varre cada coluna do jogador para achar o adversário)
         opp_abbr = None
-        player_team = str(row.get('TEAM_NAME', ''))
+        player_team_name = str(row.get('TEAM_NAME', ''))
         
-        # Pega as informações de Matchup que aparecem nos cards (ex: "Memphis Grizzlies vs G")
-        matchup_data = f"{row.get('MATCHUP_INFO', '')} {row.get('MATCHUP_LABEL', '')}"
-        
-        # Busca qual time do dicionário está no texto, ignorando o time do próprio jogador
-        for team_name, abbr in team_map.items():
-            if team_name in matchup_data and team_name not in player_team:
-                opp_abbr = abbr
-                break
-        
-        # 3. SE ACHOU O ADVERSÁRIO, MOSTRA O DOSSIÊ
+        # O "Pulo do Gato": olhamos todos os valores da linha em busca de um time
+        for col_val in row.values:
+            val_str = str(col_val)
+            for team_name, abbr in team_map.items():
+                # Se acharmos um nome de time (ex: Memphis) e não for o time do Jaylen (Celtics)
+                if team_name in val_str and team_name not in player_team_name:
+                    opp_abbr = abbr
+                    break
+            if opp_abbr: break
+
+        # 3. LOGICA DE EXIBIÇÃO
         if opp_abbr:
             st.markdown(f"### ⚔️ Histórico de Confronto: vs {opp_abbr}")
-            st.caption(f"Análise dos últimos 5 jogos de {row['PLAYER']} contra a defesa do {opp_abbr} (nesta temporada).")
+            st.caption(f"Desempenho real de {row['PLAYER']} nos últimos 5 jogos contra a defesa do {opp_abbr}.")
             
             if not log.empty:
-                # Filtra o histórico do jogador apenas contra essa sigla
+                # Filtra o histórico procurando a sigla no campo MATCHUP do log
                 h2h_log = log[log['MATCHUP'].str.contains(opp_abbr)].copy()
                 h2h_log = h2h_log.sort_values('GAME_DATE', ascending=False).head(5)
                 
                 if not h2h_log.empty:
-                    # Cálculos baseados na métrica selecionada no Raio-X
+                    # Cálculos
                     h2h_log["PRA"] = h2h_log["PTS"] + h2h_log["REB"] + h2h_log["AST"]
                     h2h_log["3PM"] = h2h_log.get("FG3M", 0)
                     
@@ -3622,36 +3623,28 @@ def render_player_focus_panel(
                     h2h_total = len(h2h_log)
                     h2h_pct = (h2h_hits / h2h_total) * 100
                     
-                    # Interface: Métricas H2H
+                    # Cards de métricas
                     c1, c2, c3 = st.columns(3)
-                    with c1: 
-                        st.metric("Jogos Realizados", h2h_total)
-                    with c2:
+                    with c1: st.metric("Encontros", h2h_total)
+                    with c2: 
                         avg_h2h = h2h_log[visual_metric].mean()
-                        st.metric(f"Média vs {opp_abbr}", f"{avg_h2h:.1f}", delta=f"{avg_h2h - m_line:.1f} vs Linha")
-                    with c3:
-                        st.metric("Hit Rate H2H", f"{h2h_pct:.0f}%")
+                        st.metric(f"Média vs {opp_abbr}", f"{avg_h2h:.1f}", delta=f"{avg_h2h - m_line:.1f}")
+                    with c3: st.metric("Hit Rate H2H", f"{h2h_pct:.0f}%")
 
-                    # Tabela detalhada
+                    # Tabela
                     h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', visual_metric, 'MIN']].copy()
                     h2h_display['GAME_DATE'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
                     h2h_display['Status'] = h2h_display[visual_metric].apply(lambda x: "✅ OVER" if x > m_line else "❌ UNDER")
-                    
                     st.dataframe(h2h_display, hide_index=True, use_container_width=True)
-                    
-                    # Alertas inteligentes
-                    if h2h_pct >= 80:
-                        st.success(f"🔥 **CARRASCO:** {row['PLAYER']} tem dominado o {opp_abbr} nesta temporada.")
-                    elif h2h_pct <= 20:
-                        st.error(f"⚠️ **DIFICULDADE:** O sistema defensivo do {opp_abbr} costuma travar o {row['PLAYER']}.")
                 else:
-                    st.info(f"Nenhum jogo registrado de {row['PLAYER']} contra {opp_abbr} nesta temporada.")
+                    st.info(f"Nenhum jogo registrado contra {opp_abbr} nesta temporada.")
             else:
-                st.info("Sem dados de histórico para este jogador.")
+                st.info("Log de histórico indisponível.")
         else:
-            st.warning("Não foi possível extrair a sigla do adversário. Verifique os dados de Matchup.")
-
-    st.markdown("</div>", unsafe_allow_html=True)
+            # Caso a busca falhe, mostramos as chaves para debugar (ajuda a gente a consertar)
+            st.warning("Não foi possível detectar o adversário automaticamente.")
+            with st.expander("Ver dados brutos (Debug)"):
+                st.write(row.to_dict())
 
 
 def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
