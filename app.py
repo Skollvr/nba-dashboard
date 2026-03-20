@@ -25,6 +25,41 @@ from nba_api.stats.endpoints import (
 )
 from nba_api.stats.static import teams
 
+# --- LOGO ABAIXO DOS IMPORTS OU DO DICIONÁRIO DE CORES ---
+
+st.markdown("""
+    <style>
+        /* 1. Cor dos botões de seleção (Projeções, Linha Manual, etc.) */
+        div[data-testid="stHorizontalBlock"] button {
+            background-color: #1e2633 !important; /* Fundo escuro padrão */
+            color: white !important;
+            border: 1px solid #3e4a5e !important;
+        }
+
+        /* 2. Cor do botão quando ele está selecionado ou focado */
+        div[data-testid="stHorizontalBlock"] button:focus, 
+        div[data-testid="stHorizontalBlock"] button:active {
+            background-color: #00ffcc !important; /* Verde Água Neon */
+            color: #000 !important;
+            border: none !important;
+            box-shadow: 0 0 15px rgba(0, 255, 204, 0.4);
+        }
+
+        /* 3. Cor da "bolinha" e da barra do Slider (Minutos, Jogos) */
+        .stSlider [data-baseweb="slider"] > div > div {
+            background-color: #00ffcc !important;
+        }
+        .stSlider [data-baseweb="slider"] [data-testid="stTickBar"] {
+            display: none; /* Limpa os risquinhos do slider pra ficar mais clean */
+        }
+
+        /* 4. Cor do Switch (Onde liga "Usar linha BetMGM") */
+        .stCheckbox [data-testid="stWidgetLabel"] p {
+            color: #00ffcc !important;
+            font-weight: bold;
+        }
+    </style>
+""", unsafe_allow_html=True)
 st.markdown("""
     <style>
         /* Fundo principal do App */
