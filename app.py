@@ -25,39 +25,37 @@ from nba_api.stats.endpoints import (
 )
 from nba_api.stats.static import teams
 
-# --- DICIONÁRIO OFICIAL DE CORES DA NBA (Hex Codes) ---
-# Usamos a cor primária para o fundo e a secundária para detalhes/texto
 NBA_TEAM_COLORS = {
-    'ATL': {'primary': '#E03A3E', 'secondary': '#C1D32F'}, # Hawks
-    'BOS': {'primary': '#007A33', 'secondary': '#BA9653'}, # Celtics
-    'BKN': {'primary': '#000000', 'secondary': '#FFFFFF'}, # Nets
-    'CHA': {'primary': '#1D1160', 'secondary': '#00788C'}, # Hornets
-    'CHI': {'primary': '#CE1141', 'secondary': '#000000'}, # Bulls
-    'CLE': {'primary': '#6F263D', 'secondary': '#FFB81C'}, # Cavaliers
-    'DAL': {'primary': '#00538C', 'secondary': '#002B5E'}, # Mavericks
-    'DEN': {'primary': '#0E2240', 'secondary': '#FEC524'}, # Nuggets
-    'DET': {'primary': '#C8102E', 'secondary': '#1D428A'}, # Pistons
-    'GSW': {'primary': '#1D428A', 'secondary': '#FFC72C'}, # Warriors
-    'HOU': {'primary': '#CE1141', 'secondary': '#000000'}, # Rockets
-    'IND': {'primary': '#002D62', 'secondary': '#FDBB30'}, # Pacers
-    'LAC': {'primary': '#C8102E', 'secondary': '#1D428A'}, # Clippers
-    'LAL': {'primary': '#552583', 'secondary': '#FDB927'}, # Lakers
-    'MEM': {'primary': '#5D76A9', 'secondary': '#12173F'}, # Grizzlies
-    'MIA': {'primary': '#98002E', 'secondary': '#F9A01B'}, # Heat
-    'MIL': {'primary': '#00471B', 'secondary': '#EEE1C6'}, # Bucks
-    'MIN': {'primary': '#0C2340', 'secondary': '#236192'}, # Timberwolves
-    'NOP': {'primary': '#0C2340', 'secondary': '#C8102E'}, # Pelicans
-    'NYK': {'primary': '#006BB6', 'secondary': '#F58426'}, # Knicks
-    'OKC': {'primary': '#007AC1', 'secondary': '#EF3B24'}, # Thunder
-    'ORL': {'primary': '#0077C0', 'secondary': '#C4CED4'}, # Magic
-    'PHI': {'primary': '#006BB6', 'secondary': '#ED174C'}, # 76ers
-    'PHX': {'primary': '#1D1060', 'secondary': '#E56020'}, # Suns
-    'POR': {'primary': '#E03A3E', 'secondary': '#000000'}, # Trail Blazers
-    'SAC': {'primary': '#5A2D81', 'secondary': '#63727A'}, # Kings
-    'SAS': {'primary': '#C4CED4', 'secondary': '#000000'}, # Spurs
-    'TOR': {'primary': '#CE1141', 'secondary': '#000000'}, # Raptors
-    'UTA': {'primary': '#002B5C', 'secondary': '#00471B'}, # Jazz
-    'WAS': {'primary': '#002B5C', 'secondary': '#E31837'}  # Wizards
+    'ATL': {'primary': '#E03A3E', 'secondary': '#C1D32F', 'name': 'Hawks'},
+    'BOS': {'primary': '#007A33', 'secondary': '#BA9653', 'name': 'Celtics'},
+    'BKN': {'primary': '#000000', 'secondary': '#FFFFFF', 'name': 'Nets'},
+    'CHA': {'primary': '#1D1160', 'secondary': '#00788C', 'name': 'Hornets'},
+    'CHI': {'primary': '#CE1141', 'secondary': '#000000', 'name': 'Bulls'},
+    'CLE': {'primary': '#6F263D', 'secondary': '#FFB81C', 'name': 'Cavaliers'},
+    'DAL': {'primary': '#00538C', 'secondary': '#002B5E', 'name': 'Mavericks'},
+    'DEN': {'primary': '#0E2240', 'secondary': '#FEC524', 'name': 'Nuggets'},
+    'DET': {'primary': '#C8102E', 'secondary': '#1D428A', 'name': 'Pistons'},
+    'GSW': {'primary': '#1D428A', 'secondary': '#FFC72C', 'name': 'Warriors'},
+    'HOU': {'primary': '#CE1141', 'secondary': '#000000', 'name': 'Rockets'},
+    'IND': {'primary': '#002D62', 'secondary': '#FDBB30', 'name': 'Pacers'},
+    'LAC': {'primary': '#C8102E', 'secondary': '#1D428A', 'name': 'Clippers'},
+    'LAL': {'primary': '#552583', 'secondary': '#FDB927', 'name': 'Lakers'},
+    'MEM': {'primary': '#5D76A9', 'secondary': '#12173F', 'name': 'Grizzlies'},
+    'MIA': {'primary': '#98002E', 'secondary': '#F9A01B', 'name': 'Heat'},
+    'MIL': {'primary': '#00471B', 'secondary': '#EEE1C6', 'name': 'Bucks'},
+    'MIN': {'primary': '#0C2340', 'secondary': '#236192', 'name': 'Timberwolves'},
+    'NOP': {'primary': '#0C2340', 'secondary': '#C8102E', 'name': 'Pelicans'},
+    'NYK': {'primary': '#006BB6', 'secondary': '#F58426', 'name': 'Knicks'},
+    'OKC': {'primary': '#007AC1', 'secondary': '#EF3B24', 'name': 'Thunder'},
+    'ORL': {'primary': '#0077C0', 'secondary': '#C4CED4', 'name': 'Magic'},
+    'PHI': {'primary': '#006BB6', 'secondary': '#ED174C', 'name': '76ers'},
+    'PHX': {'primary': '#1D1060', 'secondary': '#E56020', 'name': 'Suns'},
+    'POR': {'primary': '#E03A3E', 'secondary': '#000000', 'name': 'Trail Blazers'},
+    'SAC': {'primary': '#5A2D81', 'secondary': '#63727A', 'name': 'Kings'},
+    'SAS': {'primary': '#C4CED4', 'secondary': '#000000', 'name': 'Spurs'},
+    'TOR': {'primary': '#CE1141', 'secondary': '#000000', 'name': 'Raptors'},
+    'UTA': {'primary': '#002B5C', 'secondary': '#00471B', 'name': 'Jazz'},
+    'WAS': {'primary': '#002B5C', 'secondary': '#E31837', 'name': 'Wizards'}
 }
 
 st.set_page_config(
@@ -3360,7 +3358,21 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
-    st.code(", ".join(list(row.index))) # Mostra tudo em linha reta pra facilitar
+    # --- RASTREADOR INTELIGENTE V3 ---
+    full_name_raw = str(row.get('TEAM_NAME', '')).lower()
+    team_key = 'NBA' # Default caso nada funcione
+    
+    # Ele percorre o dicionário e vê se o nome do time (ex: 'Rockets') está no nome completo
+    for abbr, info in NBA_TEAM_COLORS.items():
+        if info['name'].lower() in full_name_raw:
+            team_key = abbr
+            break
+            
+    # Caso especial para siglas diretas
+    if team_key == 'NBA':
+        team_key = str(row.get('TEAM_ABBR', 'NBA')).upper()
+
+    colors = NBA_TEAM_COLORS.get(team_key, {'primary': '#1d222d', 'secondary': '#ffcc00'})
 # --- BUSCADOR DE CORES TURBO ---
     team_abbr = row.get('TEAM_ABBR')
     team_name = row.get('TEAM_NAME', '')
