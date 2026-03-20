@@ -46,6 +46,16 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+    <style>
+        /* Faz os containers (cards) terem efeito de vidro */
+        div[data-testid="stVerticalBlock"] > div > div[style*="border"] {
+            background: rgba(255, 255, 255, 0.03) !important;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 NBA_TEAM_COLORS = {
     'ATL': {'primary': '#E03A3E', 'secondary': '#C1D32F', 'name': 'Hawks'},
     'BOS': {'primary': '#007A33', 'secondary': '#BA9653', 'name': 'Celtics'},
