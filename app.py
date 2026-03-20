@@ -3933,7 +3933,7 @@ def render_team_section_v2(
         cards_per_row=cards_per_row,
     )
 
-   options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
+    options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
     player_name = st.selectbox(
         f"Jogador em foco — {team_name}",
         options["PLAYER"].tolist(),
