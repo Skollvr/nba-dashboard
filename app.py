@@ -3352,7 +3352,8 @@ def render_player_focus_panel(
         )
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
 
-    overview_tab, detail_tab = st.tabs(["Resumo", "Detalhamento"])
+    # NOVIDADE: As 3 abas organizando a tela!
+    overview_tab, detail_tab, visual_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual"])
 
     with overview_tab:
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
@@ -3393,8 +3394,75 @@ def render_player_focus_panel(
 
         st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
 
-   # Exibe o gráfico automaticamente junto com o detalhamento
-    render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode)
+    with visual_tab:
+        # 1. Gráfico Histórico Clássico (Movido para dentro da aba para limpar a tela)
+        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode)
+        
+        st.divider()
+        
+        # 2. NOVO: Gráfico Piso e Teto (Histograma)
+        st.markdown(f"### Frequência na Temporada — {line_metric}")
+        st.caption("Veja os montinhos: concentrados à esquerda (Piso seguro), espalhados à direita (Teto alto).")
+        
+        log = get_player_log(int(row["PLAYER_ID"]), season)
+        if not log.empty:
+            log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
+            log["3PM"] = log["FG3M"]
+            
+            # Pega a linha ativa (Mercado ou Manual)
+            line_ctx = get_line_context(row, line_metric, line_value, use_market_line)
+            active_line = float(line_ctx["line_value"])
+            
+            # Traduz a métrica atual para a coluna do banco de dados
+            log_col_map = {"PRA": "PRA", "PTS": "PTS", "REB": "REB", "AST": "AST", "3PM": "3PM", "FGA": "FGA", "3PA": "FG3A"}
+            active_col = log_col_map.get(line_metric, "PRA")
+            
+            if active_col in log.columns:
+                hist_data = log[active_col].dropna()
+                
+                fig = go.Figure()
+                fig.add_trace(go.Histogram(
+                    x=hist_data,
+                    # Configura a largura das barras baseado no tipo de estatística
+                    xbins=dict(start=0, end=max(hist_data.max(), active_line) + 5, size=2 if active_col not in ["3PM", "3PA"] else 1),
+                    marker_color="rgba(139,92,246, 0.65)",
+                    marker_line_color="rgba(139,92,246, 1)",
+                    marker_line_width=1.5,
+                    opacity=0.9,
+                    hovertemplate=f"Valor de {line_metric}: %{{x}}<br>Jogos atingidos: %{{y}}<extra></extra>"
+                ))
+                
+                # Desenha a linha vertical com a aposta
+                line_color = "#10b981" if line_ctx["edge"] >= 0 else "#ef4444"
+                fig.add_vline(
+                    x=active_line, 
+                    line_dash="dash", 
+                    line_color=line_color, 
+                    line_width=3,
+                    annotation_text=f"Linha de Aposta: {active_line}", 
+                    annotation_position="top right",
+                    annotation_font_color="#cbd5e1"
+                )
+
+                fig.update_layout(
+                    template="plotly_dark",
+                    height=380,
+                    margin=dict(l=20, r=20, t=40, b=20),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(15,23,42,0.35)",
+                    xaxis_title=f"Valor de {line_metric} na partida",
+                    yaxis_title="Quantidade de Jogos",
+                    dragmode=False,
+                    bargap=0.15
+                )
+                fig.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                fig.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
+                
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info(f"Dados indisponíveis para a métrica {line_metric}.")
+        else:
+            st.info("Sem histórico suficiente para gerar o gráfico.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
