@@ -2984,7 +2984,7 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
                 hovertemplate=f"{metric}: %{{y:.1f}}<extra></extra>",
             )
         )
-       fig.update_layout(
+        fig.update_layout(
             template="plotly_dark",
             height=360,
             margin=dict(l=20, r=20, t=10, b=20),
