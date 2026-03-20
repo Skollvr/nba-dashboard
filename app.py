@@ -376,43 +376,42 @@ def resolve_team_line(line: str) -> str:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
-    # Disfarce para passar pela proteção do site da NBA
+    # Cabeçalhos para simular um navegador real e evitar bloqueios da NBA
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://official.nba.com/"
     }
+    
+    # Descobre a temporada atual dinamicamente
     today = datetime.now(APP_TIMEZONE).date()
     season_str = get_season_string(today)
     page_url = f"https://official.nba.com/nba-injury-report-{season_str}-season/"
     
     try:
-        # Timeout reduzido para não travar o app
         response = requests.get(page_url, headers=headers, timeout=10)
+        if response.status_code == 404:
+            # Fallback para a temporada anterior caso a transição de ano no site ainda não tenha ocorrido
+            fallback_year = f"{today.year-1}-{str(today.year)[-2:]}"
+            page_url = f"https://official.nba.com/nba-injury-report-{fallback_year}-season/"
+            response = requests.get(page_url, headers=headers, timeout=10)
+        
         response.raise_for_status()
     except Exception:
-        fallback_season = f"{today.year-1}-{str(today.year)[-2:]}"
-        page_url = f"https://official.nba.com/nba-injury-report-{fallback_season}-season/"
-        try:
-            response = requests.get(page_url, headers=headers, timeout=10)
-            response.raise_for_status()
-        except Exception:
-            return ""
+        return ""
 
     html = response.text
-
-    # Regex para achar o PDF (agora cobre tanto links completos quanto links relativos)
-    pdf_urls = re.findall(
-        r'https?://[^"]*?Injury[-_]Report[^"]+\.pdf',
-        html,
-        flags=re.IGNORECASE
-    )
+    # Busca links de PDF que contenham "Injury-Report"
+    pdf_urls = re.findall(r'https?://[^"]*?Injury[-_]Report[^"]+\.pdf', html, flags=re.IGNORECASE)
     
     if not pdf_urls:
+        # Tenta buscar links relativos caso a NBA mude o formato
         rel_urls = re.findall(r'href="(/[^"]*?Injury[-_]Report[^"]+\.pdf)"', html, flags=re.IGNORECASE)
         pdf_urls = [f"https://official.nba.com{url}" for url in rel_urls]
 
     if not pdf_urls:
         return ""
 
+    # Pega o PDF mais recente pela data no nome do arquivo
     dated_urls = []
     for url in pdf_urls:
         dt = parse_report_dt_from_url(url)
@@ -425,17 +424,13 @@ def fetch_latest_injury_report_pdf_url() -> str:
 
     return pdf_urls[0]
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_df() -> pd.DataFrame:
     pdf_url = fetch_latest_injury_report_pdf_url()
     if not pdf_url:
         return pd.DataFrame()
 
-    # Precisamos usar o mesmo disfarce para fazer o download do PDF
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
     try:
         response = requests.get(pdf_url, headers=headers, timeout=15)
@@ -445,50 +440,27 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
 
     lines = extract_pdf_text_lines(response.content)
     rows = []
-
-    current_game_date = ""
-    current_game_time = ""
-    current_matchup = ""
-    current_team = ""
+    current_game_date, current_game_time, current_matchup, current_team = "", "", "", ""
     current_row = None
 
     for raw_line in lines:
         line = raw_line.strip()
-        if not line:
-            continue
-
-        if line.startswith("Game Date Game Time Matchup Team Player Name Current Status Reason"):
-            continue
+        if not line or "Game Date Game Time" in line: continue
 
         game_match = GAME_PREFIX_RE.match(line)
         if game_match:
-            if game_match.group("game_date"):
-                current_game_date = game_match.group("game_date")
-            current_game_time = game_match.group("game_time")
-            current_matchup = game_match.group("matchup")
+            if game_match.group("game_date"): current_game_date = game_match.group("game_date")
+            current_game_time, current_matchup = game_match.group("game_time"), game_match.group("matchup")
             line = game_match.group("rest").strip()
 
         resolved_team = resolve_team_line(line)
         if resolved_team:
             current_team = resolved_team
-            if "NOT YET SUBMITTED" in line:
-                current_row = None
-            continue
-
-        if "NOT YET SUBMITTED" in line:
-            current_row = None
             continue
 
         player_match = PLAYER_STATUS_RE.search(line)
         if player_match:
             player_name = " ".join(player_match.group("player").split())
-            status = player_match.group("status").strip()
-            reason = (player_match.group("reason") or "").strip()
-
-            prefix = line[:player_match.start()].strip()
-            if prefix:
-                current_team = prefix
-
             current_row = {
                 "GAME_DATE": current_game_date,
                 "GAME_TIME_ET": current_game_time,
@@ -496,20 +468,19 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
                 "TEAM_NAME_IR": current_team,
                 "PLAYER_NAME_IR": player_name,
                 "PLAYER_KEY_IR": normalize_person_name(player_name),
-                "INJ_STATUS": status,
-                "INJ_REASON": reason,
+                "INJ_STATUS": player_match.group("status").strip(),
+                "INJ_REASON": (player_match.group("reason") or "").strip(),
                 "INJ_REPORT_URL": pdf_url,
             }
             rows.append(current_row)
-        else:
-            if current_row is not None:
-                extra = line.strip()
-                if extra:
-                    current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {extra}'.strip()
+        elif current_row is not None:
+            # Captura continuação do motivo da lesão em linhas seguintes
+            current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {line}'.strip()
 
     injury_df = pd.DataFrame(rows)
-    if injury_df.empty:
-        return injury_df
+    if not injury_df.empty:
+        injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).strip()
+    return injury_df
 
     injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
     injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
@@ -3982,39 +3953,24 @@ def render_team_section_v2(
         )
 
     st.divider()
-    
-    # Chave para ligar/desligar a busca do PDF
-    show_injury = st.toggle(
-        f"🏥 Carregar Status Oficial e Rotação — {team_name}",
-        value=False,
-        key=f"toggle_ir_{team_name}"
-    )
+    show_injury = st.toggle(f"🏥 Carregar Status Oficial — {team_name}", key=f"ir_toggle_{team_name}")
 
     if show_injury:
-        with st.spinner("Lendo o PDF do Injury Report oficial da NBA... (Isso pode levar até 30s na primeira vez)"):
-            # Descobrimos o ID do time a partir do nome
+        with st.spinner("Buscando PDF oficial da NBA..."):
+            injury_df = fetch_latest_injury_report_df()
             team_id = next((tid for tid, t in TEAM_LOOKUP.items() if t.get("full_name") == team_name), 0)
             
-            # Tenta baixar/ler o PDF (com cache automático do Streamlit)
-            try:
-                injury_df = fetch_latest_injury_report_df()
-            except Exception:
-                injury_df = pd.DataFrame()
-            
-            # Cruza os dados do PDF com o elenco completo do time
+            # Cruza os dados do PDF com o time selecionado
             enriched_team_df = merge_injury_report(
                 team_df=team_df,
                 injury_df=injury_df,
                 team_name=team_name,
-                team_id=team_id,
+                team_id=team_id
             )
             
-            # Exibe os resultados organizados nas funções que você já tinha criado
-            ir_tab, lineup_tab = st.tabs(["Status Oficial (PDF)", "Escalação Pós-Filtro"])
-            with ir_tab:
-                render_injury_report_tab(enriched_team_df, team_name)
-            with lineup_tab:
-                render_lineup_report_tab(enriched_team_df, team_name)
+            ir_tab, lineup_tab = st.tabs(["Status Oficial", "Rotação Atualizada"])
+            with ir_tab: render_injury_report_tab(enriched_team_df, team_name)
+            with lineup_tab: render_lineup_report_tab(enriched_team_df, team_name)
     
 if __name__ == "__main__":
     main()
