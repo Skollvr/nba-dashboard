@@ -3549,14 +3549,23 @@ def main() -> None:
         st.caption(f"Jogos do dia em Brasília • {selected_date.strftime('%d/%m/%Y')}")
 
         st.divider()
-        chart_mode = st.radio("Modo do gráfico", CHART_OPTIONS, index=0)
-        cards_per_row = st.select_slider("Cards por linha", options=[1, 2], value=2)
+        # Troca as bolinhas de seleção por pílulas clicáveis
+        _selected_chart = st.pills("Modo do gráfico", CHART_OPTIONS, default="Compacto")
+        # Trava de segurança: se desmarcar, volta pro Compacto
+        chart_mode = _selected_chart if _selected_chart else "Compacto"
+        # Troca o slider por pílulas clicáveis
+        _selected_cards = st.pills("Cards por linha", [1, 2], default=2)
+        # Trava de segurança: se desmarcar, volta para 2 cards por padrão
+        cards_per_row = _selected_cards if _selected_cards else 2
 
         st.divider()
         st.subheader("Filtros")
         min_games = st.slider("Mínimo de jogos na temporada", 0, 82, 5, 1)
         min_minutes = st.slider("Mínimo de minutos por jogo", 0, 40, 15, 1)
-        role_filter = st.selectbox("Mostrar jogadores", ROLE_OPTIONS, index=0)
+        # Troca a caixa de seleção por botões clicáveis (pills)
+        _selected_role = st.pills("Mostrar jogadores", ROLE_OPTIONS, default="Todos")
+        # Trava de segurança: se desmarcar tudo sem querer, volta a mostrar o time inteiro
+        role_filter = _selected_role if _selected_role else "Todos"
 
         st.divider()
         st.subheader("Linha")
