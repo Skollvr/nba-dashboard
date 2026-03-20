@@ -2821,7 +2821,7 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
             stat3_class = "ranking-good" if row["MATCHUP_LABEL"] == "Favorável" else ("ranking-bad" if row["MATCHUP_LABEL"] == "Difícil" else "")
         elif mode == "edge":
             stat1_label, stat1_value = "Edge", format_signed_number(row["RANK_EDGE"])
-            stat2_label, stat2_value = "Linha", format_number(row["RANK_LINE"])
+            stat2_label, stat2_value = "Linha", row["RANK_LINE_HTML"]
             stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
         else:
@@ -2889,6 +2889,7 @@ def render_game_rankings(
     rank_df["RANK_EDGE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("edge", 0.0)))
     rank_df["RANK_HIT_TEXT"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10", "-"))
     rank_df["RANK_HIT_HTML"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10_html", "-"))
+    rank_df["RANK_LINE_HTML"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: f'<span title="{ctx.get("tooltip", "")}" style="cursor:help;">{format_number(ctx.get("line_value", 0.0))} {ctx.get("icon", "")}</span>')
     rank_df["RANK_HIT_RATE"] = rank_df["RANK_HIT_TEXT"].apply(parse_ratio_text)
 
     if "LINE_CONTEXT" in rank_df.columns:
