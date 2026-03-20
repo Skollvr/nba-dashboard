@@ -1349,50 +1349,77 @@ def inject_css() -> None:
             font-size: 0.73rem;
             line-height: 1.2;
         }
+        /* OTIMIZAÇÕES PARA TABLETS E TELAS MÉDIAS */
         @media (max-width: 1200px) {
             .player-quick-grid {
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
         }
-        @media (max-width: 760px) {
-            .ranking-row {
-                grid-template-columns: 38px 1.5fr 0.8fr 0.8fr;
-            }
-            .ranking-row .ranking-stat:last-child {
-                display: none;
-            }
-            .micro-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-            .player-quick-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-            .detail-mini-grid {
-                grid-template-columns: 1fr;
-            }
-
+        
+        /* OTIMIZAÇÕES PARA SMARTPHONES (MOBILE) */
         @media (max-width: 768px) {
             .main-title {
-            font-size: 1.9rem;
+                font-size: 1.7rem;
+                padding-top: 0.2rem;
             }
-
-        .subtitle {
-            font-size: 0.92rem;
-            margin-bottom: 0.8rem;
+            .subtitle {
+                font-size: 0.9rem;
+                margin-bottom: 0.8rem;
             }
-
-        .hero-pills {
-            gap: 0.4rem;
-            margin-bottom: 1rem;
+            .hero-pills {
+                gap: 0.3rem;
+                margin-bottom: 0.8rem;
             }
-
-        .hero-pill {
-            font-size: 0.72rem;
-            padding: 0.38rem 0.7rem;
+            .hero-pill {
+                font-size: 0.65rem;
+                padding: 0.3rem 0.6rem;
             }
-        }            
+            .matchup-shell {
+                padding: 0.8rem 0.5rem;
+            }
+            .team-title {
+                font-size: 1.1rem;
+            }
+            .ranking-row {
+                grid-template-columns: 32px 1fr 0.8fr 0.8fr; 
+                gap: 0.2rem;
+            }
+            .ranking-row .ranking-stat:last-child {
+                display: none; 
+            }
+            .ranking-player {
+                font-size: 0.85rem;
+            }
+            .micro-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr)); 
+            }
+            .player-quick-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr)); 
+            }
+            .detail-mini-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr)) !important; 
+            }
+            .quick-stat, .detail-box, .summary-card {
+                padding: 0.6rem;
+            }
+            .player-headline-value {
+                font-size: 1.5rem;
+            }
         }
-        </style>
+        
+        /* PARA TELAS MUITO PEQUENAS (Ex: iPhone SE) */
+        @media (max-width: 380px) {
+            .player-quick-grid, .micro-grid {
+                grid-template-columns: 1fr; 
+            }
+            .ranking-row {
+                grid-template-columns: 28px 1fr 0.8fr; 
+            }
+            .ranking-row .ranking-stat:nth-last-child(2) {
+                display: none;
+            }
+        }
+        </style>        
         """,
         unsafe_allow_html=True,
     )
