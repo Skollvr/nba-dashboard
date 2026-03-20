@@ -3395,11 +3395,12 @@ def render_player_focus_panel(
         # Banner com a cor primária do time e borda na cor secundária
         st.markdown(f"""
             <div style="
-                background-color: {colors['primary']}; 
-                padding: 15px; 
-                border-radius: 8px; 
-                border-left: 10px solid {colors['secondary']};
-                margin-bottom: 15px;
+                background: linear-gradient(135deg, {colors['primary']} 0%, {colors['secondary']} 150%);
+                padding: 20px; 
+                border-radius: 12px; 
+                border-left: 15px solid {colors['secondary']};
+                margin-bottom: 20px;
+                box-shadow: 0 8px 20px rgba(0,0,0,0.4);
             ">
                 <h1 style="color: {colors['secondary']}; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -1px;">
                     {row['PLAYER']}
@@ -3798,11 +3799,12 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
             # Mini Banner no topo do card com as cores do time
             st.markdown(f"""
             <div style="
-                background-color: {colors['primary']}; 
-                border-left: 5px solid {colors['secondary']};
-                padding: 6px 10px;
-                border-radius: 4px;
-                margin-bottom: 8px;
+                background: linear-gradient(90deg, {colors['primary']} 0%, {colors['secondary']} 250%);
+                border-left: 8px solid {colors['secondary']};
+                padding: 12px;
+                border-radius: 8px;
+                margin-bottom: 12px;
+                box-shadow: 2px 4px 10px rgba(0,0,0,0.3);
             ">
                 <div style="color: {colors['secondary']}; font-weight: 800; font-size: 15px; line-height: 1.1;">
                     {row['PLAYER']}
