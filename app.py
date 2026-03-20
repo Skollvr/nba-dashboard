@@ -3799,7 +3799,7 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
 
         with top_right:
             # Mini Banner no topo do card com as cores do time
-        st.markdown(f"""
+            st.markdown(f"""
             <div style="
                 background-color: {colors['primary']}; 
                 border-left: 5px solid {colors['secondary']};
