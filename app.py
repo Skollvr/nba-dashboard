@@ -465,89 +465,91 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     current_row = None
     prev_line = "" 
 
-    # Exigimos a vírgula para não pegar lixo por engano
-    player_status_re = re.compile(
-        r"(?P<player>[A-Za-zÀ-ÿ0-9'\.\-\s]+,\s+[A-Za-zÀ-ÿ0-9'\.\-\s]+)\s+"
-        r"(?P<status>Available|Out|Questionable|Probable|Doubtful)\b"
-        r"(?:\s+(?P<reason>.*))?$",
-        flags=re.IGNORECASE
-    )
-
-    # Limpador de sujeira da linha (horários, times, matchups)
-    def clean_raw_player_name(raw: str, team_name: str) -> str:
-        c = re.sub(r"\d{1,2}:\d{2}\s*\(ET\)", "", raw, flags=re.IGNORECASE)
-        c = re.sub(r"[A-Z]{2,3}@[A-Z]{2,3}", "", c)
-        c = re.sub(r"\d{2}/\d{2}/\d{4}", "", c)
-        if team_name:
-            c = re.compile(re.escape(team_name), re.IGNORECASE).sub("", c)
-        return " ".join(c.split())
-
     for line in lines:
         line_clean = line.strip()
-        if not line_clean or "Game Date Game Time" in line_clean: 
+        if not line_clean or "Game Date Game Time" in line_clean or "Page " in line_clean: 
             continue
 
-        game_match = GAME_PREFIX_RE.search(line_clean)
-        if game_match:
-            if game_match.group("game_date"): current_game_date = game_match.group("game_date")
-            current_game_time = game_match.group("game_time")
-            current_matchup = game_match.group("matchup")
+        # Encontra a palavra-chave de status para usar como "faca" e cortar a linha no meio
+        status_match = re.search(r'\b(Available|Out|Questionable|Probable|Doubtful)\b', line_clean, re.IGNORECASE)
 
-        resolved_team = resolve_team_line(line_clean)
-        if resolved_team:
-            current_team = resolved_team
-            # NOTA MÁGICA: Não damos 'continue' se acharmos um Status de lesão na mesma linha!
-            has_status = any(re.search(rf'\b{kw}\b', line_clean, re.IGNORECASE) for kw in ["Out", "Questionable", "Probable", "Doubtful", "Available"])
-            if not has_status:
-                prev_line = line_clean
-                current_row = None 
-                continue
-
-        player_match = player_status_re.search(line_clean)
-        if player_match:
-            raw_player = player_match.group("player")
-            player_name = clean_raw_player_name(raw_player, current_team)
-            status = player_match.group("status").strip().capitalize()
+        if status_match:
+            status = status_match.group(1).capitalize()
+            prefix = line_clean[:status_match.start()].strip()
+            reason = line_clean[status_match.end():].strip()
             
-            current_row = {
-                "GAME_DATE": current_game_date, "GAME_TIME_ET": current_game_time,
-                "MATCHUP": current_matchup, "TEAM_NAME_IR": current_team,
-                "PLAYER_NAME_IR": player_name, "PLAYER_KEY_IR": normalize_person_name(player_name),
-                "INJ_STATUS": status,
-                "INJ_REASON": (player_match.group("reason") or "").strip(),
-                "INJ_REPORT_URL": pdf_url,
-            }
-            rows.append(current_row)
-            prev_line = line_clean
-            continue
+            # 1. Fatiar Data
+            date_match = re.search(r'\d{2}/\d{2}/\d{4}', prefix)
+            if date_match:
+                current_game_date = date_match.group()
+                prefix = prefix.replace(current_game_date, '').strip()
+                
+            # 2. Fatiar Hora
+            time_match = re.search(r'\d{1,2}:\d{2}\s*\(ET\)', prefix, re.IGNORECASE)
+            if time_match:
+                current_game_time = time_match.group()
+                prefix = prefix.replace(current_game_time, '').strip()
+                
+            # 3. Fatiar Matchup (ex: GSW@DET)
+            matchup_match = re.search(r'[A-Z]{2,3}@[A-Z]{2,3}', prefix)
+            if matchup_match:
+                current_matchup = matchup_match.group()
+                prefix = prefix.replace(current_matchup, '').strip()
+                
+            # 4. Fatiar Nome do Time
+            resolved_team = resolve_team_line(prefix)
+            if resolved_team:
+                current_team = resolved_team
+                prefix = re.compile(re.escape(resolved_team), re.IGNORECASE).sub('', prefix).strip()
+                
+            # 5. O que sobrou na frase é garantido ser o nome do jogador!
+            player_name = prefix.strip()
+            
+            # Fallback (Órfão): Se não sobrou nome, significa que o nome ficou na linha de cima
+            if not player_name or player_name == ",":
+                fallback_prefix = prev_line
+                resolved_team_prev = resolve_team_line(fallback_prefix)
+                if resolved_team_prev:
+                    current_team = resolved_team_prev
+                    fallback_prefix = re.compile(re.escape(resolved_team_prev), re.IGNORECASE).sub('', fallback_prefix).strip()
+                player_name = fallback_prefix.strip()
 
-        status_exact = line_clean.capitalize()
-        if status_exact in ["Out", "Questionable", "Probable", "Doubtful", "Available"]:
-            if "," in prev_line or len(prev_line.split()) >= 2:
-                player_name = clean_raw_player_name(prev_line, current_team)
+            # Limpeza estética de vírgulas penduradas no início ou fim
+            player_name = re.sub(r'^[\,\-]\s*', '', player_name)
+            player_name = re.sub(r'\s*[\,\-]$', '', player_name)
+            
+            # Valida se é um nome de verdade
+            if player_name and ("," in player_name or len(player_name.split()) >= 2):
                 current_row = {
-                    "GAME_DATE": current_game_date, "GAME_TIME_ET": current_game_time,
-                    "MATCHUP": current_matchup, "TEAM_NAME_IR": current_team,
-                    "PLAYER_NAME_IR": player_name, "PLAYER_KEY_IR": normalize_person_name(player_name),
-                    "INJ_STATUS": status_exact,
-                    "INJ_REASON": "",
+                    "GAME_DATE": current_game_date, 
+                    "GAME_TIME_ET": current_game_time,
+                    "MATCHUP": current_matchup, 
+                    "TEAM_NAME_IR": current_team,
+                    "PLAYER_NAME_IR": player_name, 
+                    "PLAYER_KEY_IR": normalize_person_name(player_name),
+                    "INJ_STATUS": status,
+                    "INJ_REASON": reason,
                     "INJ_REPORT_URL": pdf_url,
                 }
                 rows.append(current_row)
-                prev_line = line_clean
-                continue
-
-        if current_row is not None:
-            if "," not in line_clean and not resolve_team_line(line_clean):
+            
+            prev_line = line_clean
+            continue
+        
+        # Se não tem status na linha, processa como a declaração do time ou Motivo extra
+        resolved_team_no_status = resolve_team_line(line_clean)
+        if resolved_team_no_status:
+            current_team = resolved_team_no_status
+            current_row = None  
+        elif current_row is not None:
+            if "," not in line_clean:
                 current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {line_clean}'.strip()
-
+                
         prev_line = line_clean
 
     injury_df = pd.DataFrame(rows)
     if injury_df.empty:
-        st.error("🚨 DIAGNÓSTICO: O PDF foi baixado perfeitamente, mas a lupa não achou nenhum jogador. O layout oficial mudou!")
-        with st.expander("🕵️ Clique aqui para ver a caixa-preta do robô (Me mande um print do texto abaixo!)"):
-            st.code("\n".join(lines[:80]))
+        st.error("🚨 DIAGNÓSTICO: O PDF foi baixado, mas a extração não achou nenhum jogador.")
     else:
         injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
     
