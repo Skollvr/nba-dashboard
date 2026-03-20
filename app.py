@@ -374,7 +374,7 @@ def resolve_team_line(line: str) -> str:
     clean_line = str(line or "").replace("NOT YET SUBMITTED", "").strip()
     norm_line = normalize_text(clean_line)
     
-    # Novo: verifica se o nome de algum time está contido na linha bagunçada do PDF
+    # Proteção extra: se o nome do time estiver misturado com outra frase
     for norm_team, full_team in TEAM_NAME_LOOKUP_NORM.items():
         if norm_team in norm_line:
             return full_team
@@ -402,7 +402,6 @@ def fetch_latest_injury_report_pdf_url() -> str:
         return ""
 
     html = response.text
-    # Busca hiper-flexível: qualquer link que tenha "injury", "report" e ".pdf"
     all_hrefs = re.findall(r'href="([^"]+\.pdf)"', html, flags=re.IGNORECASE)
     pdf_urls = []
     for href in all_hrefs:
@@ -457,8 +456,8 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     rows = []
     current_game_date, current_game_time, current_matchup, current_team = "", "", "", ""
     current_row = None
+    prev_line = "" # Memória da linha anterior
 
-    # NOVO REGEX: Flexível com caixa alta/baixa, nomes sem vírgula e espaços extras
     player_status_re = re.compile(
         r"(?P<player>[A-Za-zÀ-ÿ0-9'\.\-\s]+(?:,\s+[A-Za-zÀ-ÿ0-9'\.\-\s]+)?)\s+"
         r"(?P<status>Available|Out|Questionable|Probable|Doubtful)\b"
@@ -467,27 +466,30 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     )
 
     for line in lines:
-        if "Game Date Game Time" in line: continue
+        line_clean = line.strip()
+        if not line_clean or "Game Date Game Time" in line_clean: 
+            continue
 
-        game_match = GAME_PREFIX_RE.match(line)
+        game_match = GAME_PREFIX_RE.match(line_clean)
         if game_match:
             if game_match.group("game_date"): current_game_date = game_match.group("game_date")
             current_game_time, current_matchup = game_match.group("game_time"), game_match.group("matchup")
-            line = game_match.group("rest").strip()
+            line_clean = game_match.group("rest").strip()
 
-        resolved_team = resolve_team_line(line)
+        resolved_team = resolve_team_line(line_clean)
         if resolved_team:
             current_team = resolved_team
+            prev_line = line_clean
+            current_row = None 
             continue
 
-        player_match = player_status_re.search(line)
+        # 1) Tenta o padrão clássico (tudo na mesma linha)
+        player_match = player_status_re.search(line_clean)
         if player_match:
             player_name = " ".join(player_match.group("player").split())
-            # Força o status para a capitalização correta do app (ex: OUT -> Out)
             status = player_match.group("status").strip().capitalize()
             
-            # Recupera o time se ele estiver "colado" na mesma linha pelo PDF
-            prefix = line[:player_match.start()].strip()
+            prefix = line_clean[:player_match.start()].strip()
             if prefix and resolve_team_line(prefix):
                 current_team = resolve_team_line(prefix)
 
@@ -500,8 +502,33 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
                 "INJ_REPORT_URL": pdf_url,
             }
             rows.append(current_row)
-        elif current_row is not None:
-            current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {line.strip()}'.strip()
+            prev_line = line_clean
+            continue
+
+        # 2) Tenta o padrão "Quebrado" (Status isolado em uma linha)
+        status_exact = line_clean.capitalize()
+        if status_exact in ["Out", "Questionable", "Probable", "Doubtful", "Available"]:
+            # Verifica se a linha de cima tem vírgula (formato Last, First)
+            if "," in prev_line:
+                player_name = prev_line
+                current_row = {
+                    "GAME_DATE": current_game_date, "GAME_TIME_ET": current_game_time,
+                    "MATCHUP": current_matchup, "TEAM_NAME_IR": current_team,
+                    "PLAYER_NAME_IR": player_name, "PLAYER_KEY_IR": normalize_person_name(player_name),
+                    "INJ_STATUS": status_exact,
+                    "INJ_REASON": "",
+                    "INJ_REPORT_URL": pdf_url,
+                }
+                rows.append(current_row)
+                prev_line = line_clean
+                continue
+
+        # 3) Captura o motivo da lesão na linha seguinte
+        if current_row is not None:
+            if "," not in line_clean and not resolve_team_line(line_clean):
+                current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {line_clean}'.strip()
+
+        prev_line = line_clean
 
     injury_df = pd.DataFrame(rows)
     if not injury_df.empty:
