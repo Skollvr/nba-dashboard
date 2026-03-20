@@ -25,6 +25,40 @@ from nba_api.stats.endpoints import (
 )
 from nba_api.stats.static import teams
 
+# --- DICIONÁRIO OFICIAL DE CORES DA NBA (Hex Codes) ---
+# Usamos a cor primária para o fundo e a secundária para detalhes/texto
+NBA_TEAM_COLORS = {
+    'ATL': {'primary': '#E03A3E', 'secondary': '#C1D32F'}, # Hawks
+    'BOS': {'primary': '#007A33', 'secondary': '#BA9653'}, # Celtics
+    'BKN': {'primary': '#000000', 'secondary': '#FFFFFF'}, # Nets
+    'CHA': {'primary': '#1D1160', 'secondary': '#00788C'}, # Hornets
+    'CHI': {'primary': '#CE1141', 'secondary': '#000000'}, # Bulls
+    'CLE': {'primary': '#6F263D', 'secondary': '#FFB81C'}, # Cavaliers
+    'DAL': {'primary': '#00538C', 'secondary': '#002B5E'}, # Mavericks
+    'DEN': {'primary': '#0E2240', 'secondary': '#FEC524'}, # Nuggets
+    'DET': {'primary': '#C8102E', 'secondary': '#1D428A'}, # Pistons
+    'GSW': {'primary': '#1D428A', 'secondary': '#FFC72C'}, # Warriors
+    'HOU': {'primary': '#CE1141', 'secondary': '#000000'}, # Rockets
+    'IND': {'primary': '#002D62', 'secondary': '#FDBB30'}, # Pacers
+    'LAC': {'primary': '#C8102E', 'secondary': '#1D428A'}, # Clippers
+    'LAL': {'primary': '#552583', 'secondary': '#FDB927'}, # Lakers
+    'MEM': {'primary': '#5D76A9', 'secondary': '#12173F'}, # Grizzlies
+    'MIA': {'primary': '#98002E', 'secondary': '#F9A01B'}, # Heat
+    'MIL': {'primary': '#00471B', 'secondary': '#EEE1C6'}, # Bucks
+    'MIN': {'primary': '#0C2340', 'secondary': '#236192'}, # Timberwolves
+    'NOP': {'primary': '#0C2340', 'secondary': '#C8102E'}, # Pelicans
+    'NYK': {'primary': '#006BB6', 'secondary': '#F58426'}, # Knicks
+    'OKC': {'primary': '#007AC1', 'secondary': '#EF3B24'}, # Thunder
+    'ORL': {'primary': '#0077C0', 'secondary': '#C4CED4'}, # Magic
+    'PHI': {'primary': '#006BB6', 'secondary': '#ED174C'}, # 76ers
+    'PHX': {'primary': '#1D1060', 'secondary': '#E56020'}, # Suns
+    'POR': {'primary': '#E03A3E', 'secondary': '#000000'}, # Trail Blazers
+    'SAC': {'primary': '#5A2D81', 'secondary': '#63727A'}, # Kings
+    'SAS': {'primary': '#C4CED4', 'secondary': '#000000'}, # Spurs
+    'TOR': {'primary': '#CE1141', 'secondary': '#000000'}, # Raptors
+    'UTA': {'primary': '#002B5C', 'secondary': '#00471B'}, # Jazz
+    'WAS': {'primary': '#002B5C', 'secondary': '#E31837'}  # Wizards
+}
 
 st.set_page_config(
     page_title="NBA Props Dashboard",
@@ -3326,6 +3360,9 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
+# 1. Busca as cores do time (Se não achar, usa cinza escuro)
+    team_abbr = row.get('TEAM_ABBR', 'NBA')
+    colors = NBA_TEAM_COLORS.get(team_abbr, {'primary': '#2b2b2b', 'secondary': '#ffffff'})
     st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
 
     top_left, top_right = st.columns([1, 5])
@@ -3333,7 +3370,23 @@ def render_player_focus_panel(
         st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
 
     with top_right:
-        st.markdown(f'<div class="focus-title">{row["PLAYER"]}</div>', unsafe_allow_html=True)
+        # Banner com a cor primária do time e borda na cor secundária
+        st.markdown(f"""
+            <div style="
+                background-color: {colors['primary']}; 
+                padding: 15px; 
+                border-radius: 8px; 
+                border-left: 10px solid {colors['secondary']};
+                margin-bottom: 15px;
+            ">
+                <h1 style="color: {colors['secondary']}; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -1px;">
+                    {row['PLAYER']}
+                </h1>
+                <div style="color: {colors['secondary']}; opacity: 0.9; font-weight: 600; font-size: 14px;">
+                    {row.get('TEAM_NAME', 'NBA') or ''} | #{row.get('JERSEY_NUMBER', '')} | {row.get('POSITION', '')}
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
         position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
         st.markdown(
             f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])} • Time {row["TEAM_NAME"]}</div>',
