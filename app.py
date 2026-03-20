@@ -3346,6 +3346,17 @@ def render_player_focus_panel(
             row.get("MATCHUP_LABEL", "Neutro"),
         )
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
+    
+    # --- CONTROLE MESTRE DE MÉTRICA ---
+    # Ele fica fora das abas, então aparece o tempo todo no topo
+    _visual_metric = st.pills(
+        "Métrica em análise detalhada",
+        ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"],
+        default=line_metric,
+        key=f"global_visual_metric_{row['PLAYER_ID']}"
+    )
+    visual_metric = _visual_metric if _visual_metric else line_metric
+
 
     # NOVIDADE: As 3 abas organizando a tela!
     overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
