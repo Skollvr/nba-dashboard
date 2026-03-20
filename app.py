@@ -2880,26 +2880,29 @@ def render_game_rankings(
     with tab_cons:
         st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
 
-def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str) -> None:
+def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str, visual_metric: str) -> None:
     log = get_player_log(player_id, season)
     if log.empty:
         st.info("Sem histórico suficiente para esse jogador.")
         return
 
-    needed_cols = ["GAME_DATE", "PTS", "REB", "AST", "FGM", "FG3M", "FG3A"]
+    # Garante que puxa o FGA também do banco de dados
+    needed_cols = ["GAME_DATE", "PTS", "REB", "AST", "FGA", "FG3M", "FG3A"]
     if "MATCHUP" in log.columns:
         needed_cols.append("MATCHUP")
 
-    recent = log[needed_cols].copy()
+    recent = log[[c for c in needed_cols if c in log.columns]].copy()
     recent = recent.dropna(subset=["GAME_DATE", "PTS", "REB", "AST"]).sort_values("GAME_DATE")
     if recent.empty:
         st.info("Sem histórico suficiente para esse jogador.")
         return
 
+    # Padroniza as siglas para bater com o resto do App
     recent["PRA"] = recent["PTS"] + recent["REB"] + recent["AST"]
-    recent["3PTM"] = recent["FG3M"]
-    recent["3PTA"] = recent["FG3A"]
-    recent["FG"] = recent["FGM"]
+    recent["3PM"] = recent.get("FG3M", 0)
+    recent["3PA"] = recent.get("FG3A", 0)
+    if "FGA" not in recent.columns:
+        recent["FGA"] = 0
 
     if "MATCHUP" in recent.columns:
         matchup_parts = recent["MATCHUP"].apply(get_matchup_parts)
@@ -2919,25 +2922,19 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
         st.image(get_player_headshot_url(int(player_id)), width=82)
     with top_right:
         st.markdown(f"### Últimos jogos — {player_name}")
-        st.caption("Visual compacto: barras, últimos 5 jogos." if chart_mode == "Compacto" else "Visual completo: linhas, últimos 10 jogos.")
+        st.caption("Visual compacto: barras, últimos 5 jogos." if chart_mode == "Compacto" else "Visual completo: linha contínua, últimos 10 jogos.")
 
     if chart_mode == "Compacto":
-        metric = st.radio(
-            "Métrica do gráfico",
-            ["PRA", "PTS", "REB", "AST", "3PTM", "3PTA", "FG"],
-            horizontal=True,
-            key=f"metric_chart_{player_id}_{chart_mode}",
-        )
         recent_view = recent.tail(5).copy()
 
         fig = go.Figure(
             go.Bar(
                 x=recent_view["SHORT_LABEL"],
-                y=recent_view[metric],
-                text=recent_view[metric].round(1),
+                y=recent_view[visual_metric],
+                text=recent_view[visual_metric].round(1),
                 textposition="outside",
                 marker=dict(color="#4ade80"),
-                hovertemplate=f"{metric}: %{{y:.1f}}<extra></extra>",
+                hovertemplate=f"{visual_metric}: %{{y:.1f}}<extra></extra>",
             )
         )
         fig.update_layout(
@@ -2953,43 +2950,41 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
         fig.update_xaxes(title="", type="category", tickangle=0, showgrid=False, tickfont=dict(size=11))
         fig.update_yaxes(title="", showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
         st.plotly_chart(fig, use_container_width=True)
-        st.caption(f"{metric} • Temp: {recent[metric].mean():.1f} | L5: {recent_view[metric].mean():.1f}")
+        st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L5: {recent_view[visual_metric].mean():.1f}")
     else:
         recent_view = recent.tail(10).copy()
         fig = go.Figure()
-        for name, color, width, opacity in [
-            ("PRA", "#8b5cf6", 4, 1.0),
-            ("PTS", "#38bdf8", 2.2, 0.8),
-            ("REB", "#34d399", 2.2, 0.8),
-            ("AST", "#f59e0b", 2.2, 0.8),
-        ]:
-            fig.add_trace(
-                go.Scatter(
-                    x=recent_view["SHORT_LABEL"],
-                    y=recent_view[name],
-                    mode="lines+markers",
-                    name=name,
-                    line=dict(width=width, color=color),
-                    opacity=opacity,
-                    hovertemplate=f"{name}: %{{y:.1f}}<extra></extra>",
-                )
+        
+        # Agora o Completo foca em 1 linha só, para não virar bagunça!
+        fig.add_trace(
+            go.Scatter(
+                x=recent_view["SHORT_LABEL"],
+                y=recent_view[visual_metric],
+                mode="lines+markers+text",
+                name=visual_metric,
+                text=recent_view[visual_metric].round(1),
+                textposition="top center",
+                line=dict(width=4, color="#38bdf8"),
+                marker=dict(size=8),
+                opacity=1.0,
+                hovertemplate=f"{visual_metric}: %{{y:.1f}}<extra></extra>",
             )
+        )
 
         fig.update_layout(
             template="plotly_dark",
             height=400,
             margin=dict(l=20, r=20, t=10, b=20),
-            legend=dict(orientation="h", y=1.08, x=0),
+            showlegend=False,
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(15,23,42,0.35)",
             hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155", font=dict(color="#f8fafc", size=13)),
             dragmode=False,
         )
         fig.update_xaxes(title="", type="category", tickangle=0, showgrid=False, tickfont=dict(size=11))
-        fig.update_yaxes(title="")
+        fig.update_yaxes(title="", showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
         st.plotly_chart(fig, use_container_width=True)
-
-
+        st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L10: {recent_view[visual_metric].mean():.1f}")
 def render_badges(role: str, momentum: str, oscillation: str, matchup: str) -> None:
     role_class = "badge-starter" if role == "Titular provável" else "badge-bench"
 
@@ -3395,27 +3390,36 @@ def render_player_focus_panel(
         st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
 
     with visual_tab:
-        # 1. Gráfico Histórico Clássico (Movido para dentro da aba para limpar a tela)
-        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode)
+        # CONTROLE MESTRE: Controla ambos os gráficos simultaneamente!
+        _visual_metric = st.pills(
+            "Métrica em exploração visual",
+            ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"],
+            default=line_metric,
+            key=f"visual_metric_pills_{row['PLAYER_ID']}"
+        )
+        visual_metric = _visual_metric if _visual_metric else line_metric
+
+        # 1. Gráfico Histórico Clássico (Agora recebe a ordem do Controle Mestre)
+        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
         
         st.divider()
         
-        # 2. NOVO: Gráfico Piso e Teto (Histograma)
-        st.markdown(f"### Frequência na Temporada — {line_metric}")
+        # 2. Gráfico Piso e Teto (Histograma)
+        st.markdown(f"### Frequência na Temporada — {visual_metric}")
         st.caption("Veja os montinhos: concentrados à esquerda (Piso seguro), espalhados à direita (Teto alto).")
         
         log = get_player_log(int(row["PLAYER_ID"]), season)
         if not log.empty:
             log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
             log["3PM"] = log["FG3M"]
+            log["3PA"] = log.get("FG3A", log["FGA"])
             
-            # Pega a linha ativa (Mercado ou Manual)
-            line_ctx = get_line_context(row, line_metric, line_value, use_market_line)
-            active_line = float(line_ctx["line_value"])
+            # Recalcula a linha e a odd (se BetMGM) para a nova métrica selecionada!
+            visual_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
+            active_line = float(visual_ctx["line_value"])
             
-            # Traduz a métrica atual para a coluna do banco de dados
-            log_col_map = {"PRA": "PRA", "PTS": "PTS", "REB": "REB", "AST": "AST", "3PM": "3PM", "FGA": "FGA", "3PA": "FG3A"}
-            active_col = log_col_map.get(line_metric, "PRA")
+            log_col_map = {"PRA": "PRA", "PTS": "PTS", "REB": "REB", "AST": "AST", "3PM": "3PM", "FGA": "FGA", "3PA": "3PA"}
+            active_col = log_col_map.get(visual_metric, "PRA")
             
             if active_col in log.columns:
                 hist_data = log[active_col].dropna()
@@ -3423,26 +3427,29 @@ def render_player_focus_panel(
                 fig = go.Figure()
                 fig.add_trace(go.Histogram(
                     x=hist_data,
-                    # Configura a largura das barras baseado no tipo de estatística
                     xbins=dict(start=0, end=max(hist_data.max(), active_line) + 5, size=2 if active_col not in ["3PM", "3PA"] else 1),
                     marker_color="rgba(139,92,246, 0.65)",
                     marker_line_color="rgba(139,92,246, 1)",
                     marker_line_width=1.5,
                     opacity=0.9,
-                    hovertemplate=f"Valor de {line_metric}: %{{x}}<br>Jogos atingidos: %{{y}}<extra></extra>"
+                    hovertemplate=f"Valor de {visual_metric}: %{{x}}<br>Jogos atingidos: %{{y}}<extra></extra>"
                 ))
                 
-                # Desenha a linha vertical com a aposta
-                line_color = "#10b981" if line_ctx["edge"] >= 0 else "#ef4444"
+                # Desenha a linha vertical da aposta
+                line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
                 fig.add_vline(
                     x=active_line, 
                     line_dash="dash", 
                     line_color=line_color, 
                     line_width=3,
-                    annotation_text=f"Linha de Aposta: {active_line}", 
+                    annotation_text=f"Linha ({visual_ctx['line_source']}): {active_line}", 
                     annotation_position="top right",
                     annotation_font_color="#cbd5e1"
                 )
+
+                # UX: Se for manual e o usuário trocar a métrica visual, damos um aviso!
+                if not use_market_line and visual_metric != line_metric:
+                    st.warning(f"Atenção: A linha vertical está usando o valor manual da barra lateral ({active_line}), que originalmente foi digitado para {line_metric}.")
 
                 fig.update_layout(
                     template="plotly_dark",
@@ -3450,7 +3457,7 @@ def render_player_focus_panel(
                     margin=dict(l=20, r=20, t=40, b=20),
                     paper_bgcolor="rgba(0,0,0,0)",
                     plot_bgcolor="rgba(15,23,42,0.35)",
-                    xaxis_title=f"Valor de {line_metric} na partida",
+                    xaxis_title=f"Valor de {visual_metric} na partida",
                     yaxis_title="Quantidade de Jogos",
                     dragmode=False,
                     bargap=0.15
@@ -3460,7 +3467,7 @@ def render_player_focus_panel(
                 
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info(f"Dados indisponíveis para a métrica {line_metric}.")
+                st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
         else:
             st.info("Sem histórico suficiente para gerar o gráfico.")
 
