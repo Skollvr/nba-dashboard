@@ -310,8 +310,9 @@ def clean_injury_pdf_line(line: str) -> str:
     return line
 
 def parse_report_dt_from_url(pdf_url: str) -> datetime | None:
+    # Lupa ultra-flexível para achar a data mesmo se a NBA digitar o nome do arquivo errado
     match = re.search(
-        r"Injury-Report_(\d{4}-\d{2}-\d{2})_(\d{1,2})_(\d{2})(AM|PM)\.pdf",
+        r"Injury[\s\-_]*Report[\s\-_]*(\d{4}-\d{2}-\d{2})[\s\-_]*(\d{1,2})[\s\-_]*(\d{2})\s*(AM|PM)\.pdf",
         str(pdf_url),
         flags=re.IGNORECASE,
     )
@@ -385,25 +386,29 @@ def fetch_latest_injury_report_pdf_url() -> str:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://official.nba.com/"
+        "Referer": "https://official.nba.com/",
+        "Cache-Control": "no-cache" # Pede gentilmente para não usar cache
     }
     today = datetime.now(APP_TIMEZONE).date()
     season_str = get_season_string(today)
-    page_url = f"https://official.nba.com/nba-injury-report-{season_str}-season/"
+    
+    # CACHE-BUSTER: Adiciona os segundos exatos do relógio no link.
+    # O servidor da NBA vai achar que é uma página inédita e mandar a versão mais atual!
+    cb = int(time.time())
+    page_url = f"https://official.nba.com/nba-injury-report-{season_str}-season/?cb={cb}"
     
     try:
         response = requests.get(page_url, headers=headers, timeout=10)
         if response.status_code == 404:
             fallback_year = f"{today.year-1}-{str(today.year)[-2:]}"
-            page_url = f"https://official.nba.com/nba-injury-report-{fallback_year}-season/"
+            page_url = f"https://official.nba.com/nba-injury-report-{fallback_year}-season/?cb={cb}"
             response = requests.get(page_url, headers=headers, timeout=10)
         response.raise_for_status()
-    except Exception as e:
-        st.error(f"🚨 DIAGNÓSTICO: O site da NBA bloqueou a conexão ou a página não existe. Erro: {e}")
+    except Exception:
         return ""
 
     html = response.text
-    all_hrefs = re.findall(r'href=[\'"]([^\'"]+\.pdf)[\'"]', html, flags=re.IGNORECASE)
+    all_hrefs = re.findall(r'href="([^"]+\.pdf)"', html, flags=re.IGNORECASE)
     pdf_urls = []
     for href in all_hrefs:
         if "injury" in href.lower() and "report" in href.lower():
@@ -413,10 +418,20 @@ def fetch_latest_injury_report_pdf_url() -> str:
                 base = "https://official.nba.com"
                 pdf_urls.append(base + href if href.startswith("/") else base + "/" + href)
 
-    if not pdf_urls:
-        st.error("🚨 DIAGNÓSTICO: A página carregou, mas não encontrei nenhum link de PDF nela.")
+    if not pdf_urls: 
         return ""
 
+    dated_urls = []
+    for url in pdf_urls:
+        dt = parse_report_dt_from_url(url)
+        if dt is not None: 
+            dated_urls.append((dt, url))
+
+    if dated_urls:
+        # Pega a maior data lida
+        dated_urls.sort(key=lambda x: x[0], reverse=True)
+        return dated_urls[0][1]
+    
     return pdf_urls[0]
 
 def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
