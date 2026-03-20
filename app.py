@@ -515,7 +515,7 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     
     return injury_df
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=54000, show_spinner=False)
 def get_matchup_context(
     away_team_id: int,
     home_team_id: int,
@@ -560,7 +560,7 @@ def get_matchup_context(
 
     return away_df, home_df
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=36000, show_spinner=False)
 def get_matchup_injury_context(
     away_team_id: int,
     home_team_id: int,
@@ -1392,7 +1392,7 @@ def inject_css() -> None:
     )
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=54000, show_spinner=False)
 def get_games_for_date(target_date: date) -> pd.DataFrame:
     response = run_api_call_with_retry(
         lambda: scoreboardv2.ScoreboardV2(
@@ -1441,7 +1441,7 @@ def get_games_for_date(target_date: date) -> pd.DataFrame:
 
     return pd.DataFrame(rows)
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=54000, show_spinner=True)
 def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
     response = run_api_call_with_retry(
         lambda: commonteamroster.CommonTeamRoster(
@@ -1469,7 +1469,7 @@ def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
     return roster
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=54000, show_spinner=False)
 def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
     response = run_api_call_with_retry(
         lambda: leaguedashplayerstats.LeagueDashPlayerStats(
@@ -1503,7 +1503,7 @@ def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
     return df[[c for c in keep_cols if c in df.columns]].copy()
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=54000, show_spinner=False)
 def get_player_log(player_id: int, season: str) -> pd.DataFrame:
     response = run_api_call_with_retry(
         lambda: playergamelog.PlayerGameLog(
@@ -1526,7 +1526,7 @@ def get_player_log(player_id: int, season: str) -> pd.DataFrame:
     return df.sort_values("GAME_DATE", ascending=False)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=54000, show_spinner=False)
 def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
     response = run_api_call_with_retry(
         lambda: playergamelogs.PlayerGameLogs(
@@ -1994,7 +1994,7 @@ def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows.values())
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=54000, show_spinner=False)
 def build_team_table(team_id: int, season: str) -> pd.DataFrame:
     roster = get_team_roster(team_id, season)
     season_stats = get_league_player_stats(season, last_n_games=0)
