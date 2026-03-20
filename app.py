@@ -3360,6 +3360,30 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
+
+# --- BUSCADOR DE CORES TURBO ---
+    team_abbr = row.get('TEAM_ABBR')
+    team_name = row.get('TEAM_NAME', '')
+
+    # Se não achou a sigla, tenta descobrir pela primeira palavra do nome (ex: "Golden" -> GSW)
+    if not team_abbr or team_abbr not in NBA_TEAM_COLORS:
+        # Mapeamento rápido de emergência por nome
+        name_to_abbr = {
+            'Golden': 'GSW', 'Boston': 'BOS', 'Los': 'LAL', # Lakers/Clippers tratamos abaixo
+            'New': 'NYK', 'Miami': 'MIA', 'Chicago': 'CHI', 'Dallas': 'DAL'
+        }
+        # Tenta pegar pela primeira palavra do nome do time
+        first_word = str(team_name).split()[0]
+        team_abbr = name_to_abbr.get(first_word, 'NBA')
+        
+        # Ajuste fino para times com "Los" ou "New" repetidos
+        if "Lakers" in str(team_name): team_abbr = 'LAL'
+        if "Clippers" in str(team_name): team_abbr = 'LAC'
+        if "Nets" in str(team_name): team_abbr = 'BKN'
+        if "Pelicans" in str(team_name): team_abbr = 'NOP'
+
+    # Busca as cores finais
+    colors = NBA_TEAM_COLORS.get(team_abbr, {'primary': '#1d222d', 'secondary': '#ffcc00'})
 # 1. Busca as cores do time (Se não achar, usa cinza escuro)
     team_abbr = row.get('TEAM_ABBR', 'NBA')
     colors = NBA_TEAM_COLORS.get(team_abbr, {'primary': '#2b2b2b', 'secondary': '#ffffff'})
@@ -3686,7 +3710,14 @@ def render_player_focus_panel(
                     with c2: 
                         avg_h2h = h2h_log[visual_metric].mean()
                         st.metric(f"Média vs {opp_abbr}", f"{avg_h2h:.1f}", delta=f"{avg_h2h - m_line:.1f}")
-                    with c3: st.metric("Hit Rate H2H", f"{h2h_pct:.0f}%")
+                    with c3:
+                    st.markdown("**Sequência H2H:**")
+                    # Cria as bolinhas baseadas no status
+                    dots = "".join(['<span style="color:#28a745;font-size:22px">🟢</span>' if "OVER" in s 
+                                   else '<span style="color:#dc3545;font-size:22px">🔴</span>' 
+                                   for s in h2h_log['Status'].iloc[::-1]])
+                    st.markdown(f'<div style="letter-spacing:2px">{dots}</div>', unsafe_allow_html=True)
+                    st.caption(f"Aproveitamento: {h2h_pct:.0f}%")
 
                     # Tabela
                     # --- TABELA DETALHADA COM COLUNA DE LINHA ---
