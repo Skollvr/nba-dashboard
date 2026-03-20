@@ -3598,9 +3598,14 @@ def main() -> None:
         min_minutes = st.slider("Mínimo de minutos por jogo", 0, 40, 15, 1)
         role_filter = st.selectbox("Mostrar jogadores", ROLE_OPTIONS, index=0)
 
-        st.divider()
+       st.divider()
         st.subheader("Linha")
-        line_metric = st.selectbox("Métrica da linha", LINE_METRIC_OPTIONS, index=0)
+        
+        # Cria os botões visíveis na barra lateral
+        _selected_metric = st.pills("Métrica da linha", LINE_METRIC_OPTIONS, default="PRA")
+        # Trava de segurança: se o usuário desmarcar tudo, forçamos o PRA para não quebrar a lógica
+        line_metric = _selected_metric if _selected_metric else "PRA"
+        
         default_line_map = {"PRA": 25.5, "PTS": 20.5, "REB": 7.5, "AST": 5.5, "3PM": 2.5, "FGA": 15.5, "3PA": 6.5}
         line_value = st.number_input(
             "Valor da linha manual",
