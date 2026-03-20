@@ -3946,7 +3946,7 @@ def render_team_section_v2(
         key=f"show_focus_panel_{team_name}",
     )
 
-    if show_focus_panel:
+   if show_focus_panel:
         selected_row = filtered_df.loc[filtered_df["PLAYER"] == player_name].iloc[0]
         render_player_focus_panel(
             selected_row,
@@ -3957,7 +3957,40 @@ def render_team_section_v2(
             chart_mode,
         )
 
-    st.info("Injury Report e Provável Escalação estão temporariamente desativados para teste de performance.") 
+    st.divider()
+    
+    # Chave para ligar/desligar a busca do PDF
+    show_injury = st.toggle(
+        f"🏥 Carregar Status Oficial e Rotação — {team_name}",
+        value=False,
+        key=f"toggle_ir_{team_name}"
+    )
+
+    if show_injury:
+        with st.spinner("Lendo o PDF do Injury Report oficial da NBA... (Isso pode levar até 30s na primeira vez)"):
+            # Descobrimos o ID do time a partir do nome
+            team_id = next((tid for tid, t in TEAM_LOOKUP.items() if t.get("full_name") == team_name), 0)
+            
+            # Tenta baixar/ler o PDF (com cache automático do Streamlit)
+            try:
+                injury_df = fetch_latest_injury_report_df()
+            except Exception:
+                injury_df = pd.DataFrame()
+            
+            # Cruza os dados do PDF com o elenco completo do time
+            enriched_team_df = merge_injury_report(
+                team_df=team_df,
+                injury_df=injury_df,
+                team_name=team_name,
+                team_id=team_id,
+            )
+            
+            # Exibe os resultados organizados nas funções que você já tinha criado
+            ir_tab, lineup_tab = st.tabs(["Status Oficial (PDF)", "Escalação Pós-Filtro"])
+            with ir_tab:
+                render_injury_report_tab(enriched_team_df, team_name)
+            with lineup_tab:
+                render_lineup_report_tab(enriched_team_df, team_name)
     
 if __name__ == "__main__":
     main()
