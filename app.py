@@ -610,49 +610,26 @@ def merge_injury_report(
         return enriched
 
     roster_keys = set(enriched["PLAYER_KEY"].fillna("").astype(str).tolist())
-    target_matchup = str(game_matchup or "").upper().replace(" ", "")
-    team_aliases = get_team_name_aliases(team_id, team_name)
+    
+    # TRADUTOR: Resolve o problema do "Jimmy Butler III" vs "Jimmy Butler"
+    def fuzzy_match(ir_key: str) -> str:
+        if ir_key in roster_keys: return ir_key
+        # Remove sufixos que atrapalham o cruzamento
+        for suffix in [" iii", " ii", " iv", " v", " jr", " sr"]:
+            if ir_key.endswith(suffix):
+                clean = ir_key[:-len(suffix)].strip()
+                if clean in roster_keys: return clean
+        # Se um nome contiver o outro (ex: noah clowney)
+        for rk in roster_keys:
+            if ir_key in rk or rk in ir_key: return rk
+        return ir_key
 
     work_ir = injury_df.copy()
+    # Aplica o tradutor nos nomes que vieram do PDF
+    work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str).apply(fuzzy_match)
 
-    if "MATCHUP" in work_ir.columns:
-        work_ir["MATCHUP_NORM"] = work_ir["MATCHUP"].fillna("").astype(str).str.upper().str.replace(" ", "", regex=False)
-    else:
-        work_ir["MATCHUP_NORM"] = ""
-
-    if "TEAM_NAME_IR" in work_ir.columns:
-        work_ir["TEAM_NAME_IR_NORM"] = work_ir["TEAM_NAME_IR"].fillna("").astype(str).apply(normalize_text)
-    else:
-        work_ir["TEAM_NAME_IR_NORM"] = ""
-
-    work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str)
-
-    # 1) Tentativa principal: matchup exato
-    matchup_ir = work_ir.copy()
-    if target_matchup:
-        matchup_ir = matchup_ir[matchup_ir["MATCHUP_NORM"] == target_matchup].copy()
-    matchup_ir = matchup_ir[matchup_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
-
-    # 2) Fallback: aliases do time
-    if matchup_ir.empty:
-        team_ir = work_ir.copy()
-        if team_aliases:
-            team_ir = team_ir[team_ir["TEAM_NAME_IR_NORM"].isin(team_aliases)].copy()
-        team_ir = team_ir[team_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
-        work_match = team_ir
-        matchup_found = False
-    else:
-        work_match = matchup_ir
-        matchup_found = True
-
-    # 3) Fallback Absoluto (Órfãos): Se o time não foi lido, mas o jogador está no PDF, pegue-o!
-    if work_match.empty and "PLAYER_NAME_IR" in injury_df.columns:
-        orphan_ir = injury_df.copy()
-        orphan_ir["PLAYER_KEY_IR"] = orphan_ir["PLAYER_NAME_IR"].fillna("").apply(normalize_person_name)
-        orphan_ir = orphan_ir[orphan_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
-        if not orphan_ir.empty:
-            work_match = orphan_ir
-            matchup_found = True
+    # Como a Lupa Global já achou tudo perfeito, só cruzamos os nomes que batem com o time
+    work_match = work_ir[work_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
 
     if work_match.empty:
         return enriched
@@ -660,7 +637,7 @@ def merge_injury_report(
     work_match = work_match.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
 
     enriched["INJ_STATUS"] = "Available"
-    enriched["INJ_MATCHUP_FOUND"] = matchup_found
+    enriched["INJ_MATCHUP_FOUND"] = True
 
     merge_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"] if c in work_match.columns]
 
@@ -681,7 +658,7 @@ def merge_injury_report(
 
     merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
 
-    drop_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR", "MATCHUP_NORM", "TEAM_NAME_IR_NORM"] if c in merged.columns]
+    drop_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR"] if c in merged.columns]
     if drop_cols:
         merged = merged.drop(columns=drop_cols)
 
