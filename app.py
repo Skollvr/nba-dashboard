@@ -424,7 +424,12 @@ def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
         reader = PdfReader(BytesIO(pdf_bytes))
         lines: list[str] = []
         for page in reader.pages:
-            text = page.extract_text() or ""
+            # O Modo Layout força o pypdf a manter a tabela alinhada horizontalmente
+            try:
+                text = page.extract_text(extraction_mode="layout") or ""
+            except TypeError:
+                text = page.extract_text() or ""
+                
             page_lines = [clean_injury_pdf_line(x) for x in text.splitlines() if x.strip()]
             lines.extend(page_lines)
         return lines
@@ -531,11 +536,13 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     injury_df = pd.DataFrame(rows)
     if injury_df.empty:
         st.error("🚨 DIAGNÓSTICO: O PDF foi baixado perfeitamente, mas a lupa não achou nenhum jogador. O layout oficial mudou!")
+        with st.expander("🕵️ Clique aqui para ver a caixa-preta do robô (Me mande um print do texto abaixo!)"):
+            st.code("\n".join(lines[:80]))
     else:
         injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
     
     return injury_df
-    
+
 @st.cache_data(ttl=900, show_spinner=False)
 def get_matchup_context(
     away_team_id: int,
