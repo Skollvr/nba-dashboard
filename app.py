@@ -3933,17 +3933,17 @@ def render_team_section_v2(
         cards_per_row=cards_per_row,
     )
 
-    options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
+   options = filtered_df[["PLAYER", "PLAYER_ID"]].drop_duplicates()
     player_name = st.selectbox(
         f"Jogador em foco — {team_name}",
         options["PLAYER"].tolist(),
-        key=f"player_focus_v2_{team_name}_{chart_mode}_{line_metric}",
+        key=f"player_focus_v2_{team_name}",
     )
 
     show_focus_panel = st.toggle(
         f"Mostrar análise detalhada — {team_name}",
         value=False,
-        key=f"show_focus_panel_{team_name}_{line_metric}_{chart_mode}",
+        key=f"show_focus_panel_{team_name}",
     )
 
     if show_focus_panel:
