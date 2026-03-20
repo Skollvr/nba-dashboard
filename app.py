@@ -3598,7 +3598,7 @@ def main() -> None:
         min_minutes = st.slider("Mínimo de minutos por jogo", 0, 40, 15, 1)
         role_filter = st.selectbox("Mostrar jogadores", ROLE_OPTIONS, index=0)
 
-       st.divider()
+        st.divider()
         st.subheader("Linha")
         
         # Cria os botões visíveis na barra lateral
