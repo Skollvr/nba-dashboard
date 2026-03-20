@@ -3766,6 +3766,31 @@ def render_player_focus_panel(
 
 
 def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
+    # --- RASTREADOR DE CORES PARA O CARD ---
+    search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
+    tk = 'NBA'
+    
+    # Busca simplificada (mesma lógica do banner)
+    if 'ROCKETS' in search_text or 'HOU' in search_text: tk = 'HOU'
+    elif 'RAPTORS' in search_text or 'TOR' in search_text: tk = 'TOR'
+    elif 'HAWKS' in search_text or 'ATL' in search_text: tk = 'ATL'
+    elif 'GRIZZLIES' in search_text or 'MEM' in search_text: tk = 'MEM'
+    elif 'CELTICS' in search_text or 'BOS' in search_text: tk = 'BOS'
+    elif 'WARRIORS' in search_text or 'GSW' in search_text: tk = 'GSW'
+    elif 'LAKERS' in search_text or 'LAL' in search_text: tk = 'LAL'
+    elif 'KNICKS' in search_text or 'NYK' in search_text: tk = 'NYK'
+    elif 'NETS' in search_text or 'BKN' in search_text: tk = 'BKN'
+    elif 'BUCKS' in search_text or 'MIL' in search_text: tk = 'MIL'
+    elif 'BULLS' in search_text or 'CHI' in search_text: tk = 'CHI'
+    elif 'HEAT' in search_text or 'MIA' in search_text: tk = 'MIA'
+    elif 'SUNS' in search_text or 'PHX' in search_text: tk = 'PHX'
+    elif 'MAVERICKS' in search_text or 'DAL' in search_text: tk = 'DAL'
+    elif '76ERS' in search_text or 'PHI' in search_text: tk = 'PHI'
+    elif 'NUGGETS' in search_text or 'DEN' in search_text: tk = 'DEN'
+    elif 'PELICANS' in search_text or 'NOP' in search_text: tk = 'NOP'
+    elif 'TIMBERWOLVES' in search_text or 'MIN' in search_text: tk = 'MIN'
+    
+    colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
     with st.container(border=True):
         top_left, top_right = st.columns([1, 4])
 
@@ -3773,7 +3798,23 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
             st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=72)
 
         with top_right:
-            st.markdown(f"**{row['PLAYER']}**")
+            # Mini Banner no topo do card com as cores do time
+        st.markdown(f"""
+            <div style="
+                background-color: {colors['primary']}; 
+                border-left: 5px solid {colors['secondary']};
+                padding: 6px 10px;
+                border-radius: 4px;
+                margin-bottom: 8px;
+            ">
+                <div style="color: {colors['secondary']}; font-weight: 800; font-size: 15px; line-height: 1.1;">
+                    {row['PLAYER']}
+                </div>
+                <div style="color: {colors['secondary']}; opacity: 0.8; font-size: 10px; margin-top: 1px;">
+                    {tk} | {row.get('POSITION', '')}
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
             position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
             st.caption(f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}")
             st.markdown(render_player_headline_html(row), unsafe_allow_html=True)
