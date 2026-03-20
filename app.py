@@ -865,17 +865,28 @@ def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_
     hit_l10 = sum(float(v) >= active_line for v in recent_values)
     hit_l5 = sum(float(v) >= active_line for v in recent_values[:5])
 
+    # Criação dos indicadores visuais (tooltips e ícones)
+    source_name = "BetMGM" if use_market else "Manual"
+    icon = "🎯" if use_market else "✏️"
+    tooltip = f"Calculado com linha {source_name} ({active_line})"
+    
+    hit_l10_str = format_ratio_text(hit_l10, len(recent_values))
+    hit_l10_html = f'<span title="{tooltip}" style="cursor:help;">{hit_l10_str} {icon}</span>'
+
     return {
         "projection": projection,
         "edge": edge,
         "label": classify_line_edge(edge),
         "line_value": active_line,
-        "line_source": "BetMGM" if use_market else "Manual",
+        "line_source": source_name,
         "has_market_line": use_market,
         "over_dec": market_info.get("over_dec") if use_market else None,
         "under_dec": market_info.get("under_dec") if use_market else None,
         "updated_at": market_info.get("updated_at") if use_market else "",
-        "hit_l10": format_ratio_text(hit_l10, len(recent_values)),
+        "hit_l10": hit_l10_str,
+        "hit_l10_html": hit_l10_html,
+        "icon": icon,
+        "tooltip": tooltip,
         "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
     }
 
