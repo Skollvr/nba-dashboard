@@ -2821,8 +2821,8 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
             stat3_class = "ranking-good" if row["MATCHUP_LABEL"] == "Favorável" else ("ranking-bad" if row["MATCHUP_LABEL"] == "Difícil" else "")
         elif mode == "edge":
             stat1_label, stat1_value = "Edge", format_signed_number(row["RANK_EDGE"])
-            stat2_label, stat2_value = "Proj", format_number(row["RANK_PROJ"])
-            stat3_label, stat3_value = "Linha", format_number(row["RANK_LINE"])
+            stat2_label, stat2_value = "Linha", format_number(row["RANK_LINE"])
+            stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
         else:
             stat1_label, stat1_value = "Hit", row["RANK_HIT_HTML"]
