@@ -3711,13 +3711,13 @@ def render_player_focus_panel(
                         avg_h2h = h2h_log[visual_metric].mean()
                         st.metric(f"Média vs {opp_abbr}", f"{avg_h2h:.1f}", delta=f"{avg_h2h - m_line:.1f}")
                     with c3:
-                    st.markdown("**Sequência H2H:**")
-                    # Cria as bolinhas baseadas no status
-                    dots = "".join(['<span style="color:#28a745;font-size:22px">🟢</span>' if "OVER" in s 
+                        st.markdown("**Sequência H2H:**")
+                        # Cria as bolinhas baseadas no status
+                        dots = "".join(['<span style="color:#28a745;font-size:22px">🟢</span>' if "OVER" in s 
                                    else '<span style="color:#dc3545;font-size:22px">🔴</span>' 
                                    for s in h2h_log['Status'].iloc[::-1]])
-                    st.markdown(f'<div style="letter-spacing:2px">{dots}</div>', unsafe_allow_html=True)
-                    st.caption(f"Aproveitamento: {h2h_pct:.0f}%")
+                        st.markdown(f'<div style="letter-spacing:2px">{dots}</div>', unsafe_allow_html=True)
+                        st.caption(f"Aproveitamento: {h2h_pct:.0f}%")
 
                     # Tabela
                     # --- TABELA DETALHADA COM COLUNA DE LINHA ---
