@@ -3360,7 +3360,7 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
-st.write("Colunas disponíveis:", list(row.index)) # APAGUE DEPOIS DE TESTAR
+    st.write("Colunas disponíveis:", list(row.index)) # APAGUE DEPOIS DE TESTAR
 # --- BUSCADOR DE CORES TURBO ---
     team_abbr = row.get('TEAM_ABBR')
     team_name = row.get('TEAM_NAME', '')
