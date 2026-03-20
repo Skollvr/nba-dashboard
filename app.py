@@ -376,33 +376,40 @@ def resolve_team_line(line: str) -> str:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
-    # 1. Monta a URL da temporada automaticamente para nunca dar erro 404
+    # Disfarce para passar pela proteção do site da NBA
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     today = datetime.now(APP_TIMEZONE).date()
     season_str = get_season_string(today)
     page_url = f"https://official.nba.com/nba-injury-report-{season_str}-season/"
     
     try:
-        response = requests.get(page_url, timeout=30)
+        # Timeout reduzido para não travar o app
+        response = requests.get(page_url, headers=headers, timeout=10)
         response.raise_for_status()
     except Exception:
-        # Fallback de segurança se a NBA ainda não tiver virado a página no sistema deles
         fallback_season = f"{today.year-1}-{str(today.year)[-2:]}"
         page_url = f"https://official.nba.com/nba-injury-report-{fallback_season}-season/"
         try:
-            response = requests.get(page_url, timeout=30)
+            response = requests.get(page_url, headers=headers, timeout=10)
             response.raise_for_status()
         except Exception:
             return ""
 
     html = response.text
 
-    # 2. Expressão Regular "flexível" para não depender do servidor ak-static
+    # Regex para achar o PDF (agora cobre tanto links completos quanto links relativos)
     pdf_urls = re.findall(
-        r'https?://[^"]*?Injury-Report_[^"]+\.pdf',
+        r'https?://[^"]*?Injury[-_]Report[^"]+\.pdf',
         html,
         flags=re.IGNORECASE
     )
     
+    if not pdf_urls:
+        rel_urls = re.findall(r'href="(/[^"]*?Injury[-_]Report[^"]+\.pdf)"', html, flags=re.IGNORECASE)
+        pdf_urls = [f"https://official.nba.com{url}" for url in rel_urls]
+
     if not pdf_urls:
         return ""
 
@@ -418,18 +425,6 @@ def fetch_latest_injury_report_pdf_url() -> str:
 
     return pdf_urls[0]
 
-def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
-    reader = PdfReader(BytesIO(pdf_bytes))
-    lines: list[str] = []
-
-    for page in reader.pages:
-        text = page.extract_text() or ""
-        page_lines = [clean_injury_pdf_line(x) for x in text.splitlines()]
-        page_lines = [x for x in page_lines if x]
-        lines.extend(page_lines)
-
-    return lines
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_df() -> pd.DataFrame:
@@ -437,8 +432,16 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     if not pdf_url:
         return pd.DataFrame()
 
-    response = requests.get(pdf_url, timeout=45)
-    response.raise_for_status()
+    # Precisamos usar o mesmo disfarce para fazer o download do PDF
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    try:
+        response = requests.get(pdf_url, headers=headers, timeout=15)
+        response.raise_for_status()
+    except Exception:
+        return pd.DataFrame()
 
     lines = extract_pdf_text_lines(response.content)
     rows = []
@@ -507,6 +510,10 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     injury_df = pd.DataFrame(rows)
     if injury_df.empty:
         return injury_df
+
+    injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
+    injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
+    return injury_df
 
     injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
     injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
