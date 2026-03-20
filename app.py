@@ -372,7 +372,13 @@ TEAM_NAME_LOOKUP_NORM = {
 
 def resolve_team_line(line: str) -> str:
     clean_line = str(line or "").replace("NOT YET SUBMITTED", "").strip()
-    return TEAM_NAME_LOOKUP_NORM.get(normalize_text(clean_line), "")
+    norm_line = normalize_text(clean_line)
+    
+    # Novo: verifica se o nome de algum time está contido na linha bagunçada do PDF
+    for norm_team, full_team in TEAM_NAME_LOOKUP_NORM.items():
+        if norm_team in norm_line:
+            return full_team
+    return ""
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
@@ -617,13 +623,7 @@ def merge_injury_report(
     work_ir = injury_df.copy()
 
     if "MATCHUP" in work_ir.columns:
-        work_ir["MATCHUP_NORM"] = (
-            work_ir["MATCHUP"]
-            .fillna("")
-            .astype(str)
-            .str.upper()
-            .str.replace(" ", "", regex=False)
-        )
+        work_ir["MATCHUP_NORM"] = work_ir["MATCHUP"].fillna("").astype(str).str.upper().str.replace(" ", "", regex=False)
     else:
         work_ir["MATCHUP_NORM"] = ""
 
@@ -634,19 +634,17 @@ def merge_injury_report(
 
     work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str)
 
-    # 1) Tentativa principal: matchup exato + roster
+    # 1) Tentativa principal: matchup exato
     matchup_ir = work_ir.copy()
     if target_matchup:
         matchup_ir = matchup_ir[matchup_ir["MATCHUP_NORM"] == target_matchup].copy()
-
     matchup_ir = matchup_ir[matchup_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
 
-    # 2) Fallback: aliases do time + roster
+    # 2) Fallback: aliases do time
     if matchup_ir.empty:
         team_ir = work_ir.copy()
         if team_aliases:
             team_ir = team_ir[team_ir["TEAM_NAME_IR_NORM"].isin(team_aliases)].copy()
-
         team_ir = team_ir[team_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
         work_match = team_ir
         matchup_found = False
@@ -654,42 +652,13 @@ def merge_injury_report(
         work_match = matchup_ir
         matchup_found = True
 
-    # 3) Fallback final por PLAYER_NAME_IR normalizado
+    # 3) Fallback Absoluto (Órfãos): Se o time não foi lido, mas o jogador está no PDF, pegue-o!
     if work_match.empty and "PLAYER_NAME_IR" in injury_df.columns:
-        fallback_ir = injury_df.copy()
-
-        if "MATCHUP" in fallback_ir.columns:
-            fallback_ir["MATCHUP_NORM"] = (
-                fallback_ir["MATCHUP"]
-                .fillna("")
-                .astype(str)
-                .str.upper()
-                .str.replace(" ", "", regex=False)
-            )
-        else:
-            fallback_ir["MATCHUP_NORM"] = ""
-
-        if "TEAM_NAME_IR" in fallback_ir.columns:
-            fallback_ir["TEAM_NAME_IR_NORM"] = fallback_ir["TEAM_NAME_IR"].fillna("").astype(str).apply(normalize_text)
-        else:
-            fallback_ir["TEAM_NAME_IR_NORM"] = ""
-
-        fallback_ir["PLAYER_KEY_IR"] = fallback_ir["PLAYER_NAME_IR"].fillna("").apply(normalize_person_name)
-
-        fallback_matchup = fallback_ir.copy()
-        if target_matchup:
-            fallback_matchup = fallback_matchup[fallback_matchup["MATCHUP_NORM"] == target_matchup].copy()
-        fallback_matchup = fallback_matchup[fallback_matchup["PLAYER_KEY_IR"].isin(roster_keys)].copy()
-
-        if fallback_matchup.empty:
-            fallback_team = fallback_ir.copy()
-            if team_aliases:
-                fallback_team = fallback_team[fallback_team["TEAM_NAME_IR_NORM"].isin(team_aliases)].copy()
-            fallback_team = fallback_team[fallback_team["PLAYER_KEY_IR"].isin(roster_keys)].copy()
-            work_match = fallback_team
-            matchup_found = False
-        else:
-            work_match = fallback_matchup
+        orphan_ir = injury_df.copy()
+        orphan_ir["PLAYER_KEY_IR"] = orphan_ir["PLAYER_NAME_IR"].fillna("").apply(normalize_person_name)
+        orphan_ir = orphan_ir[orphan_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+        if not orphan_ir.empty:
+            work_match = orphan_ir
             matchup_found = True
 
     if work_match.empty:
@@ -719,17 +688,7 @@ def merge_injury_report(
 
     merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
 
-    drop_cols = [
-        c for c in [
-            "PLAYER_KEY_IR",
-            "INJ_STATUS_IR",
-            "INJ_REASON_IR",
-            "INJ_REPORT_URL_IR",
-            "MATCHUP_NORM",
-            "TEAM_NAME_IR_NORM",
-        ]
-        if c in merged.columns
-    ]
+    drop_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR", "MATCHUP_NORM", "TEAM_NAME_IR_NORM"] if c in merged.columns]
     if drop_cols:
         merged = merged.drop(columns=drop_cols)
 
