@@ -3186,7 +3186,7 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
             <div class="{line_class}">
                 <div class="quick-stat-label">{line_context['line_source']} {line_metric}</div>
                 <div class="quick-stat-value">{format_signed_number(line_context['edge'])}</div>
-                <div class="quick-stat-meta">Proj {format_number(line_context['projection'])} vs {format_number(line_context['line_value'])} • L10 {line_context['hit_l10']}{odds_meta}</div>
+                <div class="quick-stat-meta">Proj {format_number(line_context['projection'])} vs {format_number(line_context['line_value'])} • L10 {line_context['hit_l10_html']}{odds_meta}</div>
             </div>
         </div>
         """,
