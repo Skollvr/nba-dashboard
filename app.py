@@ -3946,7 +3946,7 @@ def render_team_section_v2(
         key=f"show_focus_panel_{team_name}",
     )
 
-   if show_focus_panel:
+    if show_focus_panel:
         selected_row = filtered_df.loc[filtered_df["PLAYER"] == player_name].iloc[0]
         render_player_focus_panel(
             selected_row,
