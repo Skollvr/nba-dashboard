@@ -3402,14 +3402,7 @@ def render_player_focus_panel(
 
     with visual_tab:
         # CONTROLE MESTRE: Controla ambos os gráficos simultaneamente!
-        _visual_metric = st.pills(
-            "Métrica em exploração visual",
-            ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"],
-            default=line_metric,
-            key=f"visual_metric_pills_{row['PLAYER_ID']}"
-        )
-        visual_metric = _visual_metric if _visual_metric else line_metric
-
+        
         # 1. Gráfico Histórico Clássico (Agora recebe a ordem do Controle Mestre)
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
         
