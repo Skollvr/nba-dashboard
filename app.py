@@ -3360,7 +3360,7 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
-    st.write("Colunas disponíveis:", list(row.index)) # APAGUE DEPOIS DE TESTAR
+    st.code(", ".join(list(row.index))) # Mostra tudo em linha reta pra facilitar
 # --- BUSCADOR DE CORES TURBO ---
     team_abbr = row.get('TEAM_ABBR')
     team_name = row.get('TEAM_NAME', '')
@@ -3384,9 +3384,7 @@ def render_player_focus_panel(
 
     # Busca as cores finais
     colors = NBA_TEAM_COLORS.get(team_abbr, {'primary': '#1d222d', 'secondary': '#ffcc00'})
-# 1. Busca as cores do time (Se não achar, usa cinza escuro)
-    team_abbr = row.get('TEAM_ABBR', 'NBA')
-    colors = NBA_TEAM_COLORS.get(team_abbr, {'primary': '#2b2b2b', 'secondary': '#ffffff'})
+
     st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
 
     top_left, top_right = st.columns([1, 5])
