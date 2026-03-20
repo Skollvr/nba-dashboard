@@ -88,7 +88,6 @@ ODDS_METRIC_COLUMNS = {
     "3PA": ("BETMGM_3PA_LINE", "BETMGM_3PA_OVER_DEC", "BETMGM_3PA_UNDER_DEC", "BETMGM_3PA_UPDATED_AT"),
 }
 
-INJURY_REPORT_PAGE = "https://official.nba.com/nba-injury-report-2025-26-season/"
 INACTIVE_STATUSES = {"Out", "Doubtful"}
 WATCHLIST_STATUSES = {"Questionable", "Probable"}
 
@@ -377,14 +376,33 @@ def resolve_team_line(line: str) -> str:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
-    response = requests.get(INJURY_REPORT_PAGE, timeout=30)
-    response.raise_for_status()
+    # 1. Monta a URL da temporada automaticamente para nunca dar erro 404
+    today = datetime.now(APP_TIMEZONE).date()
+    season_str = get_season_string(today)
+    page_url = f"https://official.nba.com/nba-injury-report-{season_str}-season/"
+    
+    try:
+        response = requests.get(page_url, timeout=30)
+        response.raise_for_status()
+    except Exception:
+        # Fallback de segurança se a NBA ainda não tiver virado a página no sistema deles
+        fallback_season = f"{today.year-1}-{str(today.year)[-2:]}"
+        page_url = f"https://official.nba.com/nba-injury-report-{fallback_season}-season/"
+        try:
+            response = requests.get(page_url, timeout=30)
+            response.raise_for_status()
+        except Exception:
+            return ""
+
     html = response.text
 
+    # 2. Expressão Regular "flexível" para não depender do servidor ak-static
     pdf_urls = re.findall(
-        r'https://ak-static\.cms\.nba\.com/referee/injury/Injury-Report_[^"]+\.pdf',
+        r'https?://[^"]*?Injury-Report_[^"]+\.pdf',
         html,
+        flags=re.IGNORECASE
     )
+    
     if not pdf_urls:
         return ""
 
@@ -399,7 +417,6 @@ def fetch_latest_injury_report_pdf_url() -> str:
         return dated_urls[0][1]
 
     return pdf_urls[0]
-
 
 def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
     reader = PdfReader(BytesIO(pdf_bytes))
