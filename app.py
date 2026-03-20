@@ -3348,7 +3348,7 @@ def render_player_focus_panel(
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
 
     # NOVIDADE: As 3 abas organizando a tela!
-    overview_tab, detail_tab, visual_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
+    overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
 
     with overview_tab:
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
