@@ -3469,6 +3469,27 @@ def render_player_focus_panel(
                 fig.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
                 
                 st.plotly_chart(fig, use_container_width=True)
+                
+                # --- NOVO: RESUMO OVER/UNDER MATEMÁTICO ---
+                over_count = int((hist_data > active_line).sum())
+                under_count = int((hist_data < active_line).sum())
+                push_count = int((hist_data == active_line).sum())
+                
+                push_html = f'<span style="margin: 0 0.8rem; color: #334155;">|</span><span style="color: #fbbf24;">PUSH (DEVOLUÇÃO) = {push_count}</span>' if push_count > 0 else ''
+                
+                st.markdown(
+                    f'''
+                    <div style="margin-top: 0.2rem; text-align: center; padding: 0.85rem; background: rgba(15,23,42,0.8); border: 1px solid rgba(148,163,184,0.15); border-radius: 12px; font-weight: 800; font-size: 0.9rem; letter-spacing: 0.05em;">
+                        <span style="color: #94a3b8;">LINHA {visual_ctx['line_source'].upper()}: {active_line}</span>
+                        <span style="margin: 0 0.8rem; color: #334155;">|</span>
+                        <span style="color: #10b981;">OVER NA TEMPORADA = {over_count}</span>
+                        <span style="margin: 0 0.8rem; color: #334155;">|</span>
+                        <span style="color: #ef4444;">UNDER NA TEMPORADA = {under_count}</span>
+                        {push_html}
+                    </div>
+                    ''',
+                    unsafe_allow_html=True
+                )
             else:
                 st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
         else:
