@@ -3358,44 +3358,39 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
-    # --- RASTREADOR INTELIGENTE V3 ---
-    full_name_raw = str(row.get('TEAM_NAME', '')).lower()
-    team_key = 'NBA' # Default caso nada funcione
+   # --- BUSCADOR DE CORES DEFINITIVO (HARDCODED) ---
+    # Pegamos todo o texto disponível sobre o time do jogador
+    search_text = f"{row.get('TEAM_NAME', '')} {row.get('TEAM_ABBR', '')}".upper()
     
-    # Ele percorre o dicionário e vê se o nome do time (ex: 'Rockets') está no nome completo
-    for abbr, info in NBA_TEAM_COLORS.items():
-        if info['name'].lower() in full_name_raw:
-            team_key = abbr
-            break
-            
-    # Caso especial para siglas diretas
-    if team_key == 'NBA':
-        team_key = str(row.get('TEAM_ABBR', 'NBA')).upper()
+    # 1. Definimos a sigla padrão (NBA)
+    tk = 'NBA'
+    
+    # 2. Procuramos por palavras-chave diretamente no texto
+    if 'ROCKETS' in search_text or 'HOU' in search_text: tk = 'HOU'
+    elif 'RAPTORS' in search_text or 'TOR' in search_text: tk = 'TOR'
+    elif 'HAWKS' in search_text or 'ATL' in search_text: tk = 'ATL'
+    elif 'GRIZZLIES' in search_text or 'MEM' in search_text: tk = 'MEM'
+    elif 'CELTICS' in search_text or 'BOS' in search_text: tk = 'BOS'
+    elif 'WARRIORS' in search_text or 'GSW' in search_text: tk = 'GSW'
+    elif 'LAKERS' in search_text or 'LAL' in search_text: tk = 'LAL'
+    elif 'KNICKS' in search_text or 'NYK' in search_text: tk = 'NYK'
+    elif 'NETS' in search_text or 'BKN' in search_text: tk = 'BKN'
+    elif 'BUCKS' in search_text or 'MIL' in search_text: tk = 'MIL'
+    elif 'BULLS' in search_text or 'CHI' in search_text: tk = 'CHI'
+    elif 'HEAT' in search_text or 'MIA' in search_text: tk = 'MIA'
+    elif 'SUNS' in search_text or 'PHX' in search_text: tk = 'PHX'
+    elif 'MAVERICKS' in search_text or 'DAL' in search_text: tk = 'DAL'
+    elif '76ERS' in search_text or 'PHI' in search_text: tk = 'PHI'
+    elif 'NUGGETS' in search_text or 'DEN' in search_text: tk = 'DEN'
+    elif 'PELICANS' in search_text or 'NOP' in search_text: tk = 'NOP'
+    elif 'TIMBERWOLVES' in search_text or 'MIN' in search_text: tk = 'MIN'
+    
+    # 3. Puxamos as cores do dicionário global
+    colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
 
-    colors = NBA_TEAM_COLORS.get(team_key, {'primary': '#1d222d', 'secondary': '#ffcc00'})
-# --- BUSCADOR DE CORES TURBO ---
-    team_abbr = row.get('TEAM_ABBR')
-    team_name = row.get('TEAM_NAME', '')
+    # --- DEBUG: APAGUE ESSA LINHA ABAIXO APÓS TESTAR ---
+    # st.write(f"DEBUG: Time identificado como: {tk}")
 
-    # Se não achou a sigla, tenta descobrir pela primeira palavra do nome (ex: "Golden" -> GSW)
-    if not team_abbr or team_abbr not in NBA_TEAM_COLORS:
-        # Mapeamento rápido de emergência por nome
-        name_to_abbr = {
-            'Golden': 'GSW', 'Boston': 'BOS', 'Los': 'LAL', # Lakers/Clippers tratamos abaixo
-            'New': 'NYK', 'Miami': 'MIA', 'Chicago': 'CHI', 'Dallas': 'DAL'
-        }
-        # Tenta pegar pela primeira palavra do nome do time
-        first_word = str(team_name).split()[0]
-        team_abbr = name_to_abbr.get(first_word, 'NBA')
-        
-        # Ajuste fino para times com "Los" ou "New" repetidos
-        if "Lakers" in str(team_name): team_abbr = 'LAL'
-        if "Clippers" in str(team_name): team_abbr = 'LAC'
-        if "Nets" in str(team_name): team_abbr = 'BKN'
-        if "Pelicans" in str(team_name): team_abbr = 'NOP'
-
-    # Busca as cores finais
-    colors = NBA_TEAM_COLORS.get(team_abbr, {'primary': '#1d222d', 'secondary': '#ffcc00'})
 
     st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
 
