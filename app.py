@@ -3579,9 +3579,17 @@ def render_player_focus_panel(
         st.markdown(f"### Histórico de Confronto: vs {row.get('MATCHUP_LABEL', 'Adversário')}")
         st.caption("Desempenho real do jogador nos últimos 5 jogos especificamente contra este time.")
 
-        # 1. Identifica quem é o adversário de hoje
-        # Tentamos pegar a sigla do adversário do matchup (ex: "vs MIN" -> "MIN")
-        opp_abbr = row.get('MATCHUP_LABEL', '').replace('vs ', '').replace('@ ', '').strip()
+        # 1. Identifica o adversário real (Sigla)
+        # Tentamos pegar de 'OPPONENT_ABBR' ou 'OPP_ABBR' que o seu sistema gera
+        opp_abbr = row.get('OPPONENT_ABBR') or row.get('OPP_ABBR')
+        
+        # Se não encontrar a sigla direta, vamos tentar extrair do card de Matchup
+        if not opp_abbr or opp_abbr == "Neutro":
+             # Isso tenta pegar a primeira palavra do card que diz "Memphis Grizzlies vs G"
+             opp_abbr = row.get('MATCHUP_TEAM_ABBR', 'N/A')
+
+        st.markdown(f"### Histórico de Confronto: vs {opp_abbr}")
+        st.caption(f"Desempenho real do jogador nos últimos 5 jogos especificamente contra {opp_abbr}.")
         
         if opp_abbr and not log.empty:
             # Filtra no histórico da temporada apenas jogos contra esse time
