@@ -40,21 +40,20 @@ PLAYER_HEADSHOT_URL = "https://cdn.nba.com/headshots/nba/latest/1040x760/{player
 
 SORT_OPTIONS = {
     "PRA L10": "L10_PRA",
-    "Δ PRA L10 vs Temp": "DELTA_PRA_L10",
-    "PRA L5": "L5_PRA",
-    "Δ PRA L5 vs Temp": "DELTA_PRA_L5",
     "PTS L10": "L10_PTS",
     "REB L10": "L10_REB",
     "AST L10": "L10_AST",
+    "3PM L10": "L10_3PM",
+    "FGA L10": "L10_FGA",
+    "3PA L10": "L10_3PA",
+    "Δ PRA L10 vs Temp": "DELTA_PRA_L10",
+    "PRA L5": "L5_PRA",
+    "Δ PRA L5 vs Temp": "DELTA_PRA_L5",
     "PRA temporada": "SEASON_PRA",
-    "PTS temporada": "SEASON_PTS",
-    "REB temporada": "SEASON_REB",
-    "AST temporada": "SEASON_AST",
     "Minutos por jogo": "SEASON_MIN",
     "Jogos na temporada": "SEASON_GP",
     "Nome do jogador": "PLAYER",
 }
-
 ROLE_OPTIONS = ["Todos", "Titular provável", "Reserva"]
 VIEW_OPTIONS = ["Cards", "Tabela"]
 CHART_OPTIONS = ["Compacto", "Completo"]
@@ -3592,11 +3591,12 @@ def main() -> None:
         if not api_key_available:
             st.caption("Adicione SPORTSGAMEODDS_API_KEY em st.secrets ou variável de ambiente para usar BetMGM.")
 
-        st.divider()
-        st.subheader("Ordenação")
-        sort_labels = list(SORT_OPTIONS.keys())
-        sort_label = st.selectbox("Ordenar jogadores por", options=sort_labels, index=sort_labels.index("PRA L10"))
-        ascending = st.toggle("Ordem crescente", value=False)
+        # Ordenação Automática "Invisível"
+        # Ele pega a métrica selecionada (Ex: "PTS") e avisa pro app ordenar por "PTS L10" do maior pro menor
+        sort_label = f"{line_metric} L10"
+        if sort_label not in SORT_OPTIONS:
+            sort_label = "PRA L10" # Trava de segurança
+        ascending = False
 
         st.divider()
         st.caption("Este app busca os dados ao abrir a página.")
