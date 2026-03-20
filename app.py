@@ -398,11 +398,12 @@ def fetch_latest_injury_report_pdf_url() -> str:
             page_url = f"https://official.nba.com/nba-injury-report-{fallback_year}-season/"
             response = requests.get(page_url, headers=headers, timeout=10)
         response.raise_for_status()
-    except Exception:
+    except Exception as e:
+        st.error(f"🚨 DIAGNÓSTICO: O site da NBA bloqueou a conexão ou a página não existe. Erro: {e}")
         return ""
 
     html = response.text
-    all_hrefs = re.findall(r'href="([^"]+\.pdf)"', html, flags=re.IGNORECASE)
+    all_hrefs = re.findall(r'href=[\'"]([^\'"]+\.pdf)[\'"]', html, flags=re.IGNORECASE)
     pdf_urls = []
     for href in all_hrefs:
         if "injury" in href.lower() and "report" in href.lower():
@@ -412,16 +413,10 @@ def fetch_latest_injury_report_pdf_url() -> str:
                 base = "https://official.nba.com"
                 pdf_urls.append(base + href if href.startswith("/") else base + "/" + href)
 
-    if not pdf_urls: return ""
+    if not pdf_urls:
+        st.error("🚨 DIAGNÓSTICO: A página carregou, mas não encontrei nenhum link de PDF nela.")
+        return ""
 
-    dated_urls = []
-    for url in pdf_urls:
-        dt = parse_report_dt_from_url(url)
-        if dt is not None: dated_urls.append((dt, url))
-
-    if dated_urls:
-        dated_urls.sort(key=lambda x: x[0], reverse=True)
-        return dated_urls[0][1]
     return pdf_urls[0]
 
 def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
@@ -433,13 +428,15 @@ def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
             page_lines = [clean_injury_pdf_line(x) for x in text.splitlines() if x.strip()]
             lines.extend(page_lines)
         return lines
-    except Exception:
+    except Exception as e:
+        st.error(f"🚨 DIAGNÓSTICO: O PDF foi baixado, mas não consegui ler o texto interno. Erro: {e}")
         return []
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_df() -> pd.DataFrame:
     pdf_url = fetch_latest_injury_report_pdf_url()
-    if not pdf_url: return pd.DataFrame()
+    if not pdf_url: 
+        return pd.DataFrame()
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -450,13 +447,18 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     try:
         response = requests.get(pdf_url, headers=headers, timeout=15)
         response.raise_for_status()
-    except Exception: return pd.DataFrame()
+    except Exception as e:
+        st.error(f"🚨 DIAGNÓSTICO: Achei o link ({pdf_url}), mas a NBA bloqueou o download. Erro: {e}")
+        return pd.DataFrame()
 
     lines = extract_pdf_text_lines(response.content)
+    if not lines:
+        return pd.DataFrame()
+
     rows = []
     current_game_date, current_game_time, current_matchup, current_team = "", "", "", ""
     current_row = None
-    prev_line = "" # Memória da linha anterior
+    prev_line = "" 
 
     player_status_re = re.compile(
         r"(?P<player>[A-Za-zÀ-ÿ0-9'\.\-\s]+(?:,\s+[A-Za-zÀ-ÿ0-9'\.\-\s]+)?)\s+"
@@ -483,7 +485,6 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
             current_row = None 
             continue
 
-        # 1) Tenta o padrão clássico (tudo na mesma linha)
         player_match = player_status_re.search(line_clean)
         if player_match:
             player_name = " ".join(player_match.group("player").split())
@@ -505,11 +506,9 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
             prev_line = line_clean
             continue
 
-        # 2) Tenta o padrão "Quebrado" (Status isolado em uma linha)
         status_exact = line_clean.capitalize()
         if status_exact in ["Out", "Questionable", "Probable", "Doubtful", "Available"]:
-            # Verifica se a linha de cima tem vírgula (formato Last, First)
-            if "," in prev_line:
+            if "," in prev_line or len(prev_line.split()) >= 2:
                 player_name = prev_line
                 current_row = {
                     "GAME_DATE": current_game_date, "GAME_TIME_ET": current_game_time,
@@ -523,7 +522,6 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
                 prev_line = line_clean
                 continue
 
-        # 3) Captura o motivo da lesão na linha seguinte
         if current_row is not None:
             if "," not in line_clean and not resolve_team_line(line_clean):
                 current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {line_clean}'.strip()
@@ -531,8 +529,11 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
         prev_line = line_clean
 
     injury_df = pd.DataFrame(rows)
-    if not injury_df.empty:
+    if injury_df.empty:
+        st.error("🚨 DIAGNÓSTICO: O PDF foi baixado perfeitamente, mas a lupa não achou nenhum jogador. O layout oficial mudou!")
+    else:
         injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
+    
     return injury_df
     
 @st.cache_data(ttl=900, show_spinner=False)
