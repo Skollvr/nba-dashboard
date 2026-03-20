@@ -465,40 +465,50 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
     current_row = None
     prev_line = "" 
 
+    # Exigimos a vírgula para não pegar lixo por engano
     player_status_re = re.compile(
-        r"(?P<player>[A-Za-zÀ-ÿ0-9'\.\-\s]+(?:,\s+[A-Za-zÀ-ÿ0-9'\.\-\s]+)?)\s+"
+        r"(?P<player>[A-Za-zÀ-ÿ0-9'\.\-\s]+,\s+[A-Za-zÀ-ÿ0-9'\.\-\s]+)\s+"
         r"(?P<status>Available|Out|Questionable|Probable|Doubtful)\b"
         r"(?:\s+(?P<reason>.*))?$",
         flags=re.IGNORECASE
     )
+
+    # Limpador de sujeira da linha (horários, times, matchups)
+    def clean_raw_player_name(raw: str, team_name: str) -> str:
+        c = re.sub(r"\d{1,2}:\d{2}\s*\(ET\)", "", raw, flags=re.IGNORECASE)
+        c = re.sub(r"[A-Z]{2,3}@[A-Z]{2,3}", "", c)
+        c = re.sub(r"\d{2}/\d{2}/\d{4}", "", c)
+        if team_name:
+            c = re.compile(re.escape(team_name), re.IGNORECASE).sub("", c)
+        return " ".join(c.split())
 
     for line in lines:
         line_clean = line.strip()
         if not line_clean or "Game Date Game Time" in line_clean: 
             continue
 
-        game_match = GAME_PREFIX_RE.match(line_clean)
+        game_match = GAME_PREFIX_RE.search(line_clean)
         if game_match:
             if game_match.group("game_date"): current_game_date = game_match.group("game_date")
-            current_game_time, current_matchup = game_match.group("game_time"), game_match.group("matchup")
-            line_clean = game_match.group("rest").strip()
+            current_game_time = game_match.group("game_time")
+            current_matchup = game_match.group("matchup")
 
         resolved_team = resolve_team_line(line_clean)
         if resolved_team:
             current_team = resolved_team
-            prev_line = line_clean
-            current_row = None 
-            continue
+            # NOTA MÁGICA: Não damos 'continue' se acharmos um Status de lesão na mesma linha!
+            has_status = any(re.search(rf'\b{kw}\b', line_clean, re.IGNORECASE) for kw in ["Out", "Questionable", "Probable", "Doubtful", "Available"])
+            if not has_status:
+                prev_line = line_clean
+                current_row = None 
+                continue
 
         player_match = player_status_re.search(line_clean)
         if player_match:
-            player_name = " ".join(player_match.group("player").split())
+            raw_player = player_match.group("player")
+            player_name = clean_raw_player_name(raw_player, current_team)
             status = player_match.group("status").strip().capitalize()
             
-            prefix = line_clean[:player_match.start()].strip()
-            if prefix and resolve_team_line(prefix):
-                current_team = resolve_team_line(prefix)
-
             current_row = {
                 "GAME_DATE": current_game_date, "GAME_TIME_ET": current_game_time,
                 "MATCHUP": current_matchup, "TEAM_NAME_IR": current_team,
@@ -514,7 +524,7 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
         status_exact = line_clean.capitalize()
         if status_exact in ["Out", "Questionable", "Probable", "Doubtful", "Available"]:
             if "," in prev_line or len(prev_line.split()) >= 2:
-                player_name = prev_line
+                player_name = clean_raw_player_name(prev_line, current_team)
                 current_row = {
                     "GAME_DATE": current_game_date, "GAME_TIME_ET": current_game_time,
                     "MATCHUP": current_matchup, "TEAM_NAME_IR": current_team,
