@@ -3490,6 +3490,86 @@ def render_player_focus_panel(
                     ''',
                     unsafe_allow_html=True
                 )
+                st.divider()
+
+                # --- 3. NOVO: GRÁFICO DE DISPERSÃO (MINUTOS VS PRODUÇÃO) ---
+                st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
+                st.caption("Cada ponto é um jogo. A linha de tendência mostra se a produção sobe junto com os minutos.")
+                
+                scatter_df = log[["MIN", active_col, "GAME_DATE"]].copy().dropna()
+                # Adiciona informação de matchup se existir
+                if "MATCHUP" in log.columns: scatter_df["MATCHUP"] = log["MATCHUP"]
+                else: scatter_df["MATCHUP"] = ""
+                
+                if not scatter_df.empty:
+                    # Calcula a linha de tendência (Regressão Linear Simples)
+                    x = scatter_df["MIN"]
+                    y = scatter_df[active_col]
+                    z = np.polyfit(x, y, 1)
+                    p = np.poly1d(z)
+                    trend_x = np.array([x.min(), x.max()])
+                    trend_y = p(trend_x)
+
+                    fig_scatter = go.Figure()
+
+                    # Adiciona os pontos (Jogos)
+                    fig_scatter.add_trace(go.Scatter(
+                        x=x, y=y,
+                        mode='markers',
+                        marker=dict(
+                            size=12,
+                            color=np.where(y >= active_line, '#10b981', '#ef4444'), # Verde se Over, Vermelho se Under
+                            line=dict(width=1, color='#f8fafc'),
+                            opacity=0.8
+                        ),
+                        text=scatter_df.apply(lambda r: f"Data: {r['GAME_DATE'].strftime('%d/%m')}<br>Matchup: {r['MATCHUP']}<br>Minutos: {r['MIN']}<br>{visual_metric}: {r[active_col]}", axis=1),
+                        hoverinfo='text',
+                        name='Jogos'
+                    ))
+
+                    # Adiciona a Linha de Tendência
+                    fig_scatter.add_trace(go.Scatter(
+                        x=trend_x, y=trend_y,
+                        mode='lines',
+                        line=dict(color='rgba(255, 255, 255, 0.4)', width=2, dash='dot'),
+                        name='Tendência',
+                        hoverinfo='skip'
+                    ))
+
+                    # Linha horizontal da aposta
+                    fig_scatter.add_hline(
+                        y=active_line, 
+                        line_dash="dash", 
+                        line_color=line_color, 
+                        line_width=2,
+                        annotation_text="Linha",
+                        annotation_position="bottom right"
+                    )
+
+                    fig_scatter.update_layout(
+                        template="plotly_dark",
+                        height=400,
+                        margin=dict(l=20, r=20, t=20, b=20),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(15,23,42,0.35)",
+                        xaxis_title="Minutos Jogados",
+                        yaxis_title=f"Valor de {visual_metric}",
+                        showlegend=False,
+                        dragmode=False
+                    )
+                    fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                    fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+
+                    st.plotly_chart(fig_scatter, use_container_width=True)
+                    
+                    # Explicação da correlação
+                    correl = x.corr(y)
+                    if correl > 0.7:
+                        st.success(f"📈 **Alta Correlação ({correl:.2f}):** O desempenho do jogador é extremamente dependente dos minutos. Se o tempo de quadra subir hoje, o Over é muito provável.")
+                    elif correl > 0.4:
+                        st.info(f"📊 **Correlação Moderada ({correl:.2f}):** Mais minutos costumam trazer mais {visual_metric}, mas outros fatores (eficiência/matchup) também pesam.")
+                    else:
+                        st.warning(f"📉 **Baixa Correlação ({correl:.2f}):** Esse jogador produz de forma oscilante, independente de quanto tempo fica em quadra.")
             else:
                 st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
         else:
