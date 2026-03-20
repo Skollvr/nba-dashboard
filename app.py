@@ -3276,7 +3276,7 @@ def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_va
                 <div class="detail-mini-value">{line_context['hit_l5']}</div>
             </div>
             <div class="detail-mini detail-mini-highlight">
-                <div class="detail-mini-label">Hit L10</div>
+                <div class="detail-mini-label" title="{line_context['tooltip']}" style="cursor:help;">Hit L10 {line_context['icon']}</div>
                 <div class="detail-mini-value">{line_context['hit_l10']}</div>
             </div>
         </div>
