@@ -453,104 +453,50 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
         response = requests.get(pdf_url, headers=headers, timeout=15)
         response.raise_for_status()
     except Exception as e:
-        st.error(f"🚨 DIAGNÓSTICO: Achei o link ({pdf_url}), mas a NBA bloqueou o download. Erro: {e}")
+        st.error(f"🚨 DIAGNÓSTICO: Achei o link, mas a NBA bloqueou o download. Erro: {e}")
         return pd.DataFrame()
 
     lines = extract_pdf_text_lines(response.content)
     if not lines:
         return pd.DataFrame()
 
+    # TÁTICA NUCLEAR: Transforma o PDF inteiro numa única linha de texto
+    full_text = " ".join(lines)
+    full_text = re.sub(r'\s+', ' ', full_text)
+
     rows = []
-    current_game_date, current_game_time, current_matchup, current_team = "", "", "", ""
-    current_row = None
-    prev_line = "" 
-
-    for line in lines:
-        line_clean = line.strip()
-        if not line_clean or "Game Date Game Time" in line_clean or "Page " in line_clean: 
-            continue
-
-        # Encontra a palavra-chave de status para usar como "faca" e cortar a linha no meio
-        status_match = re.search(r'\b(Available|Out|Questionable|Probable|Doubtful)\b', line_clean, re.IGNORECASE)
-
-        if status_match:
-            status = status_match.group(1).capitalize()
-            prefix = line_clean[:status_match.start()].strip()
-            reason = line_clean[status_match.end():].strip()
-            
-            # 1. Fatiar Data
-            date_match = re.search(r'\d{2}/\d{2}/\d{4}', prefix)
-            if date_match:
-                current_game_date = date_match.group()
-                prefix = prefix.replace(current_game_date, '').strip()
-                
-            # 2. Fatiar Hora
-            time_match = re.search(r'\d{1,2}:\d{2}\s*\(ET\)', prefix, re.IGNORECASE)
-            if time_match:
-                current_game_time = time_match.group()
-                prefix = prefix.replace(current_game_time, '').strip()
-                
-            # 3. Fatiar Matchup (ex: GSW@DET)
-            matchup_match = re.search(r'[A-Z]{2,3}@[A-Z]{2,3}', prefix)
-            if matchup_match:
-                current_matchup = matchup_match.group()
-                prefix = prefix.replace(current_matchup, '').strip()
-                
-            # 4. Fatiar Nome do Time
-            resolved_team = resolve_team_line(prefix)
-            if resolved_team:
-                current_team = resolved_team
-                prefix = re.compile(re.escape(resolved_team), re.IGNORECASE).sub('', prefix).strip()
-                
-            # 5. O que sobrou na frase é garantido ser o nome do jogador!
-            player_name = prefix.strip()
-            
-            # Fallback (Órfão): Se não sobrou nome, significa que o nome ficou na linha de cima
-            if not player_name or player_name == ",":
-                fallback_prefix = prev_line
-                resolved_team_prev = resolve_team_line(fallback_prefix)
-                if resolved_team_prev:
-                    current_team = resolved_team_prev
-                    fallback_prefix = re.compile(re.escape(resolved_team_prev), re.IGNORECASE).sub('', fallback_prefix).strip()
-                player_name = fallback_prefix.strip()
-
-            # Limpeza estética de vírgulas penduradas no início ou fim
-            player_name = re.sub(r'^[\,\-]\s*', '', player_name)
-            player_name = re.sub(r'\s*[\,\-]$', '', player_name)
-            
-            # Valida se é um nome de verdade
-            if player_name and ("," in player_name or len(player_name.split()) >= 2):
-                current_row = {
-                    "GAME_DATE": current_game_date, 
-                    "GAME_TIME_ET": current_game_time,
-                    "MATCHUP": current_matchup, 
-                    "TEAM_NAME_IR": current_team,
-                    "PLAYER_NAME_IR": player_name, 
-                    "PLAYER_KEY_IR": normalize_person_name(player_name),
-                    "INJ_STATUS": status,
-                    "INJ_REASON": reason,
-                    "INJ_REPORT_URL": pdf_url,
-                }
-                rows.append(current_row)
-            
-            prev_line = line_clean
-            continue
+    
+    # Busca todas as ocorrências de "Sobrenome, Nome Status" em qualquer lugar do documento
+    name_regex = r"([A-Za-zÀ-ÿ'\.\-]+\s*(?:III|II|IV|V|Jr\.|Sr\.)?\s*,\s*[A-Za-zÀ-ÿ'\.\-]+(?:[\s\-][A-Za-zÀ-ÿ'\.\-]+)?)"
+    status_regex = r"(Available|Out|Questionable|Probable|Doubtful)"
+    
+    matches = list(re.finditer(rf"{name_regex}\s+{status_regex}\b", full_text, flags=re.IGNORECASE))
+    
+    for i, match in enumerate(matches):
+        player_name = match.group(1).strip()
+        status = match.group(2).capitalize()
         
-        # Se não tem status na linha, processa como a declaração do time ou Motivo extra
-        resolved_team_no_status = resolve_team_line(line_clean)
-        if resolved_team_no_status:
-            current_team = resolved_team_no_status
-            current_row = None  
-        elif current_row is not None:
-            if "," not in line_clean:
-                current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {line_clean}'.strip()
-                
-        prev_line = line_clean
+        # Pega o motivo da lesão lendo o que está entre este jogador e o próximo
+        start_reason = match.end()
+        end_reason = matches[i+1].start() if i + 1 < len(matches) else start_reason + 120
+        raw_reason = full_text[start_reason:end_reason].strip()
+        
+        reason = re.split(r'\d{2}/\d{2}/\d{4}|NOT YET SUBMITTED', raw_reason)[0].strip()
+        if len(reason) > 120:
+            reason = reason[:120] + "..."
+
+        current_row = {
+            "GAME_DATE": "", "GAME_TIME_ET": "", "MATCHUP": "", "TEAM_NAME_IR": "", 
+            "PLAYER_NAME_IR": player_name, 
+            "PLAYER_KEY_IR": normalize_person_name(player_name),
+            "INJ_STATUS": status,
+            "INJ_REASON": reason,
+            "INJ_REPORT_URL": pdf_url,
+        }
+        rows.append(current_row)
 
     injury_df = pd.DataFrame(rows)
-    if injury_df.empty:
-        st.error("🚨 DIAGNÓSTICO: O PDF foi baixado, mas a extração não achou nenhum jogador.")
-    else:
+    if not injury_df.empty:
         injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
     
     return injury_df
