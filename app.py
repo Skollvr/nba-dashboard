@@ -3636,10 +3636,35 @@ def render_player_focus_panel(
                     with c3: st.metric("Hit Rate H2H", f"{h2h_pct:.0f}%")
 
                     # Tabela
+                    # --- TABELA DETALHADA COM COLUNA DE LINHA ---
                     h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', visual_metric, 'MIN']].copy()
-                    h2h_display['GAME_DATE'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
+                    
+                    # Adicionamos a linha atual para comparação direta
+                    h2h_display['Linha'] = m_line 
+                    
+                    # Formata a data para um padrão mais curto (ganha espaço)
+                    h2h_display['GAME_DATE'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%y')
+                    
+                    # Define o Status comparando o Real vs a Linha
                     h2h_display['Status'] = h2h_display[visual_metric].apply(lambda x: "✅ OVER" if x > m_line else "❌ UNDER")
-                    st.dataframe(h2h_display, hide_index=True, use_container_width=True)
+                    
+                    # REORDENAR COLUNAS: Colocamos a Linha ao lado do resultado real
+                    cols_order = ['GAME_DATE', 'MATCHUP', 'Linha', visual_metric, 'MIN', 'Status']
+                    h2h_display = h2h_display[cols_order]
+                    
+                    st.dataframe(
+                        h2h_display, 
+                        hide_index=True, 
+                        use_container_width=True,
+                        column_config={
+                            "GAME_DATE": st.column_config.TextColumn("Data", width="small"),
+                            "MATCHUP": st.column_config.TextColumn("Confronto", width="medium"),
+                            "Linha": st.column_config.NumberColumn("Linha", format="%.1f"),
+                            visual_metric: st.column_config.NumberColumn(f"Real ({visual_metric})", format="%.0f"),
+                            "MIN": st.column_config.NumberColumn("Min", format="%d", width="small"),
+                            "Status": st.column_config.TextColumn("Status", width="small")
+                        }
+                    )
                 else:
                     st.info(f"Nenhum jogo registrado contra {opp_abbr} nesta temporada.")
             else:
