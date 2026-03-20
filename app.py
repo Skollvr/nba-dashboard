@@ -2816,7 +2816,7 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
     for idx, (_, row) in enumerate(rank_df.iterrows(), start=1):
         if mode == "projection":
             stat1_label, stat1_value = "Proj", format_number(row["RANK_PROJ"])
-            stat2_label, stat2_value = "Hit", row["RANK_HIT_TEXT"]
+            stat2_label, stat2_value = "Hit", row["RANK_HIT_HTML"]
             stat3_label, stat3_value = "Match", row["MATCHUP_LABEL"]
             stat3_class = "ranking-good" if row["MATCHUP_LABEL"] == "Favorável" else ("ranking-bad" if row["MATCHUP_LABEL"] == "Difícil" else "")
         elif mode == "edge":
@@ -2825,7 +2825,7 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
             stat3_label, stat3_value = "Linha", format_number(row["RANK_LINE"])
             stat3_class = ""
         else:
-            stat1_label, stat1_value = "Hit", row["RANK_HIT_TEXT"]
+            stat1_label, stat1_value = "Hit", row["RANK_HIT_HTML"]
             stat2_label, stat2_value = "Osc", row["OSC_CLASS"]
             stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
@@ -2888,6 +2888,7 @@ def render_game_rankings(
     rank_df["RANK_LINE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("line_value", 0.0)))
     rank_df["RANK_EDGE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("edge", 0.0)))
     rank_df["RANK_HIT_TEXT"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10", "-"))
+    rank_df["RANK_HIT_HTML"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10_html", "-"))
     rank_df["RANK_HIT_RATE"] = rank_df["RANK_HIT_TEXT"].apply(parse_ratio_text)
 
     if "LINE_CONTEXT" in rank_df.columns:
