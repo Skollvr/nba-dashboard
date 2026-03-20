@@ -3427,12 +3427,14 @@ def render_player_focus_panel(
                 fig = go.Figure()
                 fig.add_trace(go.Histogram(
                     x=hist_data,
-                    xbins=dict(start=0, end=max(hist_data.max(), active_line) + 5, size=2 if active_col not in ["3PM", "3PA"] else 1),
+                    # Força tamanho 1. Começando em -0.5 garante que o número exato (ex: 2) fique bem no centro da barra!
+                    xbins=dict(start=-0.5, end=max(hist_data.max(), active_line) + 5, size=1),
                     marker_color="rgba(139,92,246, 0.65)",
                     marker_line_color="rgba(139,92,246, 1)",
                     marker_line_width=1.5,
                     opacity=0.9,
-                    hovertemplate=f"Valor de {visual_metric}: %{{x}}<br>Jogos atingidos: %{{y}}<extra></extra>"
+                    # Agora o tooltip vai mostrar apenas o número cravado (ex: 2)
+                    hovertemplate=f"Valor exato de {visual_metric}: %{{x}}<br>Jogos atingidos: %{{y}}<extra></extra>"
                 ))
                 
                 # Desenha a linha vertical da aposta
@@ -3462,7 +3464,8 @@ def render_player_focus_panel(
                     dragmode=False,
                     bargap=0.15
                 )
-                fig.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                # Força o eixo X a mostrar apenas números inteiros (0, 1, 2, 3...)
+                fig.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)", tick0=0, dtick=1)
                 fig.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
                 
                 st.plotly_chart(fig, use_container_width=True)
