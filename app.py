@@ -58,6 +58,11 @@ st.markdown("""
             width: 100% !important;
             height: 45px !important;
         }
+
+        /* Faz a tabela ter rolagem lateral suave no dedo */
+        .stDataFrame {
+            overflow-x: auto !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
