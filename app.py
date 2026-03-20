@@ -3699,7 +3699,7 @@ def render_player_focus_panel(
                     
                     m_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
                     m_line = float(m_ctx["line_value"])
-                    
+                    h2h_log['Status'] = h2h_log[visual_metric].apply(lambda x: "OVER" if x > m_line else "UNDER")
                     h2h_hits = (h2h_log[visual_metric] > m_line).sum()
                     h2h_total = len(h2h_log)
                     h2h_pct = (h2h_hits / h2h_total) * 100
