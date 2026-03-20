@@ -39,7 +39,7 @@ st.markdown("""
         /* 2. Cor do botão quando ele está selecionado ou focado */
         div[data-testid="stHorizontalBlock"] button:focus, 
         div[data-testid="stHorizontalBlock"] button:active {
-            background-color: #00ffcc !important; /* Verde Água Neon */
+            background-color: #ff4b4b !important; /* Verde Água Neon */
             color: #000 !important;
             border: none !important;
             box-shadow: 0 0 15px rgba(0, 255, 204, 0.4);
