@@ -865,7 +865,10 @@ def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_
     hit_l10 = sum(float(v) >= active_line for v in recent_values)
     hit_l5 = sum(float(v) >= active_line for v in recent_values[:5])
 
-    # Criação dos indicadores visuais (tooltips e ícones)
+    # Criação da sequência visual (Tracker): da esquerda (mais antigo) para a direita (mais recente)
+    # recent_values originalmente vem do mais recente para o mais antigo, por isso usamos reversed()
+    hit_sequence = "".join(["✅" if float(v) >= active_line else "❌" for v in reversed(recent_values)])
+
     source_name = "BetMGM" if use_market else "Manual"
     icon = "🎯" if use_market else "✏️"
     tooltip = f"Calculado com linha {source_name} ({active_line})"
@@ -885,6 +888,7 @@ def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_
         "updated_at": market_info.get("updated_at") if use_market else "",
         "hit_l10": hit_l10_str,
         "hit_l10_html": hit_l10_html,
+        "hit_sequence": hit_sequence,
         "icon": icon,
         "tooltip": tooltip,
         "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
@@ -3283,10 +3287,13 @@ def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_va
                 <div class="detail-mini-value">{line_context['hit_l10']}</div>
             </div>
         </div>
-        <div class="hero-note">{odds_note}</div>
+        <div style="margin-top: 0.8rem; padding-top: 0.6rem; border-top: 1px solid rgba(148,163,184,.12);">
+            <div class="detail-mini-label" style="margin-bottom: 0.2rem;">Sequência L10 (→ mais recente)</div>
+            <div style="font-size: 1.1rem; letter-spacing: 0.1rem;">{line_context['hit_sequence']}</div>
+        </div>
+        <div class="hero-note" style="margin-top: 0.6rem;">{odds_note}</div>
     </div>
     """
-
 
 def render_matchup_detail_box_html(row: pd.Series) -> str:
     matchup_class = get_matchup_chip_class(row["MATCHUP_LABEL"])
