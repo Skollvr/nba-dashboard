@@ -2984,7 +2984,7 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
                 hovertemplate=f"{metric}: %{{y:.1f}}<extra></extra>",
             )
         )
-        fig.update_layout(
+       fig.update_layout(
             template="plotly_dark",
             height=360,
             margin=dict(l=20, r=20, t=10, b=20),
@@ -2992,6 +2992,7 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
             plot_bgcolor="rgba(15,23,42,0.35)",
             showlegend=False,
             bargap=0.28,
+            dragmode=False,
         )
         fig.update_xaxes(title="", type="category", tickangle=0, showgrid=False, tickfont=dict(size=11))
         fig.update_yaxes(title="", showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
@@ -3026,6 +3027,7 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(15,23,42,0.35)",
             hoverlabel=dict(bgcolor="#0f172a", bordercolor="#334155", font=dict(color="#f8fafc", size=13)),
+            dragmode=False,
         )
         fig.update_xaxes(title="", type="category", tickangle=0, showgrid=False, tickfont=dict(size=11))
         fig.update_yaxes(title="")
@@ -3432,14 +3434,8 @@ def render_player_focus_panel(
 
         st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
 
-    show_chart = st.toggle(
-        f"Mostrar gráfico — {row['PLAYER']}",
-        value=False,
-        key=f"focus_chart_{int(row['PLAYER_ID'])}_{chart_mode}",
-    )
-
-    if show_chart:
-        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode)
+   # Exibe o gráfico automaticamente junto com o detalhamento
+    render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode)
 
     st.markdown("</div>", unsafe_allow_html=True)
 
