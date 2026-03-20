@@ -3365,25 +3365,18 @@ def render_player_focus_panel(
     # 1. Definimos a sigla padrão (NBA)
     tk = 'NBA'
     
-    # 2. Procuramos por palavras-chave diretamente no texto
-    if 'ROCKETS' in search_text or 'HOU' in search_text: tk = 'HOU'
-    elif 'RAPTORS' in search_text or 'TOR' in search_text: tk = 'TOR'
-    elif 'HAWKS' in search_text or 'ATL' in search_text: tk = 'ATL'
-    elif 'GRIZZLIES' in search_text or 'MEM' in search_text: tk = 'MEM'
-    elif 'CELTICS' in search_text or 'BOS' in search_text: tk = 'BOS'
-    elif 'WARRIORS' in search_text or 'GSW' in search_text: tk = 'GSW'
-    elif 'LAKERS' in search_text or 'LAL' in search_text: tk = 'LAL'
-    elif 'KNICKS' in search_text or 'NYK' in search_text: tk = 'NYK'
-    elif 'NETS' in search_text or 'BKN' in search_text: tk = 'BKN'
-    elif 'BUCKS' in search_text or 'MIL' in search_text: tk = 'MIL'
-    elif 'BULLS' in search_text or 'CHI' in search_text: tk = 'CHI'
-    elif 'HEAT' in search_text or 'MIA' in search_text: tk = 'MIA'
-    elif 'SUNS' in search_text or 'PHX' in search_text: tk = 'PHX'
-    elif 'MAVERICKS' in search_text or 'DAL' in search_text: tk = 'DAL'
-    elif '76ERS' in search_text or 'PHI' in search_text: tk = 'PHI'
-    elif 'NUGGETS' in search_text or 'DEN' in search_text: tk = 'DEN'
-    elif 'PELICANS' in search_text or 'NOP' in search_text: tk = 'NOP'
-    elif 'TIMBERWOLVES' in search_text or 'MIN' in search_text: tk = 'MIN'
+    # --- RASTREADOR INTELIGENTE PARA O BANNER GRANDE ---
+    search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
+    tk = 'NBA'
+    
+    # Loop automático pelo dicionário que resolve todos os times de uma vez
+    for abbr, info in NBA_TEAM_COLORS.items():
+        team_keyword = info.get('name', '').upper()
+        if (team_keyword and team_keyword in search_text) or (abbr in search_text):
+            tk = abbr
+            break
+            
+    colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
     
     # 3. Puxamos as cores do dicionário global
     colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
