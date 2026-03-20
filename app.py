@@ -742,7 +742,7 @@ def get_odds_api_key() -> str:
     return os.getenv("SPORTSGAMEODDS_API_KEY", "").strip()
 
 
-def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 3, delay: float = 1.2):
+def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 5, delay: float = 2.5):
     last_error = None
     for attempt in range(retries):
         try:
@@ -750,8 +750,9 @@ def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 3, dela
         except Exception as exc:
             last_error = exc
             if attempt < retries - 1:
+                # Pausa progressiva para acalmar os servidores da NBA (2.5s, 5s, 7.5s...)
                 time.sleep(delay * (attempt + 1))
-    raise RuntimeError(f"Falha ao consultar {endpoint_name} após {retries} tentativas.") from last_error
+    raise RuntimeError(f"A NBA bloqueou a consulta de {endpoint_name}. Aguarde 2 minutos e recarregue a página.") from last_error
 
 
 def calculate_projection(
