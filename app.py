@@ -3348,7 +3348,7 @@ def render_player_focus_panel(
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
 
     # NOVIDADE: As 3 abas organizando a tela!
-    overview_tab, detail_tab, visual_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual"])
+    overview_tab, detail_tab, visual_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
 
     with overview_tab:
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
@@ -3574,6 +3574,75 @@ def render_player_focus_panel(
                 st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
         else:
             st.info("Sem histórico suficiente para gerar o gráfico.")
+            
+    with market_tab:
+        st.markdown(f"### Histórico de Confronto: vs {row.get('MATCHUP_LABEL', 'Adversário')}")
+        st.caption("Desempenho real do jogador nos últimos 5 jogos especificamente contra este time.")
+
+        # 1. Identifica quem é o adversário de hoje
+        # Tentamos pegar a sigla do adversário do matchup (ex: "vs MIN" -> "MIN")
+        opp_abbr = row.get('MATCHUP_LABEL', '').replace('vs ', '').replace('@ ', '').strip()
+        
+        if opp_abbr and not log.empty:
+            # Filtra no histórico da temporada apenas jogos contra esse time
+            h2h_log = log[log['MATCHUP'].str.contains(opp_abbr)].copy()
+            h2h_log = h2h_log.sort_values('GAME_DATE', ascending=False).head(5)
+            
+            if not h2h_log.empty:
+                # Cálculos de performance H2H
+                h2h_log["PRA"] = h2h_log["PTS"] + h2h_log["REB"] + h2h_log["AST"]
+                h2h_log["3PM"] = h2h_log.get("FG3M", 0)
+                
+                # Pega a linha ativa (BetMGM ou Manual)
+                m_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
+                m_line = float(m_ctx["line_value"])
+                
+                # Métricas de Sucesso (Hit Rate no Confronto)
+                h2h_hits = (h2h_log[visual_metric] > m_line).sum()
+                h2h_total = len(h2h_log)
+                h2h_pct = (h2h_hits / h2h_total) * 100
+                
+                # --- UI: Cards de Resumo H2H ---
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.metric("Jogos vs Este Time", h2h_total)
+                with c2:
+                    avg_h2h = h2h_log[visual_metric].mean()
+                    st.metric(f"Média vs {opp_abbr}", f"{avg_h2h:.1f}", delta=f"{avg_h2h - m_line:.1f} vs Linha")
+                with c3:
+                    st.metric("Hit Rate H2H", f"{h2h_pct:.0f}%", help="Porcentagem de vezes que cobriu a linha atual contra este time.")
+
+                # --- Tabela de Jogos Anteriores ---
+                st.markdown("**Últimos embates diretos:**")
+                
+                # Formata a tabela para ficar bonita
+                h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', visual_metric, 'MIN']].copy()
+                h2h_display['GAME_DATE'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
+                h2h_display['Status'] = h2h_display[visual_metric].apply(lambda x: "✅ OVER" if x > m_line else "❌ UNDER")
+                
+                st.dataframe(
+                    h2h_display,
+                    column_config={
+                        "GAME_DATE": "Data",
+                        "MATCHUP": "Confronto",
+                        visual_metric: f"{visual_metric} Final",
+                        "MIN": "Minutos",
+                        "Status": st.column_config.TextColumn("Resultado", help="Comparado à linha atual")
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # --- Insights de Especialista ---
+                if h2h_pct >= 80:
+                    st.success(f"🔥 **ALERTA DE FREGUESIA:** {row['PLAYER']} cobriu a linha em {h2h_pct:.0f}% dos últimos jogos contra o {opp_abbr}. Ele parece se sentir muito confortável nesse matchup.")
+                elif h2h_pct <= 20:
+                    st.error(f"⚠️ **MURO DEFENSIVO:** {row['PLAYER']} tem muita dificuldade contra o {opp_abbr}. Apenas {h2h_pct:.0f}% de aproveitamento contra a linha atual.")
+                
+            else:
+                st.info(f"Nenhum jogo registrado de {row['PLAYER']} contra {opp_abbr} nesta temporada ainda.")
+        else:
+            st.warning("Não foi possível identificar o adversário para carregar o histórico de confronto.")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
