@@ -3770,25 +3770,29 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
     search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
     tk = 'NBA'
     
-    # Busca simplificada (mesma lógica do banner)
-    if 'ROCKETS' in search_text or 'HOU' in search_text: tk = 'HOU'
-    elif 'RAPTORS' in search_text or 'TOR' in search_text: tk = 'TOR'
-    elif 'HAWKS' in search_text or 'ATL' in search_text: tk = 'ATL'
-    elif 'GRIZZLIES' in search_text or 'MEM' in search_text: tk = 'MEM'
-    elif 'CELTICS' in search_text or 'BOS' in search_text: tk = 'BOS'
-    elif 'WARRIORS' in search_text or 'GSW' in search_text: tk = 'GSW'
-    elif 'LAKERS' in search_text or 'LAL' in search_text: tk = 'LAL'
-    elif 'KNICKS' in search_text or 'NYK' in search_text: tk = 'NYK'
-    elif 'NETS' in search_text or 'BKN' in search_text: tk = 'BKN'
-    elif 'BUCKS' in search_text or 'MIL' in search_text: tk = 'MIL'
-    elif 'BULLS' in search_text or 'CHI' in search_text: tk = 'CHI'
-    elif 'HEAT' in search_text or 'MIA' in search_text: tk = 'MIA'
-    elif 'SUNS' in search_text or 'PHX' in search_text: tk = 'PHX'
-    elif 'MAVERICKS' in search_text or 'DAL' in search_text: tk = 'DAL'
-    elif '76ERS' in search_text or 'PHI' in search_text: tk = 'PHI'
-    elif 'NUGGETS' in search_text or 'DEN' in search_text: tk = 'DEN'
-    elif 'PELICANS' in search_text or 'NOP' in search_text: tk = 'NOP'
-    elif 'TIMBERWOLVES' in search_text or 'MIN' in search_text: tk = 'MIN'
+    # --- RASTREADOR DE CORES INTELIGENTE PARA O CARD ---
+    # Pegamos o texto disponível do time (TEAM_NAME e TEAM_ABBR)
+    search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
+    
+    tk = 'NBA' # Default caso não encontre nada
+    
+    # Loop automático pelo dicionário NBA_TEAM_COLORS que está no topo do arquivo
+    # Isso evita termos que escrever if/elif para os 30 times
+    for abbr, info in NBA_TEAM_COLORS.items():
+        # Pega o nome do time no dicionário (ex: 'PISTONS')
+        team_keyword = info.get('name', '').upper()
+        
+        # Se 'PISTONS' estiver no texto de busca ('DETROIT PISTONS'), achamos o time!
+        if team_keyword and team_keyword in search_text:
+            tk = abbr
+            break
+        # Ou se a sigla 'DET' estiver no texto de busca
+        elif abbr in search_text:
+            tk = abbr
+            break
+            
+    # Puxa as cores finais baseadas na sigla encontrada (tk)
+    colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
     
     colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
     with st.container(border=True):
