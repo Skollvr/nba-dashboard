@@ -25,42 +25,42 @@ from nba_api.stats.endpoints import (
 )
 from nba_api.stats.static import teams
 
+# --- COLOQUE ISSO NO TOPO DO ARQUIVO, LOGO APÓS OS IMPORTS ---
+
+st.markdown("""
 <style>
     /* --- AJUSTES EXCLUSIVOS PARA MOBILE (Telas menores que 768px) --- */
     @media (max-width: 768px) {
-        /* 1. Reduz o tamanho do Título do Jogador no Banner */
+        /* 1. Ajusta o tamanho da fonte do nome do jogador */
         h1 {
-            font-size: 24px !important;
-            line-height: 1.1 !important;
-        }
-
-        /* 2. Diminui os recuos (padding) para sobrar mais espaço para os dados */
-        .stApp {
-            padding: 5px !important;
+            font-size: 22px !important;
         }
         
+        /* 2. Compacta o Banner do Jogador */
         div[style*="padding: 20px"] {
-            padding: 12px !important; /* Banner grande mais compacto */
+            padding: 10px !important;
+            margin-bottom: 10px !important;
         }
 
-        /* 3. Ajusta as colunas de métricas para não ficarem espremidas */
+        /* 3. Faz os cards da galeria ocuparem a largura toda no celular */
         [data-testid="column"] {
             width: 100% !important;
             flex: 1 1 auto !important;
-            margin-bottom: 10px;
         }
 
-        /* 4. Esconde elementos menos importantes no mobile para limpar o visual */
-        .mobile-hide {
-            display: none !important;
+        /* 4. Ajusta o tamanho das imagens para não estourarem */
+        img {
+            max-width: 60px !important;
         }
-
-        /* 5. Ajusta as logos dos times para ficarem lado a lado e menores */
-        [data-testid="stHorizontalBlock"] img {
-            width: 50px !important;
+        
+        /* 5. Ajusta os botões para ficarem mais fáceis de tocar com o polegar */
+        .stButton button {
+            width: 100% !important;
+            height: 45px !important;
         }
     }
 </style>
+""", unsafe_allow_html=True)
 # --- LOGO ABAIXO DOS IMPORTS OU DO DICIONÁRIO DE CORES ---
 
 st.markdown("""
