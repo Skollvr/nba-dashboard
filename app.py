@@ -381,8 +381,6 @@ def fetch_latest_injury_report_pdf_url() -> str:
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": "https://official.nba.com/"
     }
-    
-    # Descobre a temporada atual dinamicamente
     today = datetime.now(APP_TIMEZONE).date()
     season_str = get_season_string(today)
     page_url = f"https://official.nba.com/nba-injury-report-{season_str}-season/"
@@ -390,53 +388,53 @@ def fetch_latest_injury_report_pdf_url() -> str:
     try:
         response = requests.get(page_url, headers=headers, timeout=10)
         if response.status_code == 404:
-            # Fallback para a temporada anterior caso a transição de ano no site ainda não tenha ocorrido
             fallback_year = f"{today.year-1}-{str(today.year)[-2:]}"
             page_url = f"https://official.nba.com/nba-injury-report-{fallback_year}-season/"
             response = requests.get(page_url, headers=headers, timeout=10)
-        
         response.raise_for_status()
     except Exception:
         return ""
 
     html = response.text
-    # Busca links de PDF que contenham "Injury-Report"
     pdf_urls = re.findall(r'https?://[^"]*?Injury[-_]Report[^"]+\.pdf', html, flags=re.IGNORECASE)
     
     if not pdf_urls:
-        # Tenta buscar links relativos caso a NBA mude o formato
         rel_urls = re.findall(r'href="(/[^"]*?Injury[-_]Report[^"]+\.pdf)"', html, flags=re.IGNORECASE)
         pdf_urls = [f"https://official.nba.com{url}" for url in rel_urls]
 
-    if not pdf_urls:
-        return ""
+    if not pdf_urls: return ""
 
-    # Pega o PDF mais recente pela data no nome do arquivo
     dated_urls = []
     for url in pdf_urls:
         dt = parse_report_dt_from_url(url)
-        if dt is not None:
-            dated_urls.append((dt, url))
+        if dt is not None: dated_urls.append((dt, url))
 
     if dated_urls:
         dated_urls.sort(key=lambda x: x[0], reverse=True)
         return dated_urls[0][1]
-
     return pdf_urls[0]
+
+def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
+    # Esta é a função que estava faltando e causou o erro!
+    reader = PdfReader(BytesIO(pdf_bytes))
+    lines: list[str] = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        page_lines = [clean_injury_pdf_line(x) for x in text.splitlines()]
+        lines.extend([x for x in page_lines if x])
+    return lines
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_df() -> pd.DataFrame:
     pdf_url = fetch_latest_injury_report_pdf_url()
-    if not pdf_url:
-        return pd.DataFrame()
+    if not pdf_url: return pd.DataFrame()
 
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
     try:
         response = requests.get(pdf_url, headers=headers, timeout=15)
         response.raise_for_status()
-    except Exception:
-        return pd.DataFrame()
+    except Exception: return pd.DataFrame()
 
     lines = extract_pdf_text_lines(response.content)
     rows = []
@@ -462,33 +460,22 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
         if player_match:
             player_name = " ".join(player_match.group("player").split())
             current_row = {
-                "GAME_DATE": current_game_date,
-                "GAME_TIME_ET": current_game_time,
-                "MATCHUP": current_matchup,
-                "TEAM_NAME_IR": current_team,
-                "PLAYER_NAME_IR": player_name,
-                "PLAYER_KEY_IR": normalize_person_name(player_name),
+                "GAME_DATE": current_game_date, "GAME_TIME_ET": current_game_time,
+                "MATCHUP": current_matchup, "TEAM_NAME_IR": current_team,
+                "PLAYER_NAME_IR": player_name, "PLAYER_KEY_IR": normalize_person_name(player_name),
                 "INJ_STATUS": player_match.group("status").strip(),
                 "INJ_REASON": (player_match.group("reason") or "").strip(),
                 "INJ_REPORT_URL": pdf_url,
             }
             rows.append(current_row)
         elif current_row is not None:
-            # Captura continuação do motivo da lesão em linhas seguintes
             current_row["INJ_REASON"] = f'{current_row["INJ_REASON"]} {line}'.strip()
 
     injury_df = pd.DataFrame(rows)
     if not injury_df.empty:
-        injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).strip()
+        injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
     return injury_df
-
-    injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
-    injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
-    return injury_df
-
-    injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
-    injury_df["INJ_STATUS"] = injury_df["INJ_STATUS"].fillna("—")
-    return injury_df
+    
 @st.cache_data(ttl=900, show_spinner=False)
 def get_matchup_context(
     away_team_id: int,
@@ -3960,7 +3947,6 @@ def render_team_section_v2(
             injury_df = fetch_latest_injury_report_df()
             team_id = next((tid for tid, t in TEAM_LOOKUP.items() if t.get("full_name") == team_name), 0)
             
-            # Cruza os dados do PDF com o time selecionado
             enriched_team_df = merge_injury_report(
                 team_df=team_df,
                 injury_df=injury_df,
