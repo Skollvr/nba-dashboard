@@ -25,6 +25,27 @@ from nba_api.stats.endpoints import (
 )
 from nba_api.stats.static import teams
 
+st.markdown("""
+    <style>
+        /* Fundo principal do App */
+        .stApp {
+            background-color: #0a0e14;
+            background-image: radial-gradient(circle at 50% 0%, #1a1f2c 0%, #0a0e14 100%);
+        }
+
+        /* Fundo da Sidebar (Lateral) */
+        [data-testid="stSidebar"] {
+            background-color: #0e121a;
+            border-right: 1px solid #1e2633;
+        }
+
+        /* Cor global dos textos */
+        h1, h2, h3, p, span {
+            color: #e0e6ed !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 NBA_TEAM_COLORS = {
     'ATL': {'primary': '#E03A3E', 'secondary': '#C1D32F', 'name': 'Hawks'},
     'BOS': {'primary': '#007A33', 'secondary': '#BA9653', 'name': 'Celtics'},
