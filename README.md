@@ -32,6 +32,10 @@ O sistema processa dados em tempo real para oferecer insights que vão além das
    git clone [https://github.com/Skollvr/nba-dashboard.git](https://github.com/Skollvr/nba-dashboard.git)
 
 2. Instale as dependências:
+   ```bash
    pip install -r requirements.txt
 
+3. Execute:
+   ```bash
+   streamlit run app.py
 3. Rode o servidor local   
