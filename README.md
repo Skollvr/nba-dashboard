@@ -29,7 +29,7 @@ O sistema processa dados em tempo real para oferecer insights que vão além das
 
 1. **Clone o repositório:**
    ```bash
-   git clone [https://github.com/Skollvr/nba-dashboard.git](https://github.com/Skollvr/nba-dashboard.git)
+   git clone https://github.com/Skollvr/nba-dashboard.git https://github.com/Skollvr/nba-dashboard.git
 
 2. Instale as dependências:
    ```bash
