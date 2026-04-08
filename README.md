@@ -27,7 +27,7 @@ O sistema processa dados em tempo real para oferecer insights que vão além das
 
 ## ⚙️ Instalação e Execução
 
-1. Clone o repositório:
+1.  **Clone o repositório:**
    ```bash
    git clone [https://github.com/Skollvr/nba-dashboard.git](https://github.com/Skollvr/nba-dashboard.git)
 
