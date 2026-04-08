@@ -38,4 +38,4 @@ O sistema processa dados em tempo real para oferecer insights que vão além das
 3. Execute:
    ```bash
    streamlit run app.py
-3. Rode o servidor local   
+
