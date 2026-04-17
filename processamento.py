@@ -67,6 +67,14 @@ def get_matchup_chip_class(label: str) -> str:
     if label == "Difícil": return "matchup-bad"
     return "matchup-neutral"
 
+def classify_trend(delta_pra: float) -> str:
+    """Classifica a tendência baseada na diferença entre L10 e média da temporada."""
+    if delta_pra >= 2.0:
+        return "🔥 Alta"
+    if delta_pra <= -2.0:
+        return "⬇️ Fraca"
+    return "➖ Neutra"
+    
 # ---------------------------------------------------------
 # 2. COLUNAS E MAPEAMENTOS
 # ---------------------------------------------------------
