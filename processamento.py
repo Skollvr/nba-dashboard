@@ -789,3 +789,19 @@ def build_team_table(team_id: int, season: str) -> pd.DataFrame:
             "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND",
         ]
     ].copy()
+
+def normalize_position_group(position: str) -> str:
+    pos = str(position or "").upper().strip()
+    if not pos:
+        return "F"
+
+    primary = pos.split("-")[0].strip()
+    if primary in {"G", "F", "C"}:
+        return primary
+    if "G" in pos:
+        return "G"
+    if "F" in pos:
+        return "F"
+    if "C" in pos:
+        return "C"
+    return "F"
