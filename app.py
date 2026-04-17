@@ -8,6 +8,7 @@ from api_nba import get_games_for_date
 from api_odds import get_odds_api_key
 from pdf_reader import get_season_string
 from processamento import get_matchup_context
+from datetime import date, datetime, timedelta # Adicione o timedelta aqui
 
 # Puxando as funções do seu arquivo ui_components grandão!
 from ui_components import (
@@ -23,7 +24,40 @@ from ui_components import (
 )
 
 def get_brasilia_today() -> date:
-    return datetime.now(APP_TIMEZONE).date()
+    """
+    Define a data de busca baseada no horário de Brasília, 
+    com ajuste para o fuso da NBA.
+    """
+    agora = datetime.now(APP_TIMEZONE)
+    
+    # --- LÓGICA DE TRANSIÇÃO ---
+    # Se for entre 00:00 e 06:00 da manhã, o app ainda deve focar nos jogos 
+    # da noite que passou (que ainda podem estar rolando ou terminando).
+    if agora.hour < 6:
+        return (agora - timedelta(days=1)).date()
+    
+    # Se for depois das 22:00, você provavelmente já quer ver os jogos 
+    # de amanhã para começar a analisar as linhas que abriram.
+    if agora.hour >= 22:
+        return (agora + timedelta(days=1)).date()
+        
+    return agora.date()
+
+def main():
+    st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
+    inject_css()
+    
+    # Agora a data é "inteligente"
+    selected_date = get_brasilia_today()
+    
+    # Dica: Você pode adicionar um seletor de data na sidebar se quiser 
+    # navegar manualmente para outros dias além do sugerido.
+    with st.sidebar:
+        st.header("Calendário")
+        # Permitir que o usuário mude a data manualmente caso a automática não agrade
+        selected_date = st.date_input("Data dos Jogos", value=selected_date)
+        st.divider()
+        # ... resto das suas configurações (chart_mode, etc) ...
 
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
