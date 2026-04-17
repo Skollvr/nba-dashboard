@@ -9,7 +9,6 @@ from typing import Optional
 from pandas.io.formats.style import Styler
 
 
-
 from config import (
     NBA_TEAM_COLORS, TEAM_LOOKUP, TEAM_ABBR_LOOKUP, TEAM_LOGO_URL,
     PLAYER_HEADSHOT_URL, SORT_OPTIONS, ROLE_OPTIONS, VIEW_OPTIONS,
