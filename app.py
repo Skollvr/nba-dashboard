@@ -38,7 +38,8 @@ from pdf_reader import (
 from processamento import (
     filter_and_sort_team_df, build_display_dataframes, build_summary_cards_data,
     get_matchup_context, get_matchup_injury_context, merge_injury_report,
-    get_line_context, get_metric_projection_column, get_matchup_chip_class
+    get_line_context, get_metric_projection_column, get_matchup_chip_class,
+    build_team_table  # Adicione esta aqui se não estiver
 )
 
 st.set_page_config(
