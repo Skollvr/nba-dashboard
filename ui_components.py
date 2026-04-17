@@ -256,8 +256,8 @@ def render_player_focus_panel(
         tk = t_abbr
     else:
         for abbr, info in NBA_TEAM_COLORS.items():
-            name_key = info.get('name', '').upper()
-            if name_key and (f" {name_key} " in f" {t_name} "):
+            team_info_name = str(info.get('name', '')).upper()
+            if team_info_name and (f" {team_info_name} " in f" {t_name} "):
                 tk = abbr
                 break
                 
@@ -294,7 +294,6 @@ def render_player_focus_panel(
         )
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
     
-    # 1. CONTROLE DE MÉTRICA DINÂMICA
     _visual_metric = st.pills(
         "Métrica em análise detalhada", 
         ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"], 
@@ -312,52 +311,45 @@ def render_player_focus_panel(
     with visual_tab:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
 
-    # --- ABA DE MERCADO DINÂMICA (COM COLUNA DE LINHA) ---
+    # --- ABA DE MERCADO DINÂMICA (FORMATO 22,5 CORRIGIDO) ---
     with market_tab:
         st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
         
-        # A. Captura o contexto da linha ATUAL para a métrica selecionada
         v_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
         active_line = float(v_ctx['line_value'])
         
-        # B. Conversão de sigla do adversário
         current_opp = opp_abbr
         for abbr, info in NBA_TEAM_COLORS.items():
-            if info.get('name', '').upper() in str(current_opp).upper():
+            team_info_name = str(info.get('name', '')).upper()
+            if team_info_name in str(current_opp).upper():
                 current_opp = abbr
                 break
         
         log = get_player_log(int(row["PLAYER_ID"]), season)
         
         if not log.empty:
-            # Padronização de colunas no log
             log['PRA'] = log['PTS'] + log['REB'] + log['AST']
             log['3PM'] = log.get('FG3M', 0)
             log['3PA'] = log.get('FG3A', 0)
             
-            # Filtro pelo adversário (sigla CHA, BKN, etc)
             h2h_log = log[log['MATCHUP'].str.contains(current_opp, case=False, na=False)].copy()
             
             if not h2h_log.empty:
                 target_col = visual_metric
-                
                 h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', target_col]].copy()
                 h2h_display['Data'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
-                
-                # ADIÇÃO: Coluna com a linha projetada para hoje
                 h2h_display['Linha'] = active_line
                 
+                real_col_name = f'Real ({visual_metric})'
                 h2h_display = h2h_display.rename(columns={
                     'MATCHUP': 'Confronto',
                     'WL': 'Res',
                     'MIN': 'Min',
-                    target_col: f'Real ({visual_metric})'
+                    target_col: real_col_name
                 })
                 
-                # Reorganiza para que a 'Linha' fique ao lado do 'Real'
-                final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', 'Linha', f'Real ({visual_metric})']]
+                final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', 'Linha', real_col_name]]
                 
-                # Estilização: Indicador Verde/Vermelho
                 def style_hit_miss(val):
                     try:
                         num = float(val)
@@ -368,12 +360,17 @@ def render_player_focus_panel(
                     except:
                         return ''
 
-                st.write(f"Comparando histórico com a linha atual: **{active_line}** ({v_ctx['line_source']})")
+                st.write(f"Comparando histórico com a linha atual: **{active_line:.1f}** ({v_ctx['line_source']})")
                 
-                styled_df = final_table.style.map(style_hit_miss, subset=[f'Real ({visual_metric})'])
+                # CORREÇÃO DA VÍRGULA E CASAS DECIMAIS:
+                # O format abaixo força 1 casa decimal e troca o ponto por vírgula
+                styled_df = final_table.style.format({
+                    'Linha': lambda x: f"{x:.1f}".replace('.', ','),
+                    real_col_name: lambda x: f"{x:.1f}".replace('.', ',')
+                }).map(style_hit_miss, subset=[real_col_name])
+                
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
                 
-                # Resumo de Hit Rate H2H
                 hits = (h2h_log[target_col] >= active_line).sum()
                 total = len(h2h_log)
                 pct = int((hits / total) * 100) if total > 0 else 0
@@ -381,12 +378,13 @@ def render_player_focus_panel(
                 st.markdown(f"""
                     <div style="padding: 15px; background: rgba(15,23,42,0.6); border-radius: 10px; border-left: 5px solid #38bdf8; margin-top: 10px;">
                         🎯 <b>Taxa de Acerto vs {current_opp}:</b> {hits}/{total} ({pct}%) 
-                        <br><small style="opacity: 0.8;">Jogador cumpriu a linha de <b>{active_line} {visual_metric}</b> em {hits} dos últimos {total} jogos contra este time.</small>
+                        <br><small style="opacity: 0.8;">Jogador cumpriu a linha de <b>{active_line:.1f} {visual_metric}</b> em {hits} dos últimos {total} jogos contra este time.</small>
                     </div>
                 """, unsafe_allow_html=True)
             else:
                 st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
-            
+        else:
+            st.error("Erro ao carregar log do jogador.")            
 def render_team_section_v2(
     team_name: str,
     team_df: pd.DataFrame,
