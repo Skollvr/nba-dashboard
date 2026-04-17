@@ -95,54 +95,77 @@ def render_metric_distribution_chart(row: pd.Series):
 # 3. COMPONENTES DE INTERFACE (HTML/CARDS)
 # =========================================================
 
-def render_player_card(row: pd.Series, metric: str, line: float, use_market: bool):
-    """Renderiza o card individual do jogador na grade, com foto e formatação rica."""
-    ctx = get_line_context(row, metric, line, use_market)
-    match_cls = get_matchup_chip_class(row.get('MATCHUP_LABEL', 'Neutro'))
+def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
+    # --- RASTREADOR DE CORES PARA O CARD ---
+    search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
+    tk = 'NBA'
     
-    # 1. Busca a URL da foto do jogador
-    player_img_url = get_player_headshot_url(int(row.get("PLAYER_ID", 0)))
+    # --- RASTREADOR DE CORES INTELIGENTE PARA O CARD ---
+    # Pegamos o texto disponível do time (TEAM_NAME e TEAM_ABBR)
+    search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
     
-    # 2. Define a cor de destaque (Verde se o Edge for bom, Vermelho se for ruim)
-    edge_value = ctx.get("edge", 0)
-    if edge_value >= 0.75:
-        edge_color = "#10b981" # Verde
-    elif edge_value <= -0.75:
-        edge_color = "#ef4444" # Vermelho
-    else:
-        edge_color = "#38bdf8" # Azul neutro
+    tk = 'NBA' # Default caso não encontre nada
+    
+    # Loop automático pelo dicionário NBA_TEAM_COLORS que está no topo do arquivo
+    # Isso evita termos que escrever if/elif para os 30 times
+    for abbr, info in NBA_TEAM_COLORS.items():
+        # Pega o nome do time no dicionário (ex: 'PISTONS')
+        team_keyword = info.get('name', '').upper()
         
-    # 3. Monta o HTML (SEM ESPAÇOS NA ESQUERDA PARA NÃO BUGAR O STREAMLIT!)
-    html = f"""<div class="summary-card" style="display: flex; gap: 15px; align-items: center; padding: 15px;">
-<div style="flex-shrink: 0; text-align: center;">
-    <img src="{player_img_url}" width="75" style="border-radius: 50%; background-color: rgba(255,255,255,0.05); border: 3px solid {edge_color}; padding: 2px;">
-</div>
-<div style="flex-grow: 1;">
-    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-        <div>
-            <div class="summary-label" style="font-size: 1.1rem; margin-bottom: 2px; color: #f8fafc;">{row.get('PLAYER', 'Desconhecido')}</div>
-            <div style="font-size: 0.8rem; color: #94a3b8;">{row.get('POSITION', '-')} • {row.get('ROLE', 'Reserva')}</div>
-        </div>
-        <span class="matchup-chip {match_cls}" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">{row.get('MATCHUP_LABEL', 'Neutro')}</span>
-    </div>
-    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
-        <div>
-            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1;">Proj. {metric}</div>
-            <div class="summary-value" style="font-size: 1.6rem; color: {edge_color};">{ctx['projection']:.1f}</div>
-        </div>
-        <div style="text-align: right;">
-            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1;">Linha {ctx['line_source']}</div>
-            <div style="font-size: 1.2rem; font-weight: bold; color: #f8fafc;">{ctx['line_value']}</div>
-        </div>
-    </div>
-    <div class="badge-row" style="margin-top: 10px;">
-        <span class="badge badge-neutral" style="font-size: 0.75rem;">🎯 Hit L10: {ctx['hit_l10']}</span>
-        <span class="badge badge-neutral" style="font-size: 0.75rem;">⚖️ Edge: {ctx['edge']:+.1f}</span>
-    </div>
-</div>
-</div>"""
+        # Se 'PISTONS' estiver no texto de busca ('DETROIT PISTONS'), achamos o time!
+        if team_keyword and team_keyword in search_text:
+            tk = abbr
+            break
+        # Ou se a sigla 'DET' estiver no texto de busca
+        elif abbr in search_text:
+            tk = abbr
+            break
+            
+    # Puxa as cores finais baseadas na sigla encontrada (tk)
+    colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
     
-    st.markdown(html, unsafe_allow_html=True)
+    colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
+    with st.container(border=True):
+        top_left, top_right = st.columns([1, 4])
+
+        with top_left:
+            st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=72)
+
+        with top_right:
+            # Mini Banner no topo do card com as cores do time
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(90deg, {colors['primary']} 0%, {colors['secondary']} 250%);
+                border-left: 8px solid {colors['secondary']};
+                padding: 12px;
+                border-radius: 8px;
+                margin-bottom: 12px;
+                box-shadow: 2px 4px 10px rgba(0,0,0,0.3);
+            ">
+                <div style="color: {colors['secondary']}; font-weight: 800; font-size: 15px; line-height: 1.1;">
+                    {row['PLAYER']}
+                </div>
+                <div style="color: {colors['secondary']}; opacity: 0.8; font-size: 10px; margin-top: 1px;">
+                    {tk} | {row.get('POSITION', '')}
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+            position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+            st.caption(f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}")
+            st.markdown(render_player_headline_html(row), unsafe_allow_html=True)
+            render_badges(
+                row["ROLE"],
+                row.get("FORM_SIGNAL", "→ Estável"),
+                row.get("OSC_CLASS", "-"),
+                row.get("MATCHUP_LABEL", "Neutro"),
+            )
+
+        render_player_support_tiles(row, line_metric, line_value, use_market_line)
+        line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
+        if line_context["has_market_line"] and line_context["over_dec"] and line_context["under_dec"]:
+            st.caption(f"BetMGM • Linha {format_number(line_context['line_value'])} • Over {format_number(line_context['over_dec'], 2)} • Under {format_number(line_context['under_dec'], 2)}")
+        else:
+            st.caption("Detalhamento completo no painel abaixo.")
 
 def render_player_cards_grid(
     filtered_df: pd.DataFrame,
