@@ -780,68 +780,74 @@ def _weighted_profile_from_df(df: pd.DataFrame) -> dict:
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_position_opponent_profile(season: str, opponent_team_id: int, position_group: str) -> dict:
-    # Esta função faz a matemática e CRIA o PRA
-    def weighted_profile(df: pd.DataFrame) -> dict:
-        if df.empty or "GP" not in df.columns:
-            return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
-
-        work_df = df.copy()
-        for col in ["GP", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
-            work_df[col] = pd.to_numeric(work_df[col], errors="coerce").fillna(0.0)
-
-        total_gp = float(work_df["GP"].sum())
-        if total_gp <= 0:
-            return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
-
-        pts = float((work_df["PTS"] * work_df["GP"]).sum() / total_gp)
-        reb = float((work_df["REB"] * work_df["GP"]).sum() / total_gp)
-        ast = float((work_df["AST"] * work_df["GP"]).sum() / total_gp)
-        fg3m = float((work_df["FG3M"] * work_df["GP"]).sum() / total_gp)
-        fga = float((work_df["FGA"] * work_df["GP"]).sum() / total_gp)
-        fg3a = float((work_df["FG3A"] * work_df["GP"]).sum() / total_gp)
-
-        return {
-            "PTS": pts,
-            "REB": reb,
-            "AST": ast,
-            "FG3M": fg3m,
-            "FGA": fga,
-            "FG3A": fg3a,
-            "PRA": pts + reb + ast,
-            "GP": total_gp,
-        }
-
-    # 1. Puxa os DataFrames crus lá do api_nba.py
-    opp_df_raw = get_position_allowed_profile(season, opponent_team_id, position_group)
-    league_df_raw = get_league_position_baseline(season, position_group)
-    
-    # 2. APLICA a função matemática nas tabelas para gerar os dicionários com o PRA (Foi aqui a correção!)
-    opp_profile = weighted_profile(opp_df_raw)
-    league_profile = weighted_profile(league_df_raw)
-
-    # 3. Agora sim, podemos subtrair com segurança!
-    matchup_diff = opp_profile["PRA"] - league_profile["PRA"]
-
-    return {
-        "POSITION_GROUP": position_group,
-        "OPP_PTS_ALLOWED": opp_profile["PTS"],
-        "OPP_REB_ALLOWED": opp_profile["REB"],
-        "OPP_AST_ALLOWED": opp_profile["AST"],
-        "OPP_PRA_ALLOWED": opp_profile["PRA"],
-        "OPP_3PM_ALLOWED": opp_profile["FG3M"],
-        "OPP_FGA_ALLOWED": opp_profile["FGA"],
-        "OPP_3PA_ALLOWED": opp_profile["FG3A"],
-        "LEAGUE_PTS_BASELINE": league_profile["PTS"],
-        "LEAGUE_REB_BASELINE": league_profile["REB"],
-        "LEAGUE_AST_BASELINE": league_profile["AST"],
-        "LEAGUE_3PM_BASELINE": league_profile["FG3M"],
-        "LEAGUE_FGA_BASELINE": league_profile["FGA"],
-        "LEAGUE_3PA_BASELINE": league_profile["FG3A"],
-        "LEAGUE_PRA_BASELINE": league_profile["PRA"],
-        "MATCHUP_DIFF": matchup_diff,
-        "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
+    # 1. Fallback (Plano B): Se a API da NBA falhar, garantimos que o app receba as colunas vazias em vez de explodir.
+    fallback = {
+        "POSITION_GROUP": str(position_group),
+        "OPP_PTS_ALLOWED": 0.0, "OPP_REB_ALLOWED": 0.0, "OPP_AST_ALLOWED": 0.0, 
+        "OPP_PRA_ALLOWED": 0.0, "OPP_3PM_ALLOWED": 0.0, "OPP_FGA_ALLOWED": 0.0, "OPP_3PA_ALLOWED": 0.0,
+        "LEAGUE_PTS_BASELINE": 0.0, "LEAGUE_REB_BASELINE": 0.0, "LEAGUE_AST_BASELINE": 0.0, 
+        "LEAGUE_3PM_BASELINE": 0.0, "LEAGUE_FGA_BASELINE": 0.0, "LEAGUE_3PA_BASELINE": 0.0, 
+        "LEAGUE_PRA_BASELINE": 0.0, "MATCHUP_DIFF": 0.0, "MATCHUP_LABEL": "Neutro",
     }
+    
+    try:
+        def weighted_profile(df: pd.DataFrame) -> dict:
+            if df is None or df.empty or "GP" not in df.columns:
+                return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
 
+            work_df = df.copy()
+            for col in ["GP", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
+                work_df[col] = pd.to_numeric(work_df.get(col, 0), errors="coerce").fillna(0.0)
+
+            total_gp = float(work_df["GP"].sum())
+            if total_gp <= 0:
+                return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
+
+            pts = float((work_df["PTS"] * work_df["GP"]).sum() / total_gp)
+            reb = float((work_df["REB"] * work_df["GP"]).sum() / total_gp)
+            ast = float((work_df["AST"] * work_df["GP"]).sum() / total_gp)
+            fg3m = float((work_df["FG3M"] * work_df["GP"]).sum() / total_gp)
+            fga = float((work_df["FGA"] * work_df["GP"]).sum() / total_gp)
+            fg3a = float((work_df["FG3A"] * work_df["GP"]).sum() / total_gp)
+
+            return {
+                "PTS": pts, "REB": reb, "AST": ast, "FG3M": fg3m, "FGA": fga, "FG3A": fg3a,
+                "PRA": pts + reb + ast, "GP": total_gp,
+            }
+
+        # Puxa os DataFrames crus lá do nosso api_nba.py
+        opp_df_raw = get_position_allowed_profile(season, opponent_team_id, position_group)
+        league_df_raw = get_league_position_baseline(season, position_group)
+        
+        # Converte as tabelas nos perfis usando a matemática
+        opp_profile = weighted_profile(opp_df_raw)
+        league_profile = weighted_profile(league_df_raw)
+
+        matchup_diff = float(opp_profile["PRA"]) - float(league_profile["PRA"])
+
+        # Retorna o dicionário completo perfeitamente montado
+        return {
+            "POSITION_GROUP": str(position_group),
+            "OPP_PTS_ALLOWED": float(opp_profile["PTS"]),
+            "OPP_REB_ALLOWED": float(opp_profile["REB"]),
+            "OPP_AST_ALLOWED": float(opp_profile["AST"]),
+            "OPP_PRA_ALLOWED": float(opp_profile["PRA"]),
+            "OPP_3PM_ALLOWED": float(opp_profile["FG3M"]),
+            "OPP_FGA_ALLOWED": float(opp_profile["FGA"]),
+            "OPP_3PA_ALLOWED": float(opp_profile["FG3A"]),
+            "LEAGUE_PTS_BASELINE": float(league_profile["PTS"]),
+            "LEAGUE_REB_BASELINE": float(league_profile["REB"]),
+            "LEAGUE_AST_BASELINE": float(league_profile["AST"]),
+            "LEAGUE_3PM_BASELINE": float(league_profile["FG3M"]),
+            "LEAGUE_FGA_BASELINE": float(league_profile["FGA"]),
+            "LEAGUE_3PA_BASELINE": float(league_profile["FG3A"]),
+            "LEAGUE_PRA_BASELINE": float(league_profile["PRA"]),
+            "MATCHUP_DIFF": matchup_diff,
+            "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
+        }
+    except Exception:
+        # Se qualquer coisa falhar internamente, usa o Plano B seguro.
+        return fallback
     def weighted_profile(df: pd.DataFrame) -> dict:
         if df.empty or "GP" not in df.columns:
             return {
