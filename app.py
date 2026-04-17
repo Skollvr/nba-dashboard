@@ -40,6 +40,11 @@ def main():
         line_value = st.number_input("Linha Manual", value=25.5, step=0.5)
         api_key_available = bool(get_odds_api_key())
         use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
+        st.divider()
+        st.caption("Este app busca os dados ao abrir a página.")
+        if st.button("Forçar atualização"):
+            st.cache_data.clear()
+            st.rerun()
 
     selected_date = get_brasilia_today()
     season = get_season_string(selected_date)
