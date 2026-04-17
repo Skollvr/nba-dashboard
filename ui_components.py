@@ -184,37 +184,63 @@ def render_player_cards_grid(
 
 
 def render_summary_cards(away_df: pd.DataFrame, home_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str):
-    """Renderiza os cards de destaque do confronto no topo da tela usando o estilo nativo."""
+    """Renderiza os cards de destaque do confronto (Líderes em PTS, REB e AST)."""
     combined = build_summary_cards_data(away_df, home_df, min_games, min_minutes, role_filter)
     
     if combined.empty:
         return
         
-    # Título da seção bonitão
-    st.markdown('<div style="margin-top: 1rem; margin-bottom: 0.8rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; color: #10b981; font-weight: 800;">🔥 Principais Ameaças do Jogo (PRA L10)</div>', unsafe_allow_html=True)
+    # Título da seção atualizado
+    st.markdown('<div style="margin-top: 1rem; margin-bottom: 0.8rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; color: #10b981; font-weight: 800;">🔥 Líderes do Confronto (Média últimos 10 jogos)</div>', unsafe_allow_html=True)
     
-    # Pega os 3 melhores jogadores do confronto baseado no PRA dos últimos 10 jogos
-    top_players = combined.sort_values("L10_PRA", ascending=False).head(3)
+    # Identifica os líderes independentes para cada estatística (baseado nos últimos 10 jogos)
+    leader_pts = combined.sort_values("L10_PTS", ascending=False).iloc[0]
+    leader_reb = combined.sort_values("L10_REB", ascending=False).iloc[0]
+    leader_ast = combined.sort_values("L10_AST", ascending=False).iloc[0]
     
     cols = st.columns(3)
-    titles = ["Líder do Confronto", "2ª Força Ofensiva", "3ª Força Ofensiva"]
     
-    for i, (idx, row) in enumerate(top_players.iterrows()):
-        if i < len(cols):
-            with cols[i]:
-                # Usa a SUA função nativa para gerar o card perfeito
-                html_card = render_single_card(
-                    title=titles[i],
-                    value=row.get('PLAYER', '-'),
-                    meta=f"{row.get('TEAM_NAME', '-')} • {row.get('ROLE', '-')}",
-                    left_label="Média Temp",
-                    left_value=format_number(row.get('SEASON_PRA', 0)),
-                    right_label="Média L10",
-                    right_value=format_number(row.get('L10_PRA', 0)),
-                    right_highlight=True
-                )
-                st.markdown(html_card, unsafe_allow_html=True)
+    # Card 1: Líder em Pontos (PTS)
+    with cols[0]:
+        html_pts = render_single_card(
+            title="🎯 Cestinha (PTS)",
+            value=leader_pts.get('PLAYER', '-'),
+            meta=f"{leader_pts.get('TEAM_NAME', '-')} • {leader_pts.get('ROLE', '-')}",
+            left_label="Temp",
+            left_value=format_number(leader_pts.get('SEASON_PTS', 0)),
+            right_label="L10",
+            right_value=format_number(leader_pts.get('L10_PTS', 0)),
+            right_highlight=True
+        )
+        st.markdown(html_pts, unsafe_allow_html=True)
 
+    # Card 2: Líder em Rebotes (REB)
+    with cols[1]:
+        html_reb = render_single_card(
+            title="🧱 Garrafão (REB)",
+            value=leader_reb.get('PLAYER', '-'),
+            meta=f"{leader_reb.get('TEAM_NAME', '-')} • {leader_reb.get('ROLE', '-')}",
+            left_label="Temp",
+            left_value=format_number(leader_reb.get('SEASON_REB', 0)),
+            right_label="L10",
+            right_value=format_number(leader_reb.get('L10_REB', 0)),
+            right_highlight=True
+        )
+        st.markdown(html_reb, unsafe_allow_html=True)
+
+    # Card 3: Líder em Assistências (AST)
+    with cols[2]:
+        html_ast = render_single_card(
+            title="🏀 Maestro (AST)",
+            value=leader_ast.get('PLAYER', '-'),
+            meta=f"{leader_ast.get('TEAM_NAME', '-')} • {leader_ast.get('ROLE', '-')}",
+            left_label="Temp",
+            left_value=format_number(leader_ast.get('SEASON_AST', 0)),
+            right_label="L10",
+            right_value=format_number(leader_ast.get('L10_AST', 0)),
+            right_highlight=True
+        )
+        st.markdown(html_ast, unsafe_allow_html=True)
 def render_player_focus_panel(
     row: pd.Series,
     line_metric: str,
