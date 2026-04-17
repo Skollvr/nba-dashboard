@@ -845,7 +845,7 @@ def render_matchup_header(game_row: pd.Series) -> None:
 
     with c2:
         st.markdown('<div class="center-vs">VS</div>', unsafe_allow_html=True)
-        # Exibe horário convertido para Brasília
+        # CONVERSÃO DE HORÁRIO AQUI DENTRO:
         status_display = get_game_datetime_brasilia(game_row["GAME_STATUS_TEXT"])
         st.markdown(
             f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{status_display}</span></div>',
