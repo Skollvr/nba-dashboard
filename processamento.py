@@ -570,3 +570,45 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     detail_df = display_df[["Jogador", "Pos", "Papel", "GP", "MIN", "PTS Temp", "PTS L5", "PTS L10", "Proj PTS", "Hit PTS", "REB Temp", "REB L5", "REB L10", "Proj REB", "Hit REB", "AST Temp", "AST L5", "AST L10", "Proj AST", "Hit AST", "3PM Temp", "3PM L5", "3PM L10", "Proj 3PM", "Hit 3PM", "FGA Temp", "FGA L5", "FGA L10", "Proj FGA", "Hit FGA", "3PA Temp", "3PA L5", "3PA L10", "Proj 3PA", "Hit 3PA", "PRA Temp", "PRA L5", "PRA L10", "Proj PRA", "Hit PRA", "Δ PRA L5", "Δ PRA L10", "PRA adv pos", "Liga pos", "Matchup", "Oscilação", "Sinal", "Trend"]].copy()
 
     return summary_df, detail_df
+
+def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
+    team_meta = TEAM_LOOKUP.get(team_id, {}) or {}
+
+    aliases = {
+        normalize_text(team_name),
+        normalize_text(team_meta.get("full_name", "")),
+        normalize_text(team_meta.get("abbreviation", "")),
+        normalize_text(team_meta.get("city", "")),
+        normalize_text(team_meta.get("nickname", "")),
+        normalize_text(team_meta.get("state", "")),
+    }
+
+    full_name = str(team_meta.get("full_name", "") or "")
+    city = str(team_meta.get("city", "") or "")
+    nickname = str(team_meta.get("nickname", "") or "")
+
+    if city and nickname:
+        aliases.add(normalize_text(f"{city} {nickname}"))
+    if nickname:
+        aliases.add(normalize_text(nickname))
+    if city:
+        aliases.add(normalize_text(city))
+
+    special_aliases = {
+        "oklahoma city thunder": {"oklahoma city", "thunder", "okc"},
+        "portland trail blazers": {"portland", "trail blazers", "blazers", "por"},
+        "philadelphia 76ers": {"philadelphia", "76ers", "sixers", "phi"},
+        "phoenix suns": {"phoenix", "suns", "phx"},
+        "new york knicks": {"new york", "knicks", "nyk"},
+        "new orleans pelicans": {"new orleans", "pelicans", "nop"},
+        "san antonio spurs": {"san antonio", "spurs", "sas"},
+        "golden state warriors": {"golden state", "warriors", "gsw"},
+        "los angeles lakers": {"lakers", "lal"},
+        "los angeles clippers": {"clippers", "lac"},
+    }
+
+    normalized_full = normalize_text(full_name)
+    aliases.update(special_aliases.get(normalized_full, set()))
+
+    return {x for x in aliases if x}
+    
