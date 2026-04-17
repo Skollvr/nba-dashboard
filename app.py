@@ -42,10 +42,23 @@ from processamento import (
 )
 
 from ui_components import (
-    inject_css, style_table, render_matchup_header, render_game_rankings,
-    render_summary_cards, render_team_section_v2, ...
+    inject_css, 
+    style_table,
+    render_matchup_header,
+    render_game_rankings,
+    render_summary_cards, 
+    render_team_section_v2, 
+    render_player_cards_grid,
+    render_player_card,
+    render_injury_report_tab,
+    render_lineup_report_tab,
+    render_player_focus_panel,
+    get_team_logo_url,
+    get_player_headshot_url,
+    format_number,
+    format_signed_number,
+    get_matchup_parts
 )
-
 st.set_page_config(
     page_title="NBA Props Dashboard",
     page_icon="🏀",
@@ -86,48 +99,6 @@ def get_game_datetime_brasilia(game: dict) -> Optional[datetime]:
 
     return None
 
-
-    
-def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
-    team_meta = TEAM_LOOKUP.get(team_id, {}) or {}
-
-    aliases = {
-        normalize_text(team_name),
-        normalize_text(team_meta.get("full_name", "")),
-        normalize_text(team_meta.get("abbreviation", "")),
-        normalize_text(team_meta.get("city", "")),
-        normalize_text(team_meta.get("nickname", "")),
-        normalize_text(team_meta.get("state", "")),
-    }
-
-    full_name = str(team_meta.get("full_name", "") or "")
-    city = str(team_meta.get("city", "") or "")
-    nickname = str(team_meta.get("nickname", "") or "")
-
-    if city and nickname:
-        aliases.add(normalize_text(f"{city} {nickname}"))
-    if nickname:
-        aliases.add(normalize_text(nickname))
-    if city:
-        aliases.add(normalize_text(city))
-
-    special_aliases = {
-        "oklahoma city thunder": {"oklahoma city", "thunder", "okc"},
-        "portland trail blazers": {"portland", "trail blazers", "blazers", "por"},
-        "philadelphia 76ers": {"philadelphia", "76ers", "sixers", "phi"},
-        "phoenix suns": {"phoenix", "suns", "phx"},
-        "new york knicks": {"new york", "knicks", "nyk"},
-        "new orleans pelicans": {"new orleans", "pelicans", "nop"},
-        "san antonio spurs": {"san antonio", "spurs", "sas"},
-        "golden state warriors": {"golden state", "warriors", "gsw"},
-        "los angeles lakers": {"lakers", "lal"},
-        "los angeles clippers": {"clippers", "lac"},
-    }
-
-    normalized_full = normalize_text(full_name)
-    aliases.update(special_aliases.get(normalized_full, set()))
-
-    return {x for x in aliases if x}
     
 if __name__ == "__main__":
     main()
