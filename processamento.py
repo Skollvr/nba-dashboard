@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import streamlit as st
-from api_odds import normalize_text
+
 
 # 1. Importar as nossas configurações estáticas
 from config import PROJECTION_WEIGHTS, ROLE_OPTIONS, TEAM_LOOKUP
@@ -11,6 +11,9 @@ from api_nba import (
     get_team_roster, get_league_player_stats, get_team_player_logs,
     get_position_allowed_profile, get_league_position_baseline
 )
+
+# 3. Importar utilitários de texto das Odds
+from api_odds import normalize_text
 
 # ==========================================
 # CÓDIGO DE PROCESSAMENTO E PANDAS ABAIXO
