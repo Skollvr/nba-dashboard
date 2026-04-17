@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from config import (
     TEAM_LOOKUP, SORT_OPTIONS, ROLE_OPTIONS, CHART_OPTIONS, 
     LINE_METRIC_OPTIONS, APP_TIMEZONE
@@ -8,56 +8,24 @@ from api_nba import get_games_for_date
 from api_odds import get_odds_api_key
 from pdf_reader import get_season_string
 from processamento import get_matchup_context
-from datetime import date, datetime, timedelta # Adicione o timedelta aqui
 
-# Puxando as funções do seu arquivo ui_components grandão!
+# Importando do arquivo que deve se chamar ui_components.py
 from ui_components import (
     inject_css, 
     render_matchup_header,
     render_summary_cards,
     render_game_rankings,
-    render_team_section_v2, 
-    render_player_cards_grid,
-    render_injury_report_tab,
-    render_lineup_report_tab,
-    render_player_focus_panel
+    render_team_section_v2
 )
 
 def get_brasilia_today() -> date:
-    """
-    Define a data de busca baseada no horário de Brasília, 
-    com ajuste para o fuso da NBA.
-    """
+    """Lógica de rollover para o fuso horário da NBA."""
     agora = datetime.now(APP_TIMEZONE)
-    
-    # --- LÓGICA DE TRANSIÇÃO ---
-    # Se for entre 00:00 e 06:00 da manhã, o app ainda deve focar nos jogos 
-    # da noite que passou (que ainda podem estar rolando ou terminando).
     if agora.hour < 6:
         return (agora - timedelta(days=1)).date()
-    
-    # Se for depois das 22:00, você provavelmente já quer ver os jogos 
-    # de amanhã para começar a analisar as linhas que abriram.
     if agora.hour >= 22:
         return (agora + timedelta(days=1)).date()
-        
     return agora.date()
-
-def main():
-    st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
-    inject_css()
-    
-    # Agora a data é "inteligente"
-    selected_date = get_brasilia_today()
-    
-    # Dica: Você pode adicionar um seletor de data na sidebar se quiser 
-    # navegar manualmente para outros dias além do sugerido.
-    with st.sidebar:
-        st.header("Calendário")
-        # Permitir que o usuário mude a data manualmente caso a automática não agrade
-        selected_date = st.date_input("Data dos Jogos", value=selected_date)
-        st.divider()
-        # ... resto das suas configurações (chart_mode, etc) ...
 
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
@@ -75,7 +43,6 @@ def main():
         api_key_available = bool(get_odds_api_key())
         use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
         st.divider()
-        st.caption("Este app busca os dados ao abrir a página.")
         if st.button("Forçar atualização"):
             st.cache_data.clear()
             st.rerun()
@@ -101,8 +68,7 @@ def main():
     render_summary_cards(away_df, home_df, min_games, min_minutes, role_filter)
     render_game_rankings(away_df, home_df, min_games, min_minutes, role_filter, line_metric, line_value, use_market_line)
 
-   
-# --- BLOCO CORRIGIDO (MANTENHA APENAS ESTE) ---
+    # --- CORREÇÃO DA SELEÇÃO DE TIME E ADVERSÁRIO ---
     selected_team = st.segmented_control(
         "Time em análise", 
         [selected_game["away_team_name"], selected_game["home_team_name"]], 
@@ -126,4 +92,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
