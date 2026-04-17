@@ -9,7 +9,7 @@ from api_odds import get_odds_api_key
 from pdf_reader import get_season_string
 from processamento import get_matchup_context
 
-# Importando do arquivo que deve se chamar ui_components.py
+# Importando as funções do ui_components.py
 from ui_components import (
     inject_css, 
     render_matchup_header,
@@ -19,7 +19,7 @@ from ui_components import (
 )
 
 def get_brasilia_today() -> date:
-    """Lógica de rollover para o fuso horário da NBA."""
+    """Lógica de rollover: entre 00:00 e 06:00 foca no dia anterior."""
     agora = datetime.now(APP_TIMEZONE)
     if agora.hour < 6:
         return (agora - timedelta(days=1)).date()
@@ -47,6 +47,7 @@ def main():
             st.cache_data.clear()
             st.rerun()
 
+    # Data inteligente e seleção do jogo
     selected_date = get_brasilia_today()
     season = get_season_string(selected_date)
     games = get_games_for_date(selected_date)
@@ -68,7 +69,7 @@ def main():
     render_summary_cards(away_df, home_df, min_games, min_minutes, role_filter)
     render_game_rankings(away_df, home_df, min_games, min_minutes, role_filter, line_metric, line_value, use_market_line)
 
-    # --- CORREÇÃO DA SELEÇÃO DE TIME E ADVERSÁRIO ---
+    # Seleção do time e identificação do adversário (opp_abbr)
     selected_team = st.segmented_control(
         "Time em análise", 
         [selected_game["away_team_name"], selected_game["home_team_name"]], 
@@ -77,10 +78,11 @@ def main():
     
     if selected_team == selected_game["away_team_name"]:
         target_df = away_df
-        opp_abbr = selected_game.get("home_team_abbr", selected_game["home_team_name"])
+        # Busca siglas oficiais da NBA para o H2H
+        opp_abbr = selected_game.get("HOME_TEAM_ABBR", selected_game["home_team_name"])
     else:
         target_df = home_df
-        opp_abbr = selected_game.get("away_team_abbr", selected_game["away_team_name"])
+        opp_abbr = selected_game.get("VISITOR_TEAM_ABBR", selected_game["away_team_name"])
 
     sort_label = f"{line_metric} L10" if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
 
