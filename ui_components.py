@@ -96,24 +96,60 @@ def render_metric_distribution_chart(row: pd.Series):
 # =========================================================
 
 def render_player_card(row: pd.Series, metric: str, line: float, use_market: bool):
-    """Renderiza o card individual do jogador na galeria."""
+    """Renderiza o card individual do jogador na grade, com foto e formatação rica."""
     ctx = get_line_context(row, metric, line, use_market)
-    match_cls = get_matchup_chip_class(row['MATCHUP_LABEL'])
+    match_cls = get_matchup_chip_class(row.get('MATCHUP_LABEL', 'Neutro'))
     
-    # O HTML complexo que estava no app.py agora mora aqui
+    # 1. Busca a URL da foto do jogador
+    player_img_url = get_player_headshot_url(int(row.get("PLAYER_ID", 0)))
+    
+    # 2. Define a cor de destaque (Verde se o Edge for bom, Vermelho se for ruim)
+    edge_value = ctx.get("edge", 0)
+    if edge_value >= 0.75:
+        edge_color = "#10b981" # Verde
+    elif edge_value <= -0.75:
+        edge_color = "#ef4444" # Vermelho
+    else:
+        edge_color = "#38bdf8" # Azul neutro
+        
+    # 3. Monta o HTML complexo com flexbox para colocar a foto ao lado do texto
     html = f"""
-    <div class="summary-card">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="summary-label">{row['PLAYER']}</span>
-            <span class="matchup-chip {match_cls}">{row['MATCHUP_LABEL']}</span>
+    <div class="summary-card" style="display: flex; gap: 15px; align-items: center; padding: 15px;">
+        
+        <div style="flex-shrink: 0; text-align: center;">
+            <img src="{player_img_url}" width="75" style="border-radius: 50%; background-color: rgba(255,255,255,0.05); border: 3px solid {edge_color}; padding: 2px;">
         </div>
-        <div class="summary-value">{ctx['projection']:.1f}</div>
-        <div class="badge-row">
-            <span class="badge badge-starter">{row['ROLE']}</span>
-            <span class="badge badge-neutral">L10: {ctx['hit_l10']}</span>
+        
+        <div style="flex-grow: 1;">
+            
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div>
+                    <div class="summary-label" style="font-size: 1.1rem; margin-bottom: 2px; color: #f8fafc;">{row.get('PLAYER', 'Desconhecido')}</div>
+                    <div style="font-size: 0.8rem; color: #94a3b8;">{row.get('POSITION', '-')} • {row.get('ROLE', 'Reserva')}</div>
+                </div>
+                <span class="matchup-chip {match_cls}" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">{row.get('MATCHUP_LABEL', 'Neutro')}</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
+                <div>
+                    <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1;">Proj. {metric}</div>
+                    <div class="summary-value" style="font-size: 1.6rem; color: {edge_color};">{ctx['projection']:.1f}</div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1;">Linha {ctx['line_source']}</div>
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #f8fafc;">{ctx['line_value']}</div>
+                </div>
+            </div>
+            
+            <div class="badge-row" style="margin-top: 10px;">
+                <span class="badge badge-neutral" style="font-size: 0.75rem;">🎯 Hit L10: {ctx['hit_l10']}</span>
+                <span class="badge badge-neutral" style="font-size: 0.75rem;">⚖️ Edge: {ctx['edge']:+.1f}</span>
+            </div>
+            
         </div>
     </div>
     """
+    
     st.markdown(html, unsafe_allow_html=True)
 
 def render_player_cards_grid(
