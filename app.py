@@ -71,10 +71,18 @@ def main():
     
     target_df = away_df if selected_team == selected_game["away_team_name"] else home_df
     sort_label = f"{line_metric} L10" if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
-    
+
+# --- Primeiro definimos quem é o adversário ---
+    if selected_team == away_team:
+        opp_abbr = home_team
+    else:
+        opp_abbr = away_team
+
+    # --- Depois chamamos a função passando o opp_abbr no final ---
     render_team_section_v2(
         selected_team, target_df, season, min_games, min_minutes, role_filter,
-        sort_label, False, chart_mode, line_metric, line_value, use_market_line, cards_per_row
+        sort_label, False, chart_mode, line_metric, line_value, use_market_line,
+        cards_per_row, opp_abbr
     )
 
 if __name__ == "__main__":
