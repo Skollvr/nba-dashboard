@@ -656,3 +656,136 @@ def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_
         "tooltip": tooltip,
         "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
     }
+
+@st.cache_data(ttl=54000, show_spinner=False)
+def build_team_table(team_id: int, season: str) -> pd.DataFrame:
+    roster = get_team_roster(team_id, season)
+    season_stats = get_league_player_stats(season, last_n_games=0)
+    last5_stats = get_league_player_stats(season, last_n_games=5)
+    last10_stats = get_league_player_stats(season, last_n_games=10)
+
+    if roster.empty:
+        return pd.DataFrame()
+
+    roster = roster[[c for c in ["PLAYER", "PLAYER_ID", "POSITION"] if c in roster.columns]].copy()
+    if "POSITION" not in roster.columns:
+        roster["POSITION"] = ""
+
+    season_view = (
+        pd.DataFrame(columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"])
+        if season_stats.empty
+        else season_stats.rename(
+            columns={
+                "GP": "SEASON_GP",
+                "MIN": "SEASON_MIN",
+                "PTS": "SEASON_PTS",
+                "REB": "SEASON_REB",
+                "AST": "SEASON_AST",
+                "FG3M": "SEASON_3PM",
+                "FGA": "SEASON_FGA",
+                "FG3A": "SEASON_3PA",
+            }
+        )
+    )
+
+    last5_view = (
+        pd.DataFrame(columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA"])
+        if last5_stats.empty
+        else last5_stats.rename(
+            columns={
+                "GP": "L5_GP",
+                "MIN": "L5_MIN",
+                "PTS": "L5_PTS",
+                "REB": "L5_REB",
+                "AST": "L5_AST",
+                "FG3M": "L5_3PM",
+                "FGA": "L5_FGA",
+                "FG3A": "L5_3PA",
+            }
+        )
+    )
+
+    last10_view = (
+        pd.DataFrame(columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"])
+        if last10_stats.empty
+        else last10_stats.rename(
+            columns={
+                "GP": "L10_GP",
+                "MIN": "L10_MIN",
+                "PTS": "L10_PTS",
+                "REB": "L10_REB",
+                "AST": "L10_AST",
+                "FG3M": "L10_3PM",
+                "FGA": "L10_FGA",
+                "FG3A": "L10_3PA",
+            }
+        )
+    )
+
+    team_df = roster.merge(
+        season_view[["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]],
+        on="PLAYER_ID",
+        how="left",
+    ).merge(
+        last5_view[["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA"]],
+        on="PLAYER_ID",
+        how="left",
+    ).merge(
+        last10_view[["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"]],
+        on="PLAYER_ID",
+        how="left",
+    )
+
+    numeric_cols = [
+        "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA",
+        "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA",
+        "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA",
+    ]
+    for col in numeric_cols:
+        if col not in team_df.columns:
+            team_df[col] = 0.0
+        team_df[col] = pd.to_numeric(team_df[col], errors="coerce").fillna(0.0)
+
+    team_df["SEASON_PRA"] = team_df["SEASON_PTS"] + team_df["SEASON_REB"] + team_df["SEASON_AST"]
+    team_df["L5_PRA"] = team_df["L5_PTS"] + team_df["L5_REB"] + team_df["L5_AST"]
+    team_df["L10_PRA"] = team_df["L10_PTS"] + team_df["L10_REB"] + team_df["L10_AST"]
+    team_df["DELTA_PRA_L5"] = team_df["L5_PRA"] - team_df["SEASON_PRA"]
+    team_df["DELTA_PRA_L10"] = team_df["L10_PRA"] - team_df["SEASON_PRA"]
+
+    def classify_trend(delta_pra_l10: float) -> str:
+        if delta_pra_l10 >= 3.0:
+            return "🔥 Forte"
+        if delta_pra_l10 >= 1.0:
+            return "⬆️ Boa"
+        if delta_pra_l10 <= -3.0:
+            return "🥶 Queda"
+        if delta_pra_l10 <= -1.0:
+            return "⬇️ Fraca"
+        return "➖ Neutra"
+
+    team_df["TREND"] = team_df["DELTA_PRA_L10"].apply(classify_trend)
+    team_df["POSITION_GROUP"] = team_df["POSITION"].apply(normalize_position_group)
+    team_df["PLAYER_KEY"] = team_df["PLAYER"].apply(normalize_text)
+
+    team_df["ROLE"] = "Reserva"
+    starter_ids = (
+        team_df.sort_values(by=["SEASON_MIN", "SEASON_GP", "PLAYER"], ascending=[False, False, True])
+        .head(5)["PLAYER_ID"]
+        .tolist()
+    )
+    team_df.loc[team_df["PLAYER_ID"].isin(starter_ids), "ROLE"] = "Titular provável"
+
+    return team_df[
+        [
+            "PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP", "ROLE",
+            "SEASON_GP", "SEASON_MIN",
+            "SEASON_PTS", "L5_PTS", "L10_PTS",
+            "SEASON_REB", "L5_REB", "L10_REB",
+            "SEASON_AST", "L5_AST", "L10_AST",
+            "SEASON_3PM", "L5_3PM", "L10_3PM",
+            "SEASON_FGA", "L5_FGA", "L10_FGA",
+            "SEASON_3PA", "L5_3PA", "L10_3PA",
+            "SEASON_PRA", "L5_PRA", "L10_PRA",
+            "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND",
+        ]
+    ].copy()
