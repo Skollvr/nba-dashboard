@@ -132,16 +132,36 @@ def render_player_cards_grid(
                     render_player_card(row_df.iloc[col_idx], line_metric, line_value, use_market_line)
 
 
-def render_summary_cards(df: pd.DataFrame, metric: str, line: float, use_market: bool):
-    """Renderiza a grade de cards de resumo."""
-    if df.empty:
-        st.info("Nenhum jogador atende aos filtros.")
-        return
+def render_summary_cards(away_df: pd.DataFrame, home_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str):
+    """Renderiza um card de destaque do confronto no topo da tela."""
+    combined = build_summary_cards_data(away_df, home_df, min_games, min_minutes, role_filter)
     
-    cols = st.columns(3)
-    for i, (_, row) in enumerate(df.iterrows()):
-        with cols[i % 3]:
-            render_player_card(row, metric, line, use_market)
+    if combined.empty:
+        return
+        
+    # Pega o melhor jogador do confronto baseado no PRA dos últimos 10 jogos
+    best = combined.sort_values("L10_PRA", ascending=False).iloc[0]
+    
+    html = f"""
+    <div class="summary-card" style="margin-bottom: 2rem; border-left: 4px solid #10b981;">
+        <div class="summary-label" style="color: #10b981;">🔥 Destaque do Confronto (Líder PRA L10)</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+            <div class="summary-value" style="font-size: 1.8rem;">{best['PLAYER']}</div>
+            <div class="badge badge-starter">{best['TEAM_NAME']} • {best['ROLE']}</div>
+        </div>
+        <div class="detail-mini-grid" style="margin-top: 1rem;">
+            <div class="detail-mini">
+                <div class="detail-mini-label">Média PRA (Temporada)</div>
+                <div class="detail-mini-value">{best['SEASON_PRA']:.1f}</div>
+            </div>
+            <div class="detail-mini detail-mini-highlight">
+                <div class="detail-mini-label">Média PRA (Últimos 10)</div>
+                <div class="detail-mini-value">{best['L10_PRA']:.1f}</div>
+            </div>
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 def render_player_focus_panel(
     row: pd.Series,
