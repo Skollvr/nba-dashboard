@@ -683,6 +683,10 @@ def get_matchup_context(
 
     away_df["TEAM_NAME"] = away_team_name
     home_df["TEAM_NAME"] = home_team_name
+    
+    # --- NOVO: FLAG DE MANDANTE/VISITANTE ---
+    away_df["IS_HOME"] = False
+    home_df["IS_HOME"] = True
 
     odds_df = pd.DataFrame()
     if include_market:
@@ -2304,7 +2308,16 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         "OSC_L10": 0.0,
         "OSC_CLASS": "-",
         "FORM_SIGNAL": "→ Estável",
+        # --- NOVO: VARIÁVEIS DO SPLIT CASA/FORA ---
+        "HOME_PRA": 0.0, "AWAY_PRA": 0.0,
+        "HOME_PTS": 0.0, "AWAY_PTS": 0.0,
+        "HOME_REB": 0.0, "AWAY_REB": 0.0,
+        "HOME_AST": 0.0, "AWAY_AST": 0.0,
+        "HOME_3PM": 0.0, "AWAY_3PM": 0.0,
+        "HOME_FGA": 0.0, "AWAY_FGA": 0.0,
+        "HOME_3PA": 0.0, "AWAY_3PA": 0.0,
     }
+    
     list_defaults = {
         "RECENT_PRA_L10": [],
         "RECENT_PTS_L10": [],
@@ -2330,7 +2343,8 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         recent10 = player_logs.sort_values("GAME_DATE", ascending=False).head(10).copy()
         sample_size = len(recent10)
         thresholds = threshold_map.get(player_id, {})
-
+        
+        
         if sample_size == 0:
             metrics.append({"PLAYER_ID": player_id, **scalar_defaults, **list_defaults})
             continue
@@ -2354,6 +2368,10 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         osc_value = float(recent10["PRA"].std(ddof=0)) if sample_size > 1 else 0.0
         ordered = recent10.sort_values("GAME_DATE")
         slope = float(np.polyfit(range(len(ordered)), ordered["PRA"], 1)[0]) if len(ordered) >= 3 else 0.0
+
+        # --- NOVO: CÁLCULO DE SPLIT CASA/FORA ---
+        home_logs = player_logs[player_logs["MATCHUP"].str.contains("vs.", regex=False, na=False)]
+        away_logs = player_logs[player_logs["MATCHUP"].str.contains("@", regex=False, na=False)]
 
         metrics.append(
             {
@@ -2382,6 +2400,22 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
                 "RECENT_3PM_L10": recent10["FG3M"].round(1).tolist(),
                 "RECENT_FGA_L10": recent10["FGA"].round(1).tolist(),
                 "RECENT_3PA_L10": recent10["FG3A"].round(1).tolist(),
+                "RECENT_3PA_L10": recent10["FG3A"].round(1).tolist(),
+                # --- NOVO: SALVANDO AS MÉDIAS DO SPLIT ---
+                "HOME_PRA": float(home_logs["PRA"].mean()) if not home_logs.empty else 0.0,
+                "AWAY_PRA": float(away_logs["PRA"].mean()) if not away_logs.empty else 0.0,
+                "HOME_PTS": float(home_logs["PTS"].mean()) if not home_logs.empty else 0.0,
+                "AWAY_PTS": float(away_logs["PTS"].mean()) if not away_logs.empty else 0.0,
+                "HOME_REB": float(home_logs["REB"].mean()) if not home_logs.empty else 0.0,
+                "AWAY_REB": float(away_logs["REB"].mean()) if not away_logs.empty else 0.0,
+                "HOME_AST": float(home_logs["AST"].mean()) if not home_logs.empty else 0.0,
+                "AWAY_AST": float(away_logs["AST"].mean()) if not away_logs.empty else 0.0,
+                "HOME_3PM": float(home_logs["FG3M"].mean()) if not home_logs.empty else 0.0,
+                "AWAY_3PM": float(away_logs["FG3M"].mean()) if not away_logs.empty else 0.0,
+                "HOME_FGA": float(home_logs["FGA"].mean()) if not home_logs.empty else 0.0,
+                "AWAY_FGA": float(away_logs["FGA"].mean()) if not away_logs.empty else 0.0,
+                "HOME_3PA": float(home_logs["FG3A"].mean()) if not home_logs.empty else 0.0,
+                "AWAY_3PA": float(away_logs["FG3A"].mean()) if not away_logs.empty else 0.0,
             }
         )
 
@@ -3346,6 +3380,54 @@ def render_projection_detail_box_html(row: pd.Series) -> str:
     </div>
     """
 
+def render_split_detail_box_html(row: pd.Series, line_metric: str) -> str:
+    is_home = row.get("IS_HOME", False)
+    
+    home_val = row.get(f"HOME_{line_metric}", 0.0)
+    away_val = row.get(f"AWAY_{line_metric}", 0.0)
+    season_val = row.get(f"SEASON_{line_metric}", 0.0)
+    
+    # Calcula se o jogador cresce ou some baseado no local do jogo de hoje
+    active_val = home_val if is_home else away_val
+    diff = active_val - season_val
+    
+    if diff >= 1.0:
+        diff_pill = f'<span class="delta-pill delta-up">Rende +{diff:.1f} hoje</span>'
+    elif diff <= -1.0:
+        diff_pill = f'<span class="delta-pill delta-down">Cai {diff:.1f} hoje</span>'
+    else:
+        diff_pill = '<span class="delta-pill delta-flat">Sem impacto relevante</span>'
+        
+    home_class = "detail-mini detail-mini-highlight" if is_home else "detail-mini"
+    away_class = "detail-mini detail-mini-highlight" if not is_home else "detail-mini"
+    
+    return f"""
+    <div class="detail-box">
+        <div class="detail-box-top">
+            <div class="detail-box-title">Efeito de Mando de Quadra — {line_metric}</div>
+            <div class="delta-pill-row">
+                {diff_pill}
+            </div>
+        </div>
+        <div class="detail-mini-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+            <div class="detail-mini">
+                <div class="detail-mini-label">Média Geral</div>
+                <div class="detail-mini-value">{format_number(season_val)}</div>
+            </div>
+            <div class="{home_class}">
+                <div class="detail-mini-label">Jogando em Casa</div>
+                <div class="detail-mini-value">{format_number(home_val)}</div>
+            </div>
+            <div class="{away_class}">
+                <div class="detail-mini-label">Jogando Fora</div>
+                <div class="detail-mini-value">{format_number(away_val)}</div>
+            </div>
+        </div>
+        <div class="hero-note" style="margin-top: 0.55rem;">
+            Hoje o jogador atua <strong>{'EM CASA' if is_home else 'FORA DE CASA'}</strong>. Card destacado indica o cenário ativo da partida.
+        </div>
+    </div>
+    """
 
 def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> str:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
@@ -3561,6 +3643,7 @@ def render_player_focus_panel(
 
     with overview_tab:
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
+        st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
         st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
         st.markdown(
             render_manual_line_detail_box_html(row, line_metric, line_value, use_market_line),
