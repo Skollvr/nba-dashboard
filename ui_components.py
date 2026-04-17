@@ -241,6 +241,7 @@ def render_summary_cards(away_df: pd.DataFrame, home_df: pd.DataFrame, min_games
             right_highlight=True
         )
         st.markdown(html_ast, unsafe_allow_html=True)
+        
 def render_player_focus_panel(
     row: pd.Series,
     line_metric: str,
@@ -249,32 +250,19 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
-   # --- BUSCADOR DE CORES DEFINITIVO (HARDCODED) ---
-    # Pegamos todo o texto disponível sobre o time do jogador
-    search_text = f"{row.get('TEAM_NAME', '')} {row.get('TEAM_ABBR', '')}".upper()
+    # --- RASTREADOR INTELIGENTE CORRIGIDO ---
+    team_name_str = str(row.get('TEAM_NAME', '')).upper()
+    team_abbr_str = str(row.get('TEAM_ABBR', '')).upper()
     
-    # 1. Definimos a sigla padrão (NBA)
     tk = 'NBA'
-    
-    # --- RASTREADOR INTELIGENTE PARA O BANNER GRANDE ---
-    search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
-    tk = 'NBA'
-    
-    # Loop automático pelo dicionário que resolve todos os times de uma vez
     for abbr, info in NBA_TEAM_COLORS.items():
         team_keyword = info.get('name', '').upper()
-        if (team_keyword and team_keyword in search_text) or (abbr in search_text):
+        # Procura a keyword exata OU se a sigla bate perfeitamente (evita o bug do DEN dentro de GOLDEN)
+        if (team_keyword and team_keyword in team_name_str) or (abbr == team_abbr_str) or (f" {abbr} " in f" {team_name_str} "):
             tk = abbr
             break
             
     colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
-    
-    # 3. Puxamos as cores do dicionário global
-    colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
-
-    # --- DEBUG: APAGUE ESSA LINHA ABAIXO APÓS TESTAR ---
-    # st.write(f"DEBUG: Time identificado como: {tk}")
-
 
     st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
 
@@ -283,6 +271,9 @@ def render_player_focus_panel(
         st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
 
     with top_right:
+        # Pega o número da camisa se tiver, senão deixa em branco para não ficar um "#" sozinho
+        jersey = f"#{row.get('JERSEY_NUMBER')} | " if row.get('JERSEY_NUMBER') and str(row.get('JERSEY_NUMBER')).strip() else ""
+        
         # Banner com a cor primária do time e borda na cor secundária
         st.markdown(f"""
             <div style="
@@ -297,359 +288,26 @@ def render_player_focus_panel(
                     {row['PLAYER']}
                 </h1>
                 <div style="color: {colors['secondary']}; opacity: 0.9; font-weight: 600; font-size: 14px;">
-                    {row.get('TEAM_NAME', 'NBA') or ''} | #{row.get('JERSEY_NUMBER', '')} | {row.get('POSITION', '')}
+                    {tk} | {jersey}{row.get('POSITION', '')}
                 </div>
             </div>
         """, unsafe_allow_html=True)
+        
         position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
         st.markdown(
-            f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])} • Time {row["TEAM_NAME"]}</div>',
+            f'<div class="focus-sub">Pos {position} • GP {int(row.get("SEASON_GP", 0))} • MIN {format_number(row.get("SEASON_MIN", 0))} • Time {row.get("TEAM_NAME", "")}</div>',
             unsafe_allow_html=True,
         )
+        
         render_badges(
-            row["ROLE"],
+            row.get("ROLE", "-"),
             row.get("FORM_SIGNAL", "→ Estável"),
             row.get("OSC_CLASS", "-"),
             row.get("MATCHUP_LABEL", "Neutro"),
         )
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
-    
-    # --- CONTROLE MESTRE DE MÉTRICA ---
-    # Ele fica fora das abas, então aparece o tempo todo no topo
-    _visual_metric = st.pills(
-        "Métrica em análise detalhada",
-        ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"],
-        default=line_metric,
-        key=f"global_visual_metric_{row['PLAYER_ID']}"
-    )
-    visual_metric = _visual_metric if _visual_metric else line_metric
 
-
-    # NOVIDADE: As 3 abas organizando a tela!
-    overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
-
-    with overview_tab:
-        render_player_support_tiles(row, line_metric, line_value, use_market_line)
-        st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
-        st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
-        st.markdown(
-            render_manual_line_detail_box_html(row, line_metric, line_value, use_market_line),
-            unsafe_allow_html=True,
-        )
-
-    with detail_tab:
-        first_cols = st.columns(2)
-        second_cols = st.columns(2)
-        detail_items = [
-            ("PRA", row["SEASON_PRA"], row["L5_PRA"], row["L10_PRA"]),
-            ("PTS", row["SEASON_PTS"], row["L5_PTS"], row["L10_PTS"]),
-            ("REB", row["SEASON_REB"], row["L5_REB"], row["L10_REB"]),
-            ("AST", row["SEASON_AST"], row["L5_AST"], row["L10_AST"]),
-        ]
-        for col, item in zip([*first_cols, *second_cols], detail_items):
-            with col:
-                st.markdown(
-                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
-                    unsafe_allow_html=True,
-                )
-
-        extra_cols = st.columns(3)
-        extra_detail_items = [
-            ("3PM", row["SEASON_3PM"], row["L5_3PM"], row["L10_3PM"]),
-            ("FGA", row["SEASON_FGA"], row["L5_FGA"], row["L10_FGA"]),
-            ("3PA", row["SEASON_3PA"], row["L5_3PA"], row["L10_3PA"]),
-        ]
-        for col, item in zip(extra_cols, extra_detail_items):
-            with col:
-                st.markdown(
-                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
-                    unsafe_allow_html=True,
-                )
-
-        st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
-
-    with visual_tab:
-        # CONTROLE MESTRE: Controla ambos os gráficos simultaneamente!
-        
-        # 1. Gráfico Histórico Clássico (Agora recebe a ordem do Controle Mestre)
-        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
-        
-        st.divider()
-        
-        # 2. Gráfico Piso e Teto (Histograma)
-        st.markdown(f"### Frequência na Temporada — {visual_metric}")
-        st.caption("Veja os montinhos: concentrados à esquerda (Piso seguro), espalhados à direita (Teto alto).")
-        
-        log = get_player_log(int(row["PLAYER_ID"]), season)
-        if not log.empty:
-            log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
-            log["3PM"] = log["FG3M"]
-            log["3PA"] = log.get("FG3A", log["FGA"])
-            
-            # Recalcula a linha e a odd (se BetMGM) para a nova métrica selecionada!
-            visual_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
-            active_line = float(visual_ctx["line_value"])
-            
-            log_col_map = {"PRA": "PRA", "PTS": "PTS", "REB": "REB", "AST": "AST", "3PM": "3PM", "FGA": "FGA", "3PA": "3PA"}
-            active_col = log_col_map.get(visual_metric, "PRA")
-            
-            if active_col in log.columns:
-                hist_data = log[active_col].dropna()
-                
-                fig = go.Figure()
-                fig.add_trace(go.Histogram(
-                    x=hist_data,
-                    # Força tamanho 1. Começando em -0.5 garante que o número exato (ex: 2) fique bem no centro da barra!
-                    xbins=dict(start=-0.5, end=max(hist_data.max(), active_line) + 5, size=1),
-                    marker_color="rgba(139,92,246, 0.65)",
-                    marker_line_color="rgba(139,92,246, 1)",
-                    marker_line_width=1.5,
-                    opacity=0.9,
-                    # Agora o tooltip vai mostrar apenas o número cravado (ex: 2)
-                    hovertemplate=f"Valor exato de {visual_metric}: %{{x}}<br>Jogos atingidos: %{{y}}<extra></extra>"
-                ))
-                
-                # Desenha a linha vertical da aposta
-                line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
-                fig.add_vline(
-                    x=active_line, 
-                    line_dash="dash", 
-                    line_color=line_color, 
-                    line_width=3,
-                    annotation_text=f"Linha ({visual_ctx['line_source']}): {active_line}", 
-                    annotation_position="top right",
-                    annotation_font_color="#cbd5e1"
-                )
-
-                # UX: Se for manual e o usuário trocar a métrica visual, damos um aviso!
-                if not use_market_line and visual_metric != line_metric:
-                    st.warning(f"Atenção: A linha vertical está usando o valor manual da barra lateral ({active_line}), que originalmente foi digitado para {line_metric}.")
-
-                fig.update_layout(
-                    template="plotly_dark",
-                    height=380,
-                    margin=dict(l=20, r=20, t=40, b=20),
-                    paper_bgcolor="rgba(0,0,0,0)",
-                    plot_bgcolor="rgba(15,23,42,0.35)",
-                    xaxis_title=f"Valor de {visual_metric} na partida",
-                    yaxis_title="Quantidade de Jogos",
-                    dragmode=False,
-                    bargap=0.15
-                )
-                # Força o eixo X a mostrar apenas números inteiros (0, 1, 2, 3...)
-                fig.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)", tick0=0, dtick=1)
-                fig.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # --- NOVO: RESUMO OVER/UNDER MATEMÁTICO ---
-                over_count = int((hist_data > active_line).sum())
-                under_count = int((hist_data < active_line).sum())
-                push_count = int((hist_data == active_line).sum())
-                
-                push_html = f'<span style="margin: 0 0.8rem; color: #334155;">|</span><span style="color: #fbbf24;">PUSH (DEVOLUÇÃO) = {push_count}</span>' if push_count > 0 else ''
-                
-                st.markdown(
-                    f'''
-                    <div style="margin-top: 0.2rem; text-align: center; padding: 0.85rem; background: rgba(15,23,42,0.8); border: 1px solid rgba(148,163,184,0.15); border-radius: 12px; font-weight: 800; font-size: 0.9rem; letter-spacing: 0.05em;">
-                        <span style="color: #94a3b8;">LINHA {visual_ctx['line_source'].upper()}: {active_line}</span>
-                        <span style="margin: 0 0.8rem; color: #334155;">|</span>
-                        <span style="color: #10b981;">OVER NA TEMPORADA = {over_count}</span>
-                        <span style="margin: 0 0.8rem; color: #334155;">|</span>
-                        <span style="color: #ef4444;">UNDER NA TEMPORADA = {under_count}</span>
-                        {push_html}
-                    </div>
-                    ''',
-                    unsafe_allow_html=True
-                )
-                st.divider()
-
-                # --- 3. NOVO: GRÁFICO DE DISPERSÃO (MINUTOS VS PRODUÇÃO) ---
-                st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
-                st.caption("Cada ponto é um jogo. A linha de tendência mostra se a produção sobe junto com os minutos.")
-                
-                scatter_df = log[["MIN", active_col, "GAME_DATE"]].copy().dropna()
-                # Adiciona informação de matchup se existir
-                if "MATCHUP" in log.columns: scatter_df["MATCHUP"] = log["MATCHUP"]
-                else: scatter_df["MATCHUP"] = ""
-                
-                if not scatter_df.empty:
-                    # Calcula a linha de tendência (Regressão Linear Simples)
-                    x = scatter_df["MIN"]
-                    y = scatter_df[active_col]
-                    z = np.polyfit(x, y, 1)
-                    p = np.poly1d(z)
-                    trend_x = np.array([x.min(), x.max()])
-                    trend_y = p(trend_x)
-
-                    fig_scatter = go.Figure()
-
-                    # Adiciona os pontos (Jogos)
-                    fig_scatter.add_trace(go.Scatter(
-                        x=x, y=y,
-                        mode='markers',
-                        marker=dict(
-                            size=12,
-                            color=np.where(y >= active_line, '#10b981', '#ef4444'), # Verde se Over, Vermelho se Under
-                            line=dict(width=1, color='#f8fafc'),
-                            opacity=0.8
-                        ),
-                        text=scatter_df.apply(lambda r: f"Data: {r['GAME_DATE'].strftime('%d/%m')}<br>Matchup: {r['MATCHUP']}<br>Minutos: {r['MIN']}<br>{visual_metric}: {r[active_col]}", axis=1),
-                        hoverinfo='text',
-                        name='Jogos'
-                    ))
-
-                    # Adiciona a Linha de Tendência
-                    fig_scatter.add_trace(go.Scatter(
-                        x=trend_x, y=trend_y,
-                        mode='lines',
-                        line=dict(color='rgba(255, 255, 255, 0.4)', width=2, dash='dot'),
-                        name='Tendência',
-                        hoverinfo='skip'
-                    ))
-
-                    # Linha horizontal da aposta
-                    fig_scatter.add_hline(
-                        y=active_line, 
-                        line_dash="dash", 
-                        line_color=line_color, 
-                        line_width=2,
-                        annotation_text="Linha",
-                        annotation_position="bottom right"
-                    )
-
-                    fig_scatter.update_layout(
-                        template="plotly_dark",
-                        height=400,
-                        margin=dict(l=20, r=20, t=20, b=20),
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        plot_bgcolor="rgba(15,23,42,0.35)",
-                        xaxis_title="Minutos Jogados",
-                        yaxis_title=f"Valor de {visual_metric}",
-                        showlegend=False,
-                        dragmode=False
-                    )
-                    fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
-                    fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
-
-                    st.plotly_chart(fig_scatter, use_container_width=True)
-                    
-                    # Explicação da correlação
-                    correl = x.corr(y)
-                    if correl > 0.7:
-                        st.success(f"📈 **Alta Correlação ({correl:.2f}):** O desempenho do jogador é extremamente dependente dos minutos. Se o tempo de quadra subir hoje, o Over é muito provável.")
-                    elif correl > 0.4:
-                        st.info(f"📊 **Correlação Moderada ({correl:.2f}):** Mais minutos costumam trazer mais {visual_metric}, mas outros fatores (eficiência/matchup) também pesam.")
-                    else:
-                        st.warning(f"📉 **Baixa Correlação ({correl:.2f}):** Esse jogador produz de forma oscilante, independente de quanto tempo fica em quadra.")
-            else:
-                st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
-        else:
-            st.info("Sem histórico suficiente para gerar o gráfico.")
-            
-    with market_tab:
-        # 1. MAPEAMENTO COMPLETO
-        team_map = {
-            'Hawks': 'ATL', 'Celtics': 'BOS', 'Nets': 'BKN', 'Hornets': 'CHA', 'Bulls': 'CHI', 
-            'Cavaliers': 'CLE', 'Mavericks': 'DAL', 'Nuggets': 'DEN', 'Pistons': 'DET', 
-            'Warriors': 'GSW', 'Rockets': 'HOU', 'Pacers': 'IND', 'Clippers': 'LAC', 
-            'Lakers': 'LAL', 'Grizzlies': 'MEM', 'Heat': 'MIA', 'Bucks': 'MIL', 
-            'Timberwolves': 'MIN', 'Pelicans': 'NOP', 'Knicks': 'NYK', 'Thunder': 'OKC', 
-            'Magic': 'ORL', '76ers': 'PHI', 'Suns': 'PHX', 'Kings': 'SAC', 
-            'Spurs': 'SAS', 'Raptors': 'TOR', 'Jazz': 'UTA', 'Wizards': 'WAS', 'Trail Blazers': 'POR'
-        }
-
-        # 2. BUSCA BRUTA (Varre cada coluna do jogador para achar o adversário)
-        opp_abbr = None
-        player_team_name = str(row.get('TEAM_NAME', ''))
-        
-        # O "Pulo do Gato": olhamos todos os valores da linha em busca de um time
-        for col_val in row.values:
-            val_str = str(col_val)
-            for team_name, abbr in team_map.items():
-                # Se acharmos um nome de time (ex: Memphis) e não for o time do Jaylen (Celtics)
-                if team_name in val_str and team_name not in player_team_name:
-                    opp_abbr = abbr
-                    break
-            if opp_abbr: break
-
-        # 3. LOGICA DE EXIBIÇÃO
-        if opp_abbr:
-            st.markdown(f"### ⚔️ Histórico de Confronto: vs {opp_abbr}")
-            st.caption(f"Desempenho real de {row['PLAYER']} nos últimos 5 jogos contra a defesa do {opp_abbr}.")
-            
-            if not log.empty:
-                # Filtra o histórico procurando a sigla no campo MATCHUP do log
-                h2h_log = log[log['MATCHUP'].str.contains(opp_abbr)].copy()
-                h2h_log = h2h_log.sort_values('GAME_DATE', ascending=False).head(5)
-                
-                if not h2h_log.empty:
-                    # Cálculos
-                    h2h_log["PRA"] = h2h_log["PTS"] + h2h_log["REB"] + h2h_log["AST"]
-                    h2h_log["3PM"] = h2h_log.get("FG3M", 0)
-                    
-                    m_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
-                    m_line = float(m_ctx["line_value"])
-                    h2h_log['Status'] = h2h_log[visual_metric].apply(lambda x: "OVER" if x > m_line else "UNDER")
-                    h2h_hits = (h2h_log[visual_metric] > m_line).sum()
-                    h2h_total = len(h2h_log)
-                    h2h_pct = (h2h_hits / h2h_total) * 100
-                    
-                    # Cards de métricas
-                    c1, c2, c3 = st.columns(3)
-                    with c1: st.metric("Encontros", h2h_total)
-                    with c2: 
-                        avg_h2h = h2h_log[visual_metric].mean()
-                        st.metric(f"Média vs {opp_abbr}", f"{avg_h2h:.1f}", delta=f"{avg_h2h - m_line:.1f}")
-                    with c3:
-                        st.markdown("**Sequência H2H:**")
-                        # Cria as bolinhas baseadas no status
-                        dots = "".join(['<span style="color:#28a745;font-size:22px">🟢</span>' if "OVER" in s 
-                                   else '<span style="color:#dc3545;font-size:22px">🔴</span>' 
-                                   for s in h2h_log['Status'].iloc[::-1]])
-                        st.markdown(f'<div style="letter-spacing:2px">{dots}</div>', unsafe_allow_html=True)
-                        st.caption(f"Aproveitamento: {h2h_pct:.0f}%")
-
-                    # Tabela
-                    # --- TABELA DETALHADA COM COLUNA DE LINHA ---
-                    h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', visual_metric, 'MIN']].copy()
-                    
-                    # Adicionamos a linha atual para comparação direta
-                    h2h_display['Linha'] = m_line 
-                    
-                    # Formata a data para um padrão mais curto (ganha espaço)
-                    h2h_display['GAME_DATE'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%y')
-                    
-                    # Define o Status comparando o Real vs a Linha
-                    h2h_display['Status'] = h2h_display[visual_metric].apply(lambda x: "✅ OVER" if x > m_line else "❌ UNDER")
-                    
-                    # REORDENAR COLUNAS: Colocamos a Linha ao lado do resultado real
-                    cols_order = ['GAME_DATE', 'MATCHUP', 'Linha', visual_metric, 'MIN', 'Status']
-                    h2h_display = h2h_display[cols_order]
-                    
-                    st.dataframe(
-                        h2h_display, 
-                        hide_index=True, 
-                        use_container_width=True,
-                        column_config={
-                            "GAME_DATE": st.column_config.TextColumn("Data", width="small"),
-                            "MATCHUP": st.column_config.TextColumn("Confronto", width="medium"),
-                            "Linha": st.column_config.NumberColumn("Linha", format="%.1f"),
-                            visual_metric: st.column_config.NumberColumn(f"Real ({visual_metric})", format="%.0f"),
-                            "MIN": st.column_config.NumberColumn("Min", format="%d", width="small"),
-                            "Status": st.column_config.TextColumn("Status", width="small")
-                        }
-                    )
-                else:
-                    st.info(f"Nenhum jogo registrado contra {opp_abbr} nesta temporada.")
-            else:
-                st.info("Log de histórico indisponível.")
-        else:
-            # Caso a busca falhe, mostramos as chaves para debugar (ajuda a gente a consertar)
-            st.warning("Não foi possível detectar o adversário automaticamente.")
-            with st.expander("Ver dados brutos (Debug)"):
-                st.write(row.to_dict())
-
+    # ... a partir daqui o código continua igualzinho com o _visual_metric = st.pills(...)
 def render_team_section_v2(
     team_name: str,
     team_df: pd.DataFrame,
@@ -689,7 +347,7 @@ def render_team_section_v2(
     )
 
     st.markdown(
-        '<div class="section-note">Cards curtos no topo e painel detalhado do jogador sob demanda, para não carregar tranqueira à toa.</div>',
+        '<div class="section-note">Cards curtos no topo e painel detalhado do jogador sob demanda.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1223,7 +881,7 @@ def render_game_rankings(
     ).head(5)
 
     st.subheader(f"Ranking do confronto — {line_metric}")
-    st.caption("Bloco compacto para bater o olho rápido, usando BetMGM quando houver linha disponível.")
+    st.caption("Bloco compacto para leitura rápida, usando BetMGM quando houver linha disponível.")
 
     tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
 
