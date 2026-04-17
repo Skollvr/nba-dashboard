@@ -250,17 +250,24 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
-    # --- RASTREADOR INTELIGENTE CORRIGIDO ---
-    team_name_str = str(row.get('TEAM_NAME', '')).upper()
-    team_abbr_str = str(row.get('TEAM_ABBR', '')).upper()
+    # --- RASTREADOR DE CORES À PROVA DE BUGS ---
+    team_name_str = str(row.get('TEAM_NAME', '')).upper().strip()
+    team_abbr_str = str(row.get('TEAM_ABBR', '')).upper().strip()
     
-    tk = 'NBA'
-    for abbr, info in NBA_TEAM_COLORS.items():
-        team_keyword = info.get('name', '').upper()
-        # Procura a keyword exata OU se a sigla bate perfeitamente (evita o bug do DEN dentro de GOLDEN)
-        if (team_keyword and team_keyword in team_name_str) or (abbr == team_abbr_str) or (f" {abbr} " in f" {team_name_str} "):
-            tk = abbr
-            break
+    tk = 'NBA' # Cor padrão caso não ache nada
+    
+    # 1ª Tentativa: Se a sigla exata (ex: GSW, CHA) já veio da API, usamos ela direto!
+    if team_abbr_str in NBA_TEAM_COLORS:
+        tk = team_abbr_str
+    else:
+        # 2ª Tentativa: Busca pelo nome, mas exigindo a PALAVRA EXATA (com espaços ao redor)
+        # Isso impede que "NETS" seja lido dentro de "HORNETS"
+        padded_name = f" {team_name_str} "
+        for abbr, info in NBA_TEAM_COLORS.items():
+            team_keyword = str(info.get('name', '')).upper().strip()
+            if team_keyword and (f" {team_keyword} " in padded_name):
+                tk = abbr
+                break
             
     colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
 
@@ -271,7 +278,6 @@ def render_player_focus_panel(
         st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
 
     with top_right:
-        # Pega o número da camisa se tiver, senão deixa em branco para não ficar um "#" sozinho
         jersey = f"#{row.get('JERSEY_NUMBER')} | " if row.get('JERSEY_NUMBER') and str(row.get('JERSEY_NUMBER')).strip() else ""
         
         # Banner com a cor primária do time e borda na cor secundária
@@ -307,7 +313,8 @@ def render_player_focus_panel(
         )
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
 
-    # ... a partir daqui o código continua igualzinho com o _visual_metric = st.pills(...)
+    # --- O resto da função (_visual_metric = st.pills...) continua igualzinho aqui para baixo ---
+
 def render_team_section_v2(
     team_name: str,
     team_df: pd.DataFrame,
