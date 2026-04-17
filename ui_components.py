@@ -312,7 +312,7 @@ def render_player_focus_panel(
     with visual_tab:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
 
-    # --- ABA DE MERCADO DINÂMICA (RESTALLECIDA CONFORME ORIGINAL) ---
+    # --- ABA DE MERCADO DINÂMICA (COM COLUNA DE LINHA) ---
     with market_tab:
         st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
         
@@ -335,16 +335,17 @@ def render_player_focus_panel(
             log['3PM'] = log.get('FG3M', 0)
             log['3PA'] = log.get('FG3A', 0)
             
-            # Filtro pelo adversário
+            # Filtro pelo adversário (sigla CHA, BKN, etc)
             h2h_log = log[log['MATCHUP'].str.contains(current_opp, case=False, na=False)].copy()
             
             if not h2h_log.empty:
-                # C. Preparação da Tabela Visual
-                # Coluna alvo baseada na pílula selecionada
                 target_col = visual_metric
                 
                 h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', target_col]].copy()
                 h2h_display['Data'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
+                
+                # ADIÇÃO: Coluna com a linha projetada para hoje
+                h2h_display['Linha'] = active_line
                 
                 h2h_display = h2h_display.rename(columns={
                     'MATCHUP': 'Confronto',
@@ -353,9 +354,10 @@ def render_player_focus_panel(
                     target_col: f'Real ({visual_metric})'
                 })
                 
-                final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', f'Real ({visual_metric})']]
+                # Reorganiza para que a 'Linha' fique ao lado do 'Real'
+                final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', 'Linha', f'Real ({visual_metric})']]
                 
-                # D. Estilização: Indicador Verde/Vermelho baseado na linha de hoje
+                # Estilização: Indicador Verde/Vermelho
                 def style_hit_miss(val):
                     try:
                         num = float(val)
@@ -371,7 +373,7 @@ def render_player_focus_panel(
                 styled_df = final_table.style.map(style_hit_miss, subset=[f'Real ({visual_metric})'])
                 st.dataframe(styled_df, use_container_width=True, hide_index=True)
                 
-                # E. Resumo de Hit Rate H2H
+                # Resumo de Hit Rate H2H
                 hits = (h2h_log[target_col] >= active_line).sum()
                 total = len(h2h_log)
                 pct = int((hits / total) * 100) if total > 0 else 0
@@ -384,8 +386,6 @@ def render_player_focus_panel(
                 """, unsafe_allow_html=True)
             else:
                 st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
-        else:
-            st.error("Erro ao carregar log do jogador.")
             
 def render_team_section_v2(
     team_name: str,
