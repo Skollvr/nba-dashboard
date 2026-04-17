@@ -245,6 +245,7 @@ def render_player_focus_panel(
     use_market_line: bool,
     season: str,
     chart_mode: str,
+    opp_abbr
 ) -> None:
     # --- 1. RASTREADOR DE CORES (GSW/CHA FIX) ---
     t_name = str(row.get('TEAM_NAME', '')).upper()
@@ -371,6 +372,7 @@ def render_team_section_v2(
     line_value: float,
     use_market_line: bool,
     cards_per_row: int,
+    opp_abbr
 ) -> None:
     if team_df.empty:
         st.warning(f"Não encontrei dados para {team_name}.")
@@ -430,6 +432,7 @@ def render_team_section_v2(
             use_market_line,
             season,
             chart_mode,
+            opp_abbr,
         )
 
     st.divider()
