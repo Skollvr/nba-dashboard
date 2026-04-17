@@ -845,8 +845,10 @@ def render_matchup_header(game_row: pd.Series) -> None:
 
     with c2:
         st.markdown('<div class="center-vs">VS</div>', unsafe_allow_html=True)
+        # Exibe horário convertido para Brasília
+        status_display = get_game_datetime_brasilia(game_row["GAME_STATUS_TEXT"])
         st.markdown(
-            f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{game_row["GAME_STATUS_TEXT"]}</span></div>',
+            f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{status_display}</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -856,14 +858,6 @@ def render_matchup_header(game_row: pd.Series) -> None:
         st.markdown('<div class="team-sub">Mandante</div>', unsafe_allow_html=True)
 
     st.markdown("</div>", unsafe_allow_html=True)
-    
-    status_display = get_game_datetime_brasilia(game_row["GAME_STATUS_TEXT"])
-        
-        st.markdown(
-            f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{status_display}</span></div>',
-            unsafe_allow_html=True,
-        )
-
 
 def render_single_card(
     title: str,
