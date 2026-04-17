@@ -112,43 +112,35 @@ def render_player_card(row: pd.Series, metric: str, line: float, use_market: boo
     else:
         edge_color = "#38bdf8" # Azul neutro
         
-    # 3. Monta o HTML complexo com flexbox para colocar a foto ao lado do texto
-    html = f"""
-    <div class="summary-card" style="display: flex; gap: 15px; align-items: center; padding: 15px;">
-        
-        <div style="flex-shrink: 0; text-align: center;">
-            <img src="{player_img_url}" width="75" style="border-radius: 50%; background-color: rgba(255,255,255,0.05); border: 3px solid {edge_color}; padding: 2px;">
+    # 3. Monta o HTML (SEM ESPAÇOS NA ESQUERDA PARA NÃO BUGAR O STREAMLIT!)
+    html = f"""<div class="summary-card" style="display: flex; gap: 15px; align-items: center; padding: 15px;">
+<div style="flex-shrink: 0; text-align: center;">
+    <img src="{player_img_url}" width="75" style="border-radius: 50%; background-color: rgba(255,255,255,0.05); border: 3px solid {edge_color}; padding: 2px;">
+</div>
+<div style="flex-grow: 1;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            <div class="summary-label" style="font-size: 1.1rem; margin-bottom: 2px; color: #f8fafc;">{row.get('PLAYER', 'Desconhecido')}</div>
+            <div style="font-size: 0.8rem; color: #94a3b8;">{row.get('POSITION', '-')} • {row.get('ROLE', 'Reserva')}</div>
         </div>
-        
-        <div style="flex-grow: 1;">
-            
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div>
-                    <div class="summary-label" style="font-size: 1.1rem; margin-bottom: 2px; color: #f8fafc;">{row.get('PLAYER', 'Desconhecido')}</div>
-                    <div style="font-size: 0.8rem; color: #94a3b8;">{row.get('POSITION', '-')} • {row.get('ROLE', 'Reserva')}</div>
-                </div>
-                <span class="matchup-chip {match_cls}" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">{row.get('MATCHUP_LABEL', 'Neutro')}</span>
-            </div>
-            
-            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
-                <div>
-                    <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1;">Proj. {metric}</div>
-                    <div class="summary-value" style="font-size: 1.6rem; color: {edge_color};">{ctx['projection']:.1f}</div>
-                </div>
-                <div style="text-align: right;">
-                    <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1;">Linha {ctx['line_source']}</div>
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #f8fafc;">{ctx['line_value']}</div>
-                </div>
-            </div>
-            
-            <div class="badge-row" style="margin-top: 10px;">
-                <span class="badge badge-neutral" style="font-size: 0.75rem;">🎯 Hit L10: {ctx['hit_l10']}</span>
-                <span class="badge badge-neutral" style="font-size: 0.75rem;">⚖️ Edge: {ctx['edge']:+.1f}</span>
-            </div>
-            
+        <span class="matchup-chip {match_cls}" style="font-size: 0.7rem; padding: 0.2rem 0.5rem;">{row.get('MATCHUP_LABEL', 'Neutro')}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.05);">
+        <div>
+            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1;">Proj. {metric}</div>
+            <div class="summary-value" style="font-size: 1.6rem; color: {edge_color};">{ctx['projection']:.1f}</div>
+        </div>
+        <div style="text-align: right;">
+            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1;">Linha {ctx['line_source']}</div>
+            <div style="font-size: 1.2rem; font-weight: bold; color: #f8fafc;">{ctx['line_value']}</div>
         </div>
     </div>
-    """
+    <div class="badge-row" style="margin-top: 10px;">
+        <span class="badge badge-neutral" style="font-size: 0.75rem;">🎯 Hit L10: {ctx['hit_l10']}</span>
+        <span class="badge badge-neutral" style="font-size: 0.75rem;">⚖️ Edge: {ctx['edge']:+.1f}</span>
+    </div>
+</div>
+</div>"""
     
     st.markdown(html, unsafe_allow_html=True)
 
