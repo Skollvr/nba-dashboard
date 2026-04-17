@@ -36,12 +36,10 @@ from pdf_reader import (
 )
 
 from processamento import (
-    build_team_table, classify_matchup_tier, calculate_projection, 
-    get_position_opponent_profile_v2, build_form_context, 
-    enrich_team_with_context, get_matchup_context,
-    merge_injury_report, get_line_context
+    filter_and_sort_team_df, build_display_dataframes, build_summary_cards_data,
+    get_matchup_context, get_matchup_injury_context, merge_injury_report,
+    get_line_context, get_metric_projection_column, get_matchup_chip_class
 )
-
 
 st.set_page_config(
     page_title="NBA Props Dashboard",
@@ -122,30 +120,6 @@ def get_matchup_parts(matchup: str) -> tuple[str, str]:
     return venue, opponent_abbr
 
 
-def classify_oscillation(value: float) -> str:
-    if value <= 4.5:
-        return "Baixa"
-    if value <= 7.5:
-        return "Média"
-    return "Alta"
-
-
-def classify_form_signal(slope: float) -> str:
-    if slope >= 1.0:
-        return "↗ Em alta"
-    if slope <= -1.0:
-        return "↘ Em queda"
-    return "→ Estável"
-
-
-
-def get_matchup_chip_class(label: str) -> str:
-    if label == "Favorável":
-        return "matchup-good"
-    if label == "Difícil":
-        return "matchup-bad"
-    return "matchup-neutral"
-
     
 def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
     team_meta = TEAM_LOOKUP.get(team_id, {}) or {}
@@ -190,282 +164,10 @@ def get_team_name_aliases(team_id: int, team_name: str = "") -> set[str]:
 
 
 
-@st.cache_data(ttl=36000, show_spinner=False)
-def get_matchup_injury_context(
-    away_team_id: int,
-    home_team_id: int,
-    away_team_name: str,
-    home_team_name: str,
-    away_df: pd.DataFrame,
-    home_df: pd.DataFrame,
-) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    try:
-        injury_df = fetch_latest_injury_report_df()
-    except Exception:
-        injury_df = pd.DataFrame()
-
-    injury_report_url = ""
-    if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
-        valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
-        valid_urls = valid_urls[valid_urls.str.strip() != ""]
-        if not valid_urls.empty:
-            injury_report_url = valid_urls.iloc[0]
-
-    injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
-
-    game_matchup = f"{TEAM_ABBR_LOOKUP[int(away_team_id)]}@{TEAM_ABBR_LOOKUP[int(home_team_id)]}"
-
-    away_injury_df = merge_injury_report(
-        away_df,
-        injury_df,
-        away_team_name,
-        away_team_id,
-        game_matchup=game_matchup,
-    )
-
-    home_injury_df = merge_injury_report(
-        home_df,
-        injury_df,
-        home_team_name,
-        home_team_id,
-        game_matchup=game_matchup,
-    )
-
-    return away_injury_df, home_injury_df, injury_report_meta
-
-
-def get_metric_projection_column(metric: str) -> str:
-    return {
-        "PRA": "PROJ_PRA",
-        "PTS": "PROJ_PTS",
-        "REB": "PROJ_REB",
-        "AST": "PROJ_AST",
-        "3PM": "PROJ_3PM",
-        "FGA": "PROJ_FGA",
-        "3PA": "PROJ_3PA",
-    }[metric]
-
-
-def get_metric_recent_list_column(metric: str) -> str:
-    return {
-        "PRA": "RECENT_PRA_L10",
-        "PTS": "RECENT_PTS_L10",
-        "REB": "RECENT_REB_L10",
-        "AST": "RECENT_AST_L10",
-        "3PM": "RECENT_3PM_L10",
-        "FGA": "RECENT_FGA_L10",
-        "3PA": "RECENT_3PA_L10",
-    }[metric]
-
-
-def classify_line_edge(edge: float) -> str:
-    if edge >= 1.5:
-        return "Acima"
-    if edge <= -1.5:
-        return "Abaixo"
-    return "Justa"
-
-
-def get_metric_hit_text_column(metric: str) -> str:
-    return {
-        "PRA": "HIT_RATE_L10_TEXT",
-        "PTS": "PTS_HIT_RATE_L10_TEXT",
-        "REB": "REB_HIT_RATE_L10_TEXT",
-        "AST": "AST_HIT_RATE_L10_TEXT",
-        "3PM": "THREE_PM_HIT_RATE_L10_TEXT",
-        "FGA": "FGA_HIT_RATE_L10_TEXT",
-        "3PA": "THREE_PA_HIT_RATE_L10_TEXT",
-    }[metric]
-
-
-def get_metric_hit_rate_column(metric: str) -> str:
-    return {
-        "PRA": "HIT_RATE_L10",
-        "PTS": "PTS_HIT_RATE_L10",
-        "REB": "REB_HIT_RATE_L10",
-        "AST": "AST_HIT_RATE_L10",
-        "3PM": "THREE_PM_HIT_RATE_L10",
-        "FGA": "FGA_HIT_RATE_L10",
-        "3PA": "THREE_PA_HIT_RATE_L10",
-    }[metric]
-
-
-def get_metric_market_columns(metric: str) -> tuple[str, str, str, str]:
-    return ODDS_METRIC_COLUMNS[metric]
-
-
-def get_market_line_for_metric(row: pd.Series, metric: str) -> dict:
-    line_col, over_col, under_col, updated_col = get_metric_market_columns(metric)
-    return {
-        "line": row.get(line_col),
-        "over_dec": row.get(over_col),
-        "under_dec": row.get(under_col),
-        "updated_at": row.get(updated_col),
-    }
-
-    
 def inject_css() -> None:
     with open("style.css", "r", encoding="utf-8") as f:
         css = f.read()
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-
-def _weighted_profile_from_df(df: pd.DataFrame) -> dict:
-    if df.empty or "GP" not in df.columns:
-        return {
-            "PTS": 0.0,
-            "REB": 0.0,
-            "AST": 0.0,
-            "FG3M": 0.0,
-            "FGA": 0.0,
-            "FG3A": 0.0,
-            "PRA": 0.0,
-            "GP": 0.0,
-        }
-
-    work_df = df.copy()
-    for col in ["GP", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
-        work_df[col] = pd.to_numeric(work_df[col], errors="coerce").fillna(0.0)
-
-    total_gp = float(work_df["GP"].sum())
-    if total_gp <= 0:
-        return {
-            "PTS": 0.0,
-            "REB": 0.0,
-            "AST": 0.0,
-            "FG3M": 0.0,
-            "FGA": 0.0,
-            "FG3A": 0.0,
-            "PRA": 0.0,
-            "GP": 0.0,
-        }
-
-    pts = float((work_df["PTS"] * work_df["GP"]).sum() / total_gp)
-    reb = float((work_df["REB"] * work_df["GP"]).sum() / total_gp)
-    ast = float((work_df["AST"] * work_df["GP"]).sum() / total_gp)
-    fg3m = float((work_df["FG3M"] * work_df["GP"]).sum() / total_gp)
-    fga = float((work_df["FGA"] * work_df["GP"]).sum() / total_gp)
-    fg3a = float((work_df["FG3A"] * work_df["GP"]).sum() / total_gp)
-
-    return {
-        "PTS": pts,
-        "REB": reb,
-        "AST": ast,
-        "FG3M": fg3m,
-        "FGA": fga,
-        "FG3A": fg3a,
-        "PRA": pts + reb + ast,
-        "GP": total_gp,
-    }
-
-
-def apply_filters(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str) -> pd.DataFrame:
-    filtered = team_df[(team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)].copy()
-    if role_filter != "Todos":
-        filtered = filtered[filtered["ROLE"] == role_filter].copy()
-    return filtered
-
-
-def filter_and_sort_team_df(
-    team_df: pd.DataFrame,
-    min_games: int,
-    min_minutes: int,
-    role_filter: str,
-    sort_column: str,
-    ascending: bool,
-) -> pd.DataFrame:
-    if team_df.empty:
-        return team_df
-
-    filtered = apply_filters(team_df, min_games, min_minutes, role_filter)
-    if filtered.empty:
-        return filtered
-
-    if sort_column == "PLAYER":
-        filtered = filtered.sort_values(by=["PLAYER", "SEASON_MIN"], ascending=[ascending, False])
-    else:
-        filtered = filtered.sort_values(by=[sort_column, "SEASON_MIN", "PLAYER"], ascending=[ascending, False, True])
-    return filtered.reset_index(drop=True)
-
-
-def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    display_df = team_df.copy()
-
-    display_df["Jogador"] = display_df["PLAYER"]
-    display_df["Pos"] = display_df["POSITION"].replace("", "-")
-    display_df["Papel"] = display_df["ROLE"]
-    display_df["GP"] = display_df["SEASON_GP"]
-    display_df["MIN"] = display_df["SEASON_MIN"]
-
-    display_df["PRA Temp"] = display_df["SEASON_PRA"]
-    display_df["PRA L5"] = display_df["L5_PRA"]
-    display_df["PRA L10"] = display_df["L10_PRA"]
-    display_df["Δ PRA L5"] = display_df["DELTA_PRA_L5"]
-    display_df["Δ PRA L10"] = display_df["DELTA_PRA_L10"]
-    display_df["Trend"] = display_df["TREND"]
-
-    display_df["PTS Temp"] = display_df["SEASON_PTS"]
-    display_df["PTS L5"] = display_df["L5_PTS"]
-    display_df["PTS L10"] = display_df["L10_PTS"]
-    display_df["REB Temp"] = display_df["SEASON_REB"]
-    display_df["REB L5"] = display_df["L5_REB"]
-    display_df["REB L10"] = display_df["L10_REB"]
-    display_df["AST Temp"] = display_df["SEASON_AST"]
-    display_df["AST L5"] = display_df["L5_AST"]
-    display_df["AST L10"] = display_df["L10_AST"]
-    display_df["3PM Temp"] = display_df["SEASON_3PM"]
-    display_df["3PM L5"] = display_df["L5_3PM"]
-    display_df["3PM L10"] = display_df["L10_3PM"]
-    display_df["FGA Temp"] = display_df["SEASON_FGA"]
-    display_df["FGA L5"] = display_df["L5_FGA"]
-    display_df["FGA L10"] = display_df["L10_FGA"]
-    display_df["3PA Temp"] = display_df["SEASON_3PA"]
-    display_df["3PA L5"] = display_df["L5_3PA"]
-    display_df["3PA L10"] = display_df["L10_3PA"]
-
-    display_df["Proj PRA"] = display_df["PROJ_PRA"]
-    display_df["Proj PTS"] = display_df["PROJ_PTS"]
-    display_df["Proj REB"] = display_df["PROJ_REB"]
-    display_df["Proj AST"] = display_df["PROJ_AST"]
-    display_df["Proj 3PM"] = display_df["PROJ_3PM"]
-    display_df["Proj FGA"] = display_df["PROJ_FGA"]
-    display_df["Proj 3PA"] = display_df["PROJ_3PA"]
-    display_df["Matchup"] = display_df["MATCHUP_LABEL"]
-    display_df["Hit PRA"] = display_df["HIT_RATE_L10_TEXT"]
-    display_df["Hit PTS"] = display_df["PTS_HIT_RATE_L10_TEXT"]
-    display_df["Hit REB"] = display_df["REB_HIT_RATE_L10_TEXT"]
-    display_df["Hit AST"] = display_df["AST_HIT_RATE_L10_TEXT"]
-    display_df["Hit 3PM"] = display_df["THREE_PM_HIT_RATE_L10_TEXT"]
-    display_df["Hit FGA"] = display_df["FGA_HIT_RATE_L10_TEXT"]
-    display_df["Hit 3PA"] = display_df["THREE_PA_HIT_RATE_L10_TEXT"]
-    display_df["Sinal"] = display_df["FORM_SIGNAL"]
-    display_df["Oscilação"] = display_df["OSC_CLASS"]
-    display_df["PRA adv pos"] = display_df["OPP_PRA_ALLOWED"]
-    display_df["Liga pos"] = display_df["LEAGUE_PRA_BASELINE"]
-
-    summary_df = display_df[
-        [
-            "Jogador", "Papel", "GP", "MIN", "PRA Temp", "PRA L10", "Proj PRA", "Δ PRA L10",
-            "Matchup", "Hit PRA", "Oscilação", "Sinal", "Trend",
-        ]
-    ].copy()
-
-    detail_df = display_df[
-        [
-            "Jogador", "Pos", "Papel", "GP", "MIN",
-            "PTS Temp", "PTS L5", "PTS L10", "Proj PTS", "Hit PTS",
-            "REB Temp", "REB L5", "REB L10", "Proj REB", "Hit REB",
-            "AST Temp", "AST L5", "AST L10", "Proj AST", "Hit AST",
-            "3PM Temp", "3PM L5", "3PM L10", "Proj 3PM", "Hit 3PM",
-            "FGA Temp", "FGA L5", "FGA L10", "Proj FGA", "Hit FGA",
-            "3PA Temp", "3PA L5", "3PA L10", "Proj 3PA", "Hit 3PA",
-            "PRA Temp", "PRA L5", "PRA L10", "Proj PRA", "Hit PRA",
-            "Δ PRA L5", "Δ PRA L10", "PRA adv pos", "Liga pos",
-            "Matchup", "Oscilação", "Sinal", "Trend",
-        ]
-    ].copy()
-
-    return summary_df, detail_df
-
 
 def style_delta(val) -> str:
     try:
@@ -644,17 +346,6 @@ def render_matchup_header(game_row: pd.Series) -> None:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-
-def build_summary_cards_data(
-    away_df: pd.DataFrame,
-    home_df: pd.DataFrame,
-    min_games: int,
-    min_minutes: int,
-    role_filter: str,
-) -> pd.DataFrame:
-    away_filtered = apply_filters(away_df, min_games, min_minutes, role_filter).copy()
-    home_filtered = apply_filters(home_df, min_games, min_minutes, role_filter).copy()
-    return pd.concat([away_filtered, home_filtered], ignore_index=True)
 
 
 def render_single_card(
