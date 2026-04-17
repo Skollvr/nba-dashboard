@@ -42,6 +42,7 @@ from processamento import (
     merge_injury_report, get_line_context
 )
 
+
 st.set_page_config(
     page_title="NBA Props Dashboard",
     page_icon="🏀",
@@ -124,23 +125,6 @@ def get_matchup_parts(matchup: str) -> tuple[str, str]:
     venue = "vs" if "vs" in parts else "@"
     opponent_abbr = parts[-1].strip().upper()
     return venue, opponent_abbr
-
-
-def normalize_position_group(position: str) -> str:
-    pos = str(position or "").upper().strip()
-    if not pos:
-        return "F"
-
-    primary = pos.split("-")[0].strip()
-    if primary in {"G", "F", "C"}:
-        return primary
-    if "G" in pos:
-        return "G"
-    if "F" in pos:
-        return "F"
-    if "C" in pos:
-        return "C"
-    return "F"
 
 
 def classify_oscillation(value: float) -> str:
