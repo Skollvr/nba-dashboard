@@ -290,6 +290,12 @@ def get_position_opponent_profile_v2(season: str, opponent_team_id: int, positio
         "MATCHUP_DIFF": matchup_diff,
         "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
     }
+    
+def format_ratio_text(numerator: int, denominator: int) -> str:
+    if denominator <= 0:
+        return "-"
+    return f"{int(numerator)}/{int(denominator)}"
+
 
 def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.DataFrame:
     if team_df.empty:
