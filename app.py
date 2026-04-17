@@ -1,104 +1,76 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-import requests
-import os
 from datetime import date, datetime
-from typing import Optional
-from pandas.io.formats.style import Styler
-
-
 from config import (
-    NBA_TEAM_COLORS, TEAM_LOOKUP, TEAM_ABBR_LOOKUP, TEAM_LOGO_URL,
-    PLAYER_HEADSHOT_URL, SORT_OPTIONS, ROLE_OPTIONS, VIEW_OPTIONS,
-    CHART_OPTIONS, LINE_METRIC_OPTIONS, PROJECTION_WEIGHTS,
-    ODDS_API_BASE_URL, ODDS_BOOKMAKER, ODDS_STAT_MAP, ODDS_METRIC_COLUMNS,
-    INACTIVE_STATUSES, WATCHLIST_STATUSES, PLAYER_STATUS_RE, GAME_PREFIX_RE,
-    APP_TIMEZONE, EASTERN_TIMEZONE, UTC_TIMEZONE, TEAM_NAME_LOOKUP_NORM
+    TEAM_LOOKUP, SORT_OPTIONS, ROLE_OPTIONS, CHART_OPTIONS, 
+    LINE_METRIC_OPTIONS, APP_TIMEZONE
 )
+from api_nba import get_games_for_date
+from api_odds import get_odds_api_key
+from pdf_reader import get_season_string
+from processamento import get_matchup_context
 
-from api_nba import (
-    run_api_call_with_retry, get_games_for_date, get_team_roster,
-    get_league_player_stats, get_player_log, get_team_player_logs,
-    get_position_allowed_profile, get_league_position_baseline
-)
-
-from api_odds import (
-    normalize_text, normalize_person_name, american_to_decimal, get_odds_api_key,
-    fetch_nba_odds_events, find_matching_odds_event, extract_betmgm_player_props
-)
-
-from pdf_reader import (
-    get_season_string, parse_injury_report_timestamp_from_url, 
-    fetch_latest_injury_report_df
-)
-
-from processamento import (
-    filter_and_sort_team_df, build_display_dataframes, build_summary_cards_data,
-    get_matchup_context, get_matchup_injury_context, merge_injury_report,
-    get_line_context, get_metric_projection_column, get_matchup_chip_class,
-    build_team_table  # Adicione esta aqui se não estiver
-)
-
+# Puxando as funções do seu arquivo ui_components grandão!
 from ui_components import (
     inject_css, 
-    style_table,
     render_matchup_header,
+    render_summary_cards,
     render_game_rankings,
-    render_summary_cards, 
     render_team_section_v2, 
     render_player_cards_grid,
-    render_player_card,
     render_injury_report_tab,
     render_lineup_report_tab,
-    render_player_focus_panel,
-    get_team_logo_url,
-    get_player_headshot_url,
-    format_number,
-    format_signed_number,
-    get_matchup_parts
-)
-st.set_page_config(
-    page_title="NBA Props Dashboard",
-    page_icon="🏀",
-    layout="wide",
+    render_player_focus_panel
 )
 
 def get_brasilia_today() -> date:
     return datetime.now(APP_TIMEZONE).date()
 
-
-def get_game_datetime_brasilia(game: dict) -> Optional[datetime]:
-    candidate_fields = [
-        (game.get("gameTimeUTC"), UTC_TIMEZONE),
-        (game.get("gameDateTimeUTC"), UTC_TIMEZONE),
-        (game.get("gameEt"), EASTERN_TIMEZONE),
-        (game.get("gameDateEST"), EASTERN_TIMEZONE),
-        (game.get("gameDateTimeEst"), EASTERN_TIMEZONE),
-    ]
-
-    for raw_value, source_tz in candidate_fields:
-        if not raw_value:
-            continue
-        parsed = pd.to_datetime(raw_value, errors="coerce")
-        if pd.isna(parsed):
-            continue
-        dt_value = parsed.to_pydatetime()
-        if dt_value.tzinfo is None:
-            dt_value = dt_value.replace(tzinfo=source_tz)
-        return dt_value.astimezone(APP_TIMEZONE)
-
-    game_code = str(game.get("gameCode", ""))
-    if len(game_code) >= 8 and game_code[:8].isdigit():
-        try:
-            fallback_dt = datetime.strptime(game_code[:8], "%Y%m%d").replace(tzinfo=EASTERN_TIMEZONE)
-            return fallback_dt.astimezone(APP_TIMEZONE)
-        except ValueError:
-            return None
-
-    return None
-
+def main():
+    st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
+    inject_css()
     
+    with st.sidebar:
+        st.header("Configurações")
+        chart_mode = st.pills("Gráfico", CHART_OPTIONS, default="Compacto")
+        cards_per_row = st.pills("Cards/Linha", [1, 2], default=2)
+        min_games = st.slider("Min Jogos", 0, 82, 5)
+        min_minutes = st.slider("Min Minutos", 0, 40, 15)
+        role_filter = st.pills("Jogadores", ROLE_OPTIONS, default="Todos")
+        line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PRA")
+        line_value = st.number_input("Linha Manual", value=25.5, step=0.5)
+        api_key_available = bool(get_odds_api_key())
+        use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
+
+    selected_date = get_brasilia_today()
+    season = get_season_string(selected_date)
+    games = get_games_for_date(selected_date)
+
+    if games.empty:
+        st.warning("Sem jogos para hoje.")
+        return
+
+    game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
+    selected_game = games.loc[games["label"] == game_label].iloc[0]
+
+    away_df, home_df = get_matchup_context(
+        int(selected_game["VISITOR_TEAM_ID"]), int(selected_game["HOME_TEAM_ID"]),
+        selected_game["away_team_name"], selected_game["home_team_name"],
+        season, api_key_available
+    )
+
+    render_matchup_header(selected_game)
+    render_summary_cards(away_df, home_df, min_games, min_minutes, role_filter)
+    render_game_rankings(away_df, home_df, min_games, min_minutes, role_filter, line_metric, line_value, use_market_line)
+
+    selected_team = st.segmented_control("Time em análise", [selected_game["away_team_name"], selected_game["home_team_name"]], default=selected_game["away_team_name"])
+    
+    target_df = away_df if selected_team == selected_game["away_team_name"] else home_df
+    sort_label = f"{line_metric} L10" if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
+    
+    render_team_section_v2(
+        selected_team, target_df, season, min_games, min_minutes, role_filter,
+        sort_label, False, chart_mode, line_metric, line_value, use_market_line, cards_per_row
+    )
+
 if __name__ == "__main__":
     main()
