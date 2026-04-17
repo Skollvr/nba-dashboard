@@ -306,15 +306,22 @@ def render_player_focus_panel(
     with visual_tab:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
 
-    # --- ABA DE MERCADO CORRIGIDA (H2H) ---
+    # --- ABA DE MERCADO (H2H DEFINITIVO) ---
     with market_tab:
         st.markdown(f"### ⚔️ Histórico de Confronto (H2H)")
         
-        # Agora usamos o opp_abbr que veio por parâmetro, sem adivinhação!
-        if opp_abbr:
+        # Se não recebemos a sigla por parâmetro, tentamos buscar no matchup_label
+        if not opp_abbr or opp_abbr in ["NEUTRO", ""]:
+             matchup_val = str(row.get('MATCHUP_LABEL', '')).upper()
+             if " VS " in matchup_val:
+                 opp_abbr = matchup_val.split(" VS ")[-1].strip()
+
+        if not opp_abbr or opp_abbr == "NEUTRO":
+            st.warning("Sigla do adversário não identificada. Verifique a seleção do jogo.")
+        else:
             log = get_player_log(int(row["PLAYER_ID"]), season)
             if not log.empty:
-                # Filtra o log pelo adversário correto
+                # O filtro agora é direto e certeiro
                 h2h_log = log[log['MATCHUP'].str.contains(opp_abbr)].copy()
                 
                 if not h2h_log.empty:
@@ -326,10 +333,6 @@ def render_player_focus_panel(
                     st.dataframe(h2h_display, use_container_width=True, hide_index=True)
                 else:
                     st.info(f"Nenhum jogo de {row['PLAYER']} contra {opp_abbr} encontrado nesta temporada.")
-            else:
-                st.error("Não foi possível carregar o histórico do jogador.")
-        else:
-            st.warning("Sigla do adversário não disponível para filtro.")
 
 def render_team_section_v2(
     team_name: str,
