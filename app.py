@@ -9,7 +9,7 @@ from api_odds import get_odds_api_key
 from pdf_reader import get_season_string
 from processamento import get_matchup_context
 
-# Importando do seu arquivo ui_components.py
+# Importando as funções do ui_components.py
 from ui_components import (
     inject_css, 
     render_matchup_header,
@@ -31,7 +31,6 @@ def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
     inject_css()
     
-    # 1. Configurações na Sidebar
     with st.sidebar:
         st.header("Configurações")
         chart_mode = st.pills("Gráfico", CHART_OPTIONS, default="Compacto")
@@ -41,16 +40,13 @@ def main():
         role_filter = st.pills("Jogadores", ROLE_OPTIONS, default="Todos")
         line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PRA")
         line_value = st.number_input("Linha Manual", value=25.5, step=0.5)
-        
         api_key_available = bool(get_odds_api_key())
         use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
-        
         st.divider()
         if st.button("Forçar atualização"):
             st.cache_data.clear()
             st.rerun()
 
-    # 2. Data e Jogos
     selected_date = get_brasilia_today()
     season = get_season_string(selected_date)
     games = get_games_for_date(selected_date)
@@ -62,36 +58,32 @@ def main():
     game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
-    # 3. Carregamento de Dados
     away_df, home_df = get_matchup_context(
         int(selected_game["VISITOR_TEAM_ID"]), int(selected_game["HOME_TEAM_ID"]),
         selected_game["away_team_name"], selected_game["home_team_name"],
         season, api_key_available
     )
 
-    # 4. Interface Superior
     render_matchup_header(selected_game)
     render_summary_cards(away_df, home_df, min_games, min_minutes, role_filter)
     render_game_rankings(away_df, home_df, min_games, min_minutes, role_filter, line_metric, line_value, use_market_line)
 
-    # 5. Seleção de Time e Lógica de Adversário (CORRIGIDA)
     selected_team = st.segmented_control(
         "Time em análise", 
         [selected_game["away_team_name"], selected_game["home_team_name"]], 
         default=selected_game["away_team_name"]
     )
     
+    # Lógica de sigla robusta para o H2H
     if selected_team == selected_game["away_team_name"]:
         target_df = away_df
-        # Busca siglas oficiais para o filtro H2H
-        opp_abbr = selected_game.get("home_team_abbr", selected_game["home_team_name"])
+        opp_abbr = selected_game.get("HOME_TEAM_ABBR", selected_game["home_team_name"])
     else:
         target_df = home_df
-        opp_abbr = selected_game.get("away_team_abbr", selected_game["away_team_name"])
+        opp_abbr = selected_game.get("VISITOR_TEAM_ABBR", selected_game["away_team_name"])
 
     sort_label = f"{line_metric} L10" if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
 
-    # 6. Cards de Jogadores
     render_team_section_v2(
         selected_team, target_df, season, min_games, min_minutes, role_filter,
         sort_label, False, chart_mode, line_metric, line_value, use_market_line,
