@@ -1,6 +1,16 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import requests
+import os
 from datetime import date, datetime
 from io import BytesIO
-import os
+from typing import Optional
+from pandas.io.formats.style import Styler
+from pypdf import PdfReader
+
+# --- NOSSOS ARQUIVOS MODULARIZADOS ---
 from config import (
     NBA_TEAM_COLORS, TEAM_LOOKUP, TEAM_ABBR_LOOKUP, TEAM_LOGO_URL,
     PLAYER_HEADSHOT_URL, SORT_OPTIONS, ROLE_OPTIONS, VIEW_OPTIONS,
@@ -9,20 +19,14 @@ from config import (
     INACTIVE_STATUSES, WATCHLIST_STATUSES, PLAYER_STATUS_RE, GAME_PREFIX_RE,
     APP_TIMEZONE, EASTERN_TIMEZONE, UTC_TIMEZONE, TEAM_NAME_LOOKUP_NORM
 )
+
 from api_nba import (
     run_api_call_with_retry, get_games_for_date, get_team_roster,
     get_league_player_stats, get_player_log, get_team_player_logs,
     get_position_allowed_profile, get_league_position_baseline
 )
-from typing import Optional
-from pandas.io.formats.style import Styler
 
-import numpy as np
-import plotly.graph_objects as go
-from pypdf import PdfReader
-import requests
-
-
+# --- CONFIGURAÇÃO DA PÁGINA (Sempre o primeiro comando do Streamlit!) ---
 st.set_page_config(
     page_title="NBA Props Dashboard",
     page_icon="🏀",
