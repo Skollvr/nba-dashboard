@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
 from pandas.io.formats.style import Styler
-
+from pdf_reader import parse_injury_report_timestamp_from_url
 from config import (
     NBA_TEAM_COLORS, TEAM_LOGO_URL, PLAYER_HEADSHOT_URL, 
     LINE_METRIC_OPTIONS, CHART_OPTIONS, TEAM_LOOKUP, SORT_OPTIONS
