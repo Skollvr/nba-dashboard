@@ -96,35 +96,29 @@ def render_metric_distribution_chart(row: pd.Series):
 # =========================================================
 
 def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
-    # --- RASTREADOR DE CORES PARA O CARD ---
-    search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
-    tk = 'NBA'
+    # --- RASTREADOR DE CORES "BLINDADO" (CORREÇÃO DEFINITIVA) ---
+    # Pegamos os dados brutos para evitar adivinhações por texto
+    raw_team_name = str(row.get('TEAM_NAME', 'NBA'))
+    raw_team_abbr = str(row.get('TEAM_ABBR', '')).strip().upper()
     
-    # --- RASTREADOR DE CORES INTELIGENTE PARA O CARD ---
-    # Pegamos o texto disponível do time (TEAM_NAME e TEAM_ABBR)
-    search_text = f"{row.get('TEAM_NAME', '') or ''} {row.get('TEAM_ABBR', '') or ''}".upper()
+    tk = 'NBA' # Padrão
     
-    tk = 'NBA' # Default caso não encontre nada
-    
-    # Loop automático pelo dicionário NBA_TEAM_COLORS que está no topo do arquivo
-    # Isso evita termos que escrever if/elif para os 30 times
-    for abbr, info in NBA_TEAM_COLORS.items():
-        # Pega o nome do time no dicionário (ex: 'PISTONS')
-        team_keyword = info.get('name', '').upper()
-        
-        # Se 'PISTONS' estiver no texto de busca ('DETROIT PISTONS'), achamos o time!
-        if team_keyword and team_keyword in search_text:
-            tk = abbr
-            break
-        # Ou se a sigla 'DET' estiver no texto de busca
-        elif abbr in search_text:
-            tk = abbr
-            break
-            
+    # 1. Tentativa por Sigla Oficial (A mais segura: GSW é sempre GSW)
+    if raw_team_abbr in NBA_TEAM_COLORS:
+        tk = raw_team_abbr
+    else:
+        # 2. Tentativa por Nome (Exige a palavra inteira para evitar conflitos como "Nets" em "Hornets")
+        search_name = f" {raw_team_name.upper()} "
+        for abbr, info in NBA_TEAM_COLORS.items():
+            team_key = str(info.get('name', '')).upper().strip()
+            if team_key and f" {team_key} " in search_name:
+                tk = abbr
+                break
+                
     # Puxa as cores finais baseadas na sigla encontrada (tk)
     colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
     
-    colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
+    # --- INÍCIO DO SEU DESIGN ORIGINAL PRESERVADO ---
     with st.container(border=True):
         top_left, top_right = st.columns([1, 4])
 
@@ -132,7 +126,7 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
             st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=72)
 
         with top_right:
-            # Mini Banner no topo do card com as cores do time
+            # Mini Banner no topo do card com as cores do time (tk agora é GSW/CHA correto)
             st.markdown(f"""
             <div style="
                 background: linear-gradient(90deg, {colors['primary']} 0%, {colors['secondary']} 250%);
@@ -150,6 +144,7 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
                 </div>
             </div>
         """, unsafe_allow_html=True)
+            
             position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
             st.caption(f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}")
             st.markdown(render_player_headline_html(row), unsafe_allow_html=True)
@@ -160,6 +155,7 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
                 row.get("MATCHUP_LABEL", "Neutro"),
             )
 
+        # Tiles de suporte e informações de linha originais
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
         line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
         if line_context["has_market_line"] and line_context["over_dec"] and line_context["under_dec"]:
