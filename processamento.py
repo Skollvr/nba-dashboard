@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import streamlit as st
+from api_odds import normalize_text
 
 # 1. Importar as nossas configurações estáticas
 from config import PROJECTION_WEIGHTS, ROLE_OPTIONS, TEAM_LOOKUP
