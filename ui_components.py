@@ -246,7 +246,7 @@ def render_player_focus_panel(
     season: str,
     chart_mode: str,
 ) -> None:
-    # --- RASTREADOR DE CORES "BLINDADO" (GSW/CHA FIX) ---
+    # --- 1. RASTREADOR DE CORES (GSW/CHA FIX) ---
     t_name = str(row.get('TEAM_NAME', '')).upper()
     t_abbr = str(row.get('TEAM_ABBR', '')).strip().upper()
     
@@ -293,8 +293,7 @@ def render_player_focus_panel(
         )
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
     
-    # Controle de métrica visual
-    _visual_metric = st.pills("Métrica em análise detalhada", ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"], default=line_metric, key=f"v_metric_{row['PLAYER_ID']}")
+    _visual_metric = st.pills("Métrica em análise detalhada", ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"], default=line_metric, key=f"v_met_{row['PLAYER_ID']}")
     visual_metric = _visual_metric if _visual_metric else line_metric
 
     overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
@@ -302,59 +301,61 @@ def render_player_focus_panel(
     with overview_tab:
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
         st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
-        st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
-
-    with detail_tab:
-        # (Lógica de detalhamento de médias aqui...)
-        st.info("Detalhamento de médias por período.")
 
     with visual_tab:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
 
-    # --- ABA DE MERCADO CORRIGIDA (H2H REAL) ---
+    # --- ABA DE MERCADO CORRIGIDA (H2H) ---
     with market_tab:
         st.markdown(f"### ⚔️ Histórico de Confronto (H2H)")
         
-        # 1. Identifica o adversário atual (ex: "Orlando Magic")
-        # Geralmente pegamos do MATCHUP_LABEL que diz algo como "vs ORL"
-        matchup_text = str(row.get('MATCHUP_LABEL', '')).upper()
+        # LÓGICA DE DETECÇÃO DO ADVERSÁRIO MELHORADA
+        matchup_val = str(row.get('MATCHUP_LABEL', '')).upper()
+        opp_abbr = ""
         
-        # Buscamos o log de jogos completo do jogador
-        log = get_player_log(int(row["PLAYER_ID"]), season)
-        
-        if not log.empty:
-            # Filtramos o log para mostrar apenas jogos contra o time que ele enfrenta hoje
-            # A API da NBA usa a coluna 'MATCHUP' no formato "TEAM vs. OPP" ou "TEAM @ OPP"
-            # Vamos extrair a sigla do adversário do matchup_text (ex: "ORL")
-            opp_abbr = matchup_text.split()[-1] 
-            
-            h2h_log = log[log['MATCHUP'].str.contains(opp_abbr)].copy()
-            
-            if not h2h_log.empty:
-                h2h_log['PRA'] = h2h_log['PTS'] + h2h_log['REB'] + h2h_log['AST']
-                
-                # Preparamos uma tabela elegante para o usuário
-                h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', 'PTS', 'REB', 'AST', 'PRA']].copy()
-                h2h_display.columns = ['Data', 'Confronto', 'Res', 'Min', 'PTS', 'REB', 'AST', 'PRA']
-                
-                st.write(f"Últimos jogos de **{row['PLAYER']}** contra **{opp_abbr}**:")
-                st.dataframe(h2h_display, use_container_width=True, hide_index=True)
-                
-                # Média H2H vs Média da Temporada
-                avg_h2h = h2h_log['PRA'].mean()
-                diff = avg_h2h - row['SEASON_PRA']
-                color = "#10b981" if diff > 0 else "#ef4444"
-                
-                st.markdown(f"""
-                    <div style="padding: 15px; background: rgba(15,23,42,0.5); border-radius: 10px; border-left: 5px solid {color};">
-                        Média de PRA neste confronto: <b>{avg_h2h:.1f}</b> 
-                        ( <span style="color: {color};">{'▲' if diff > 0 else '▼'} {abs(diff):.1f}</span> vs média temp )
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.warning(f"Nenhum jogo encontrado para {row['PLAYER']} contra {opp_abbr} nesta temporada.")
+        # Tenta extrair a sigla (ex: "Favorável vs ORL" -> "ORL")
+        if " VS " in matchup_val:
+            opp_abbr = matchup_val.split(" VS ")[-1].strip()
         else:
-            st.error("Não foi possível carregar o histórico do jogador.")
+            # Se não houver "vs", tentamos buscar em outras colunas comuns do seu dataframe
+            opp_abbr = str(row.get('OPP_ABBR', row.get('MATCHUP', ''))).strip().upper()
+            # Limpeza rápida: se for algo como "MIL @ ORL", pega a última sigla
+            if "@" in opp_abbr: opp_abbr = opp_abbr.split("@")[-1].strip()
+            elif "VS" in opp_abbr: opp_abbr = opp_abbr.split("VS")[-1].strip()
+
+        # Remove palavras de status para não filtrar por "NEUTRO"
+        if opp_abbr in ["NEUTRO", "FAVORÁVEL", "DESFAVORÁVEL", "DIFÍCIL", "EXCELENTE"]:
+            opp_abbr = ""
+
+        if not opp_abbr:
+            st.warning("Não foi possível identificar a sigla do adversário para filtrar o histórico.")
+        else:
+            log = get_player_log(int(row["PLAYER_ID"]), season)
+            if not log.empty:
+                # Filtra o histórico contra o adversário real
+                h2h_log = log[log['MATCHUP'].str.contains(opp_abbr)].copy()
+                
+                if not h2h_log.empty:
+                    h2h_log['PRA'] = h2h_log['PTS'] + h2h_log['REB'] + h2h_log['AST']
+                    h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', 'PTS', 'REB', 'AST', 'PRA']].copy()
+                    h2h_display.columns = ['Data', 'Confronto', 'Res', 'Min', 'PTS', 'REB', 'AST', 'PRA']
+                    
+                    st.write(f"Histórico de **{row['PLAYER']}** contra **{opp_abbr}**:")
+                    st.dataframe(h2h_display, use_container_width=True, hide_index=True)
+                    
+                    avg_h2h = h2h_log['PRA'].mean()
+                    diff = avg_h2h - row['SEASON_PRA']
+                    color = "#10b981" if diff > 0 else "#ef4444"
+                    st.markdown(f"""
+                        <div style="padding: 12px; background: rgba(15,23,42,0.6); border-radius: 8px; border-left: 5px solid {color};">
+                            Média H2H: <b>{avg_h2h:.1f} PRA</b> 
+                            (<span style="color:{color};">{'▲' if diff > 0 else '▼'} {abs(diff):.1f}</span> vs média da temporada)
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info(f"Nenhum jogo encontrado para {row['PLAYER']} contra {opp_abbr} nesta temporada.")
+            else:
+                st.error("Erro ao carregar log do jogador.")
 
 def render_team_section_v2(
     team_name: str,
