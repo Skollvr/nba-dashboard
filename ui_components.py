@@ -245,9 +245,9 @@ def render_player_focus_panel(
     use_market_line: bool,
     season: str,
     chart_mode: str,
-    opp_abbr
+    opp_abbr: str
 ) -> None:
-    # --- 1. RASTREADOR DE CORES (GSW/CHA FIX) ---
+    # --- RASTREADOR DE CORES (GSW/CHA FIX) ---
     t_name = str(row.get('TEAM_NAME', '')).upper()
     t_abbr = str(row.get('TEAM_ABBR', '')).strip().upper()
     
@@ -294,7 +294,13 @@ def render_player_focus_panel(
         )
         render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
     
-    _visual_metric = st.pills("Métrica em análise detalhada", ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"], default=line_metric, key=f"v_met_{row['PLAYER_ID']}")
+    # 1. CONTROLE DE MÉTRICA DINÂMICA
+    _visual_metric = st.pills(
+        "Métrica em análise detalhada", 
+        ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"], 
+        default=line_metric, 
+        key=f"v_met_{row['PLAYER_ID']}"
+    )
     visual_metric = _visual_metric if _visual_metric else line_metric
 
     overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
@@ -306,44 +312,81 @@ def render_player_focus_panel(
     with visual_tab:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
 
-    # --- ABA DE MERCADO (CORREÇÃO DE FILTRO H2H) ---
+    # --- ABA DE MERCADO DINÂMICA (RESTALLECIDA CONFORME ORIGINAL) ---
     with market_tab:
-        st.markdown(f"### ⚔️ Histórico de Confronto (H2H)")
+        st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
         
-        # 1. TRADUÇÃO: Se opp_abbr for o nome longo, convertemos para sigla
-        # Ex: "Charlotte Hornets" -> "CHA"
+        # A. Captura o contexto da linha ATUAL para a métrica selecionada
+        v_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
+        active_line = float(v_ctx['line_value'])
+        
+        # B. Conversão de sigla do adversário
         current_opp = opp_abbr
         for abbr, info in NBA_TEAM_COLORS.items():
             if info.get('name', '').upper() in str(current_opp).upper():
                 current_opp = abbr
                 break
         
-        # 2. BUSCA O LOG E FILTRA PELA SIGLA (A única que funciona no log da NBA)
         log = get_player_log(int(row["PLAYER_ID"]), season)
         
         if not log.empty:
-            # Filtro robusto: procura a sigla no texto do Matchup (ex: "MEM vs. CHA")
+            # Padronização de colunas no log
+            log['PRA'] = log['PTS'] + log['REB'] + log['AST']
+            log['3PM'] = log.get('FG3M', 0)
+            log['3PA'] = log.get('FG3A', 0)
+            
+            # Filtro pelo adversário
             h2h_log = log[log['MATCHUP'].str.contains(current_opp, case=False, na=False)].copy()
             
             if not h2h_log.empty:
-                h2h_log['PRA'] = h2h_log['PTS'] + h2h_log['REB'] + h2h_log['AST']
-                h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', 'PTS', 'REB', 'AST', 'PRA']].copy()
-                h2h_display.columns = ['Data', 'Confronto', 'Res', 'Min', 'PTS', 'REB', 'AST', 'PRA']
+                # C. Preparação da Tabela Visual
+                # Coluna alvo baseada na pílula selecionada
+                target_col = visual_metric
                 
-                st.write(f"Desempenho de **{row['PLAYER']}** contra **{current_opp}** ({opp_abbr}):")
-                st.dataframe(h2h_display, use_container_width=True, hide_index=True)
+                h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', target_col]].copy()
+                h2h_display['Data'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
                 
-                # Resumo de performance
-                avg_h2h = h2h_log['PRA'].mean()
-                diff = avg_h2h - row['SEASON_PRA']
-                color = "#10b981" if diff > 0 else "#ef4444"
+                h2h_display = h2h_display.rename(columns={
+                    'MATCHUP': 'Confronto',
+                    'WL': 'Res',
+                    'MIN': 'Min',
+                    target_col: f'Real ({visual_metric})'
+                })
+                
+                final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', f'Real ({visual_metric})']]
+                
+                # D. Estilização: Indicador Verde/Vermelho baseado na linha de hoje
+                def style_hit_miss(val):
+                    try:
+                        num = float(val)
+                        if num >= active_line:
+                            return 'background-color: rgba(34,197,94,0.15); color: #86efac; font-weight: bold; border-left: 4px solid #22c55e;'
+                        else:
+                            return 'background-color: rgba(239,68,68,0.15); color: #fca5a5; font-weight: bold; border-left: 4px solid #ef4444;'
+                    except:
+                        return ''
+
+                st.write(f"Comparando histórico com a linha atual: **{active_line}** ({v_ctx['line_source']})")
+                
+                styled_df = final_table.style.map(style_hit_miss, subset=[f'Real ({visual_metric})'])
+                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                
+                # E. Resumo de Hit Rate H2H
+                hits = (h2h_log[target_col] >= active_line).sum()
+                total = len(h2h_log)
+                pct = int((hits / total) * 100) if total > 0 else 0
+                
                 st.markdown(f"""
-                    <div style="padding: 12px; background: rgba(15,23,42,0.6); border-radius: 8px; border-left: 5px solid {color};">
-                        Média H2H: <b>{avg_h2h:.1f} PRA</b> ( {'▲' if diff > 0 else '▼'} {abs(diff):.1f} vs média temp )
+                    <div style="padding: 15px; background: rgba(15,23,42,0.6); border-radius: 10px; border-left: 5px solid #38bdf8; margin-top: 10px;">
+                        🎯 <b>Taxa de Acerto vs {current_opp}:</b> {hits}/{total} ({pct}%) 
+                        <br><small style="opacity: 0.8;">Jogador cumpriu a linha de <b>{active_line} {visual_metric}</b> em {hits} dos últimos {total} jogos contra este time.</small>
                     </div>
                 """, unsafe_allow_html=True)
             else:
-                st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado no log da temporada.")
+                st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
+        else:
+            st.error("Erro ao carregar log do jogador.")
+            
 def render_team_section_v2(
     team_name: str,
     team_df: pd.DataFrame,
