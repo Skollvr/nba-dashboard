@@ -310,30 +310,11 @@ def render_player_focus_panel(
     with market_tab:
         st.markdown(f"### ⚔️ Histórico de Confronto (H2H)")
         
-        # LÓGICA DE DETECÇÃO DO ADVERSÁRIO MELHORADA
-        matchup_val = str(row.get('MATCHUP_LABEL', '')).upper()
-        opp_abbr = ""
-        
-        # Tenta extrair a sigla (ex: "Favorável vs ORL" -> "ORL")
-        if " VS " in matchup_val:
-            opp_abbr = matchup_val.split(" VS ")[-1].strip()
-        else:
-            # Se não houver "vs", tentamos buscar em outras colunas comuns do seu dataframe
-            opp_abbr = str(row.get('OPP_ABBR', row.get('MATCHUP', ''))).strip().upper()
-            # Limpeza rápida: se for algo como "MIL @ ORL", pega a última sigla
-            if "@" in opp_abbr: opp_abbr = opp_abbr.split("@")[-1].strip()
-            elif "VS" in opp_abbr: opp_abbr = opp_abbr.split("VS")[-1].strip()
-
-        # Remove palavras de status para não filtrar por "NEUTRO"
-        if opp_abbr in ["NEUTRO", "FAVORÁVEL", "DESFAVORÁVEL", "DIFÍCIL", "EXCELENTE"]:
-            opp_abbr = ""
-
-        if not opp_abbr:
-            st.warning("Não foi possível identificar a sigla do adversário para filtrar o histórico.")
-        else:
+        # Agora usamos o opp_abbr que veio por parâmetro, sem adivinhação!
+        if opp_abbr:
             log = get_player_log(int(row["PLAYER_ID"]), season)
             if not log.empty:
-                # Filtra o histórico contra o adversário real
+                # Filtra o log pelo adversário correto
                 h2h_log = log[log['MATCHUP'].str.contains(opp_abbr)].copy()
                 
                 if not h2h_log.empty:
@@ -341,22 +322,14 @@ def render_player_focus_panel(
                     h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', 'PTS', 'REB', 'AST', 'PRA']].copy()
                     h2h_display.columns = ['Data', 'Confronto', 'Res', 'Min', 'PTS', 'REB', 'AST', 'PRA']
                     
-                    st.write(f"Histórico de **{row['PLAYER']}** contra **{opp_abbr}**:")
+                    st.write(f"Desempenho de **{row['PLAYER']}** contra **{opp_abbr}**:")
                     st.dataframe(h2h_display, use_container_width=True, hide_index=True)
-                    
-                    avg_h2h = h2h_log['PRA'].mean()
-                    diff = avg_h2h - row['SEASON_PRA']
-                    color = "#10b981" if diff > 0 else "#ef4444"
-                    st.markdown(f"""
-                        <div style="padding: 12px; background: rgba(15,23,42,0.6); border-radius: 8px; border-left: 5px solid {color};">
-                            Média H2H: <b>{avg_h2h:.1f} PRA</b> 
-                            (<span style="color:{color};">{'▲' if diff > 0 else '▼'} {abs(diff):.1f}</span> vs média da temporada)
-                        </div>
-                    """, unsafe_allow_html=True)
                 else:
-                    st.info(f"Nenhum jogo encontrado para {row['PLAYER']} contra {opp_abbr} nesta temporada.")
+                    st.info(f"Nenhum jogo de {row['PLAYER']} contra {opp_abbr} encontrado nesta temporada.")
             else:
-                st.error("Erro ao carregar log do jogador.")
+                st.error("Não foi possível carregar o histórico do jogador.")
+        else:
+            st.warning("Sigla do adversário não disponível para filtro.")
 
 def render_team_section_v2(
     team_name: str,
