@@ -72,18 +72,31 @@ def main():
     target_df = away_df if selected_team == selected_game["away_team_name"] else home_df
     sort_label = f"{line_metric} L10" if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
 
-# --- Primeiro definimos quem é o adversário ---
-    if selected_team == away_team:
-        opp_abbr = home_team
+# --- BLOCO CORRIGIDO ---
+    # 1. Criamos a seleção do time
+    selected_team = st.segmented_control(
+        "Time em análise", 
+        [selected_game["away_team_name"], selected_game["home_team_name"]], 
+        default=selected_game["away_team_name"]
+    )
+    
+    # 2. Definimos quem é o alvo e quem é o adversário usando os dados do selected_game
+    if selected_team == selected_game["away_team_name"]:
+        target_df = away_df
+        # Pegamos a sigla do mandante (adversário) para o H2H
+        opp_abbr = selected_game.get("HOME_TEAM_ABBR", selected_game["home_team_name"])
     else:
-        opp_abbr = away_team
+        target_df = home_df
+        # Pegamos a sigla do visitante (adversário) para o H2H
+        opp_abbr = selected_game.get("VISITOR_TEAM_ABBR", selected_game["away_team_name"])
 
-    # --- Depois chamamos a função passando o opp_abbr no final ---
+    sort_label = f"{line_metric} L10" if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
+
+    # 3. Chamamos a função passando o opp_abbr no final
     render_team_section_v2(
         selected_team, target_df, season, min_games, min_minutes, role_filter,
         sort_label, False, chart_mode, line_metric, line_value, use_market_line,
         cards_per_row, opp_abbr
     )
-
 if __name__ == "__main__":
     main()
