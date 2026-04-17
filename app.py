@@ -399,11 +399,6 @@ def parse_injury_report_timestamp_from_url(pdf_url: str) -> dict:
     }
 
 
-TEAM_NAME_LOOKUP_NORM = {
-    normalize_text(team["full_name"]): team["full_name"]
-    for team in teams.get_teams()
-}
-
 
 def resolve_team_line(line: str) -> str:
     clean_line = str(line or "").replace("NOT YET SUBMITTED", "").strip()
