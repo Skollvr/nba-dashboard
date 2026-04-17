@@ -1644,46 +1644,61 @@ def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
 
 @st.cache_data(ttl=54000, show_spinner=False)
 def get_player_log(player_id: int, season: str) -> pd.DataFrame:
-    response = run_api_call_with_retry(
-        lambda: playergamelog.PlayerGameLog(
-            player_id=player_id,
-            season=season,
-            season_type_all_star="Regular Season",
-            timeout=45,
-        ),
-        endpoint_name="PlayerGameLog",
-    )
-    frames = response.get_data_frames()
-    if not frames:
+    # Agora buscamos todas as fases da temporada para não perder nenhum jogo!
+    season_types = ["Regular Season", "PlayIn", "Playoffs"]
+    all_logs = []
+    
+    for stype in season_types:
+        try:
+            response = run_api_call_with_retry(
+                lambda st=stype: playergamelog.PlayerGameLog(
+                    player_id=player_id,
+                    season=season,
+                    season_type_all_star=st,
+                    timeout=45,
+                ),
+                endpoint_name=f"PlayerGameLog_{stype}",
+            )
+            frames = response.get_data_frames()
+            if frames and not frames[0].empty:
+                all_logs.append(frames[0])
+        except Exception:
+            continue
+
+    if not all_logs:
         return pd.DataFrame()
 
-    df = frames[0].copy()
-    if df.empty:
-        return df
-
+    df = pd.concat(all_logs, ignore_index=True)
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
     return df.sort_values("GAME_DATE", ascending=False)
 
 
 @st.cache_data(ttl=54000, show_spinner=False)
 def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
-    response = run_api_call_with_retry(
-        lambda: playergamelogs.PlayerGameLogs(
-            team_id_nullable=team_id,
-            season_nullable=season,
-            season_type_nullable="Regular Season",
-            timeout=45,
-        ),
-        endpoint_name="PlayerGameLogs",
-    )
-    frames = response.get_data_frames()
-    if not frames:
+    season_types = ["Regular Season", "PlayIn", "Playoffs"]
+    all_logs = []
+    
+    for stype in season_types:
+        try:
+            response = run_api_call_with_retry(
+                lambda st=stype: playergamelogs.PlayerGameLogs(
+                    team_id_nullable=team_id,
+                    season_nullable=season,
+                    season_type_nullable=st,
+                    timeout=45,
+                ),
+                endpoint_name=f"PlayerGameLogs_{stype}",
+            )
+            frames = response.get_data_frames()
+            if frames and not frames[0].empty:
+                all_logs.append(frames[0])
+        except Exception:
+            continue
+
+    if not all_logs:
         return pd.DataFrame()
 
-    df = frames[0].copy()
-    if df.empty:
-        return df
-
+    df = pd.concat(all_logs, ignore_index=True)
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
     for col in ["PTS", "REB", "AST", "MIN", "FG3M", "FGA", "FG3A"]:
         if col in df.columns:
