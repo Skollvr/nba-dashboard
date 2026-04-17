@@ -10,7 +10,7 @@ from typing import Optional
 from pandas.io.formats.style import Styler
 from pypdf import PdfReader
 
-# --- NOSSOS ARQUIVOS MODULARIZADOS ---
+
 from config import (
     NBA_TEAM_COLORS, TEAM_LOOKUP, TEAM_ABBR_LOOKUP, TEAM_LOGO_URL,
     PLAYER_HEADSHOT_URL, SORT_OPTIONS, ROLE_OPTIONS, VIEW_OPTIONS,
@@ -26,7 +26,11 @@ from api_nba import (
     get_position_allowed_profile, get_league_position_baseline
 )
 
-# --- CONFIGURAÇÃO DA PÁGINA (Sempre o primeiro comando do Streamlit!) ---
+from api_odds import (
+    normalize_text, normalize_person_name, american_to_decimal, get_odds_api_key,
+    fetch_nba_odds_events, find_matching_odds_event, extract_betmgm_player_props
+)
+
 st.set_page_config(
     page_title="NBA Props Dashboard",
     page_icon="🏀",
