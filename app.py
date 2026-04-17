@@ -107,11 +107,6 @@ def format_signed_number(value, decimals: int = 1) -> str:
         return "-"
 
 
-def format_ratio_text(numerator: int, denominator: int) -> str:
-    if denominator <= 0:
-        return "-"
-    return f"{int(numerator)}/{int(denominator)}"
-
 
 def get_matchup_parts(matchup: str) -> tuple[str, str]:
     if not isinstance(matchup, str) or matchup.strip() == "":
