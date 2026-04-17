@@ -779,15 +779,14 @@ def _weighted_profile_from_df(df: pd.DataFrame) -> dict:
     }
 
 @st.cache_data(ttl=21600, show_spinner=False)
-def get_position_opponent_profile(season: str, opponent_team_id: int, position_group: str) -> dict:
-    # 1. Fallback (Plano B): Se a API da NBA falhar, garantimos que o app receba as colunas vazias em vez de explodir.
+def get_position_opponent_profile_v2(season: str, opponent_team_id: int, position_group: str) -> dict:
     fallback = {
         "POSITION_GROUP": str(position_group),
         "OPP_PTS_ALLOWED": 0.0, "OPP_REB_ALLOWED": 0.0, "OPP_AST_ALLOWED": 0.0, 
         "OPP_PRA_ALLOWED": 0.0, "OPP_3PM_ALLOWED": 0.0, "OPP_FGA_ALLOWED": 0.0, "OPP_3PA_ALLOWED": 0.0,
         "LEAGUE_PTS_BASELINE": 0.0, "LEAGUE_REB_BASELINE": 0.0, "LEAGUE_AST_BASELINE": 0.0, 
-        "LEAGUE_3PM_BASELINE": 0.0, "LEAGUE_FGA_BASELINE": 0.0, "LEAGUE_3PA_BASELINE": 0.0, 
-        "LEAGUE_PRA_BASELINE": 0.0, "MATCHUP_DIFF": 0.0, "MATCHUP_LABEL": "Neutro",
+        "LEAGUE_PRA_BASELINE": 0.0, "LEAGUE_3PM_BASELINE": 0.0, "LEAGUE_FGA_BASELINE": 0.0, "LEAGUE_3PA_BASELINE": 0.0, 
+        "MATCHUP_DIFF": 0.0, "MATCHUP_LABEL": "Neutro",
     }
     
     try:
@@ -810,22 +809,16 @@ def get_position_opponent_profile(season: str, opponent_team_id: int, position_g
             fga = float((work_df["FGA"] * work_df["GP"]).sum() / total_gp)
             fg3a = float((work_df["FG3A"] * work_df["GP"]).sum() / total_gp)
 
-            return {
-                "PTS": pts, "REB": reb, "AST": ast, "FG3M": fg3m, "FGA": fga, "FG3A": fg3a,
-                "PRA": pts + reb + ast, "GP": total_gp,
-            }
+            return {"PTS": pts, "REB": reb, "AST": ast, "FG3M": fg3m, "FGA": fga, "FG3A": fg3a, "PRA": pts + reb + ast, "GP": total_gp}
 
-        # Puxa os DataFrames crus lá do nosso api_nba.py
         opp_df_raw = get_position_allowed_profile(season, opponent_team_id, position_group)
         league_df_raw = get_league_position_baseline(season, position_group)
         
-        # Converte as tabelas nos perfis usando a matemática
         opp_profile = weighted_profile(opp_df_raw)
         league_profile = weighted_profile(league_df_raw)
 
         matchup_diff = float(opp_profile["PRA"]) - float(league_profile["PRA"])
 
-        # Retorna o dicionário completo perfeitamente montado
         return {
             "POSITION_GROUP": str(position_group),
             "OPP_PTS_ALLOWED": float(opp_profile["PTS"]),
@@ -846,8 +839,8 @@ def get_position_opponent_profile(season: str, opponent_team_id: int, position_g
             "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
         }
     except Exception:
-        # Se qualquer coisa falhar internamente, usa o Plano B seguro.
         return fallback
+        
     def weighted_profile(df: pd.DataFrame) -> dict:
         if df.empty or "GP" not in df.columns:
             return {
@@ -1332,10 +1325,12 @@ def enrich_team_with_context(
     team_logs = get_team_player_logs(team_id, season)
     enriched = build_form_context(team_df, team_logs)
 
-    matchup_rows = [(season, opponent_team_id, pos) for pos in ["G", "F", "C"]]
+    # MUDANÇA: Usando a V2 da função para fugir do cache
+    matchup_rows = [get_position_opponent_profile_v2(season, opponent_team_id, pos) for pos in ["G", "F", "C"]]
     matchup_df = pd.DataFrame(matchup_rows)
 
-    if matchup_df.empty:
+    # TRAVA DE SEGURANÇA: Só tenta juntar se a coluna existir, senão usa o plano B.
+    if matchup_df.empty or "POSITION_GROUP" not in matchup_df.columns:
         enriched["OPP_TEAM_NAME"] = opponent_team_name
         fallback_cols = [
             "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED",
@@ -1366,7 +1361,6 @@ def enrich_team_with_context(
     enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], row["OPP_PRA_ALLOWED"], row["LEAGUE_PRA_BASELINE"]), axis=1)
 
     return enriched
-
 
 def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFrame:
     if team_df.empty:
