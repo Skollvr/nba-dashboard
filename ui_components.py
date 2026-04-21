@@ -329,14 +329,7 @@ def render_player_focus_panel(
             unsafe_allow_html=True,
         )
         
-        render_badges(
-            row.get("ROLE", "-"),
-            row.get("FORM_SIGNAL", "→ Estável"),
-            row.get("OSC_CLASS", "-"),
-            row.get("MATCHUP_LABEL", "Neutro"),
-        )
-        render_focus_summary_tiles(row, line_metric, line_value, use_market_line)
-    
+            
     _visual_metric = st.pills(
         "Métrica em análise detalhada", 
         ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"], 
@@ -344,6 +337,15 @@ def render_player_focus_panel(
         key=f"v_met_{row['PLAYER_ID']}"
     )
     visual_metric = _visual_metric if _visual_metric else line_metric
+    focus_matchup_ctx = get_metric_matchup_context(row, visual_metric)
+
+    render_badges(
+        row.get("ROLE", "-"),
+        row.get("FORM_SIGNAL", "→ Estável"),
+        row.get("OSC_CLASS", "-"),
+        focus_matchup_ctx["label"],
+    )
+    render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
 
     overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
 
@@ -1855,6 +1857,8 @@ def render_matchup_detail_box_html(row: pd.Series) -> str:
 
 def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
+    matchup_ctx = get_metric_matchup_context(row, line_metric)
+
     line_class = "micro-stat micro-stat-emph"
     if line_context["edge"] > 0.75:
         line_class = "micro-stat micro-stat-good"
@@ -1862,18 +1866,22 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
         line_class = "micro-stat micro-stat-bad"
 
     matchup_class = "micro-stat"
-    if row.get("MATCHUP_LABEL") == "Favorável":
+    if matchup_ctx["label"] == "Favorável":
         matchup_class = "micro-stat micro-stat-good"
-    elif row.get("MATCHUP_LABEL") == "Difícil":
+    elif matchup_ctx["label"] == "Difícil":
         matchup_class = "micro-stat micro-stat-bad"
+
+    proj_col = get_metric_projection_column(line_metric)
+    season_col = f"SEASON_{line_metric}" if line_metric != "PRA" else "SEASON_PRA"
+    l10_col = f"L10_{line_metric}" if line_metric != "PRA" else "L10_PRA"
 
     st.markdown(
         f"""
         <div class="micro-grid">
             <div class="micro-stat micro-stat-emph">
-                <div class="micro-label">Proj PRA</div>
-                <div class="micro-value">{format_number(row['PROJ_PRA'])}</div>
-                <div class="micro-meta">Temp {format_number(row['SEASON_PRA'])} • L10 {format_number(row['L10_PRA'])}</div>
+                <div class="micro-label">Proj {line_metric}</div>
+                <div class="micro-value">{format_number(row.get(proj_col, 0.0))}</div>
+                <div class="micro-meta">Temp {format_number(row.get(season_col, 0.0))} • L10 {format_number(row.get(l10_col, 0.0))}</div>
             </div>
             <div class="{line_class}">
                 <div class="micro-label">{line_context['line_source']} {line_metric}</div>
@@ -1882,8 +1890,8 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
             </div>
             <div class="{matchup_class}">
                 <div class="micro-label">Matchup</div>
-                <div class="micro-value">{row['MATCHUP_LABEL']}</div>
-                <div class="micro-meta">{row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']}</div>
+                <div class="micro-value">{matchup_ctx['label']}</div>
+                <div class="micro-meta">{row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']} • diff {format_signed_number(matchup_ctx['diff'])}</div>
             </div>
             <div class="micro-stat">
                 <div class="micro-label">Oscilação</div>
