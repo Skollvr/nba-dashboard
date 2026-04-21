@@ -52,9 +52,22 @@ def classify_form_signal(slope: float) -> str:
     if slope <= -1.0: return "↘ Em queda"
     return "→ Estável"
 
-def classify_matchup_tier(diff_value: float) -> str:
-    if diff_value >= 2.5: return "Favorável"
-    if diff_value <= -2.5: return "Difícil"
+def classify_matchup_tier_by_metric(metric: str, diff_value: float) -> str:
+    thresholds = {
+        "PTS": 1.5,
+        "REB": 1.0,
+        "AST": 0.8,
+        "PRA": 2.0,
+        "3PM": 0.4,
+        "FGA": 1.2,
+        "3PA": 0.8,
+    }
+    t = thresholds.get(metric, 1.2)
+
+    if diff_value >= t:
+        return "Favorável"
+    if diff_value <= -t:
+        return "Difícil"
     return "Neutro"
 
 def classify_line_edge(edge: float) -> str:
@@ -248,7 +261,16 @@ def get_position_opponent_profile_v2(season: str, opponent_team_id: int, positio
     try:
         def weighted_profile(df: pd.DataFrame) -> dict:
             if df is None or df.empty or "GP" not in df.columns:
-                return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
+                return {
+                    "PTS": 0.0,
+                    "REB": 0.0,
+                    "AST": 0.0,
+                    "FG3M": 0.0,
+                    "FGA": 0.0,
+                    "FG3A": 0.0,
+                    "PRA": 0.0,
+                    "GP": 0.0,
+                }
 
             work_df = df.copy()
             for col in ["GP", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
@@ -256,7 +278,16 @@ def get_position_opponent_profile_v2(season: str, opponent_team_id: int, positio
 
             total_gp = float(work_df["GP"].sum())
             if total_gp <= 0:
-                return {"PTS": 0.0, "REB": 0.0, "AST": 0.0, "FG3M": 0.0, "FGA": 0.0, "FG3A": 0.0, "PRA": 0.0, "GP": 0.0}
+                return {
+                    "PTS": 0.0,
+                    "REB": 0.0,
+                    "AST": 0.0,
+                    "FG3M": 0.0,
+                    "FGA": 0.0,
+                    "FG3A": 0.0,
+                    "PRA": 0.0,
+                    "GP": 0.0,
+                }
 
             pts = float((work_df["PTS"] * work_df["GP"]).sum() / total_gp)
             reb = float((work_df["REB"] * work_df["GP"]).sum() / total_gp)
@@ -265,7 +296,16 @@ def get_position_opponent_profile_v2(season: str, opponent_team_id: int, positio
             fga = float((work_df["FGA"] * work_df["GP"]).sum() / total_gp)
             fg3a = float((work_df["FG3A"] * work_df["GP"]).sum() / total_gp)
 
-            return {"PTS": pts, "REB": reb, "AST": ast, "FG3M": fg3m, "FGA": fga, "FG3A": fg3a, "PRA": pts + reb + ast, "GP": total_gp}
+            return {
+                "PTS": pts,
+                "REB": reb,
+                "AST": ast,
+                "FG3M": fg3m,
+                "FGA": fga,
+                "FG3A": fg3a,
+                "PRA": pts + reb + ast,
+                "GP": total_gp,
+            }
 
         opp_df_raw = get_position_allowed_profile(season, opponent_team_id, position_group)
         league_df_raw = get_league_position_baseline(season, position_group)
@@ -298,21 +338,21 @@ def get_position_opponent_profile_v2(season: str, opponent_team_id: int, positio
             "LEAGUE_FGA_BASELINE": float(league_profile["FGA"]),
             "LEAGUE_3PA_BASELINE": float(league_profile["FG3A"]),
             "MATCHUP_DIFF": diff_pra,
-            "MATCHUP_LABEL": classify_matchup_tier(diff_pra),
+            "MATCHUP_LABEL": classify_matchup_tier_by_metric("PRA", diff_pra),
             "MATCHUP_DIFF_PTS": diff_pts,
-            "MATCHUP_LABEL_PTS": classify_matchup_tier(diff_pts),
+            "MATCHUP_LABEL_PTS": classify_matchup_tier_by_metric("PTS", diff_pts),
             "MATCHUP_DIFF_REB": diff_reb,
-            "MATCHUP_LABEL_REB": classify_matchup_tier(diff_reb),
+            "MATCHUP_LABEL_REB": classify_matchup_tier_by_metric("REB", diff_reb),
             "MATCHUP_DIFF_AST": diff_ast,
-            "MATCHUP_LABEL_AST": classify_matchup_tier(diff_ast),
+            "MATCHUP_LABEL_AST": classify_matchup_tier_by_metric("AST", diff_ast),
             "MATCHUP_DIFF_PRA": diff_pra,
-            "MATCHUP_LABEL_PRA": classify_matchup_tier(diff_pra),
+            "MATCHUP_LABEL_PRA": classify_matchup_tier_by_metric("PRA", diff_pra),
             "MATCHUP_DIFF_3PM": diff_3pm,
-            "MATCHUP_LABEL_3PM": classify_matchup_tier(diff_3pm),
+            "MATCHUP_LABEL_3PM": classify_matchup_tier_by_metric("3PM", diff_3pm),
             "MATCHUP_DIFF_FGA": diff_fga,
-            "MATCHUP_LABEL_FGA": classify_matchup_tier(diff_fga),
+            "MATCHUP_LABEL_FGA": classify_matchup_tier_by_metric("FGA", diff_fga),
             "MATCHUP_DIFF_3PA": diff_3pa,
-            "MATCHUP_LABEL_3PA": classify_matchup_tier(diff_3pa),
+            "MATCHUP_LABEL_3PA": classify_matchup_tier_by_metric("3PA", diff_3pa),
         }
     except Exception:
         return fallback
