@@ -376,16 +376,16 @@ def render_player_focus_panel(
         st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
 
     with visual_tab:
-    render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
+        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
 
-    st.divider()
+        st.divider()
 
-    st.markdown(f"### Frequência na Temporada — {visual_metric}")
-    st.caption("Veja os montinhos: concentrados à esquerda (piso), espalhados à direita (teto).")
+        st.markdown(f"### Frequência na Temporada — {visual_metric}")
+        st.caption("Veja os montinhos: concentrados à esquerda (piso), espalhados à direita (teto).")
 
-    log = get_player_log(int(row["PLAYER_ID"]), season)
+        log = get_player_log(int(row["PLAYER_ID"]), season)
 
-    if not log.empty:
+        if not log.empty:
         log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
         log["3PM"] = log.get("FG3M", 0)
         log["3PA"] = log.get("FG3A", 0)
@@ -557,8 +557,8 @@ def render_player_focus_panel(
                     st.warning(f"📉 Baixa Correlação ({correl:.2f}): produção mais oscilante, pouco dependente dos minutos.")
         else:
             st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
-    else:
-        st.info("Sem histórico suficiente para gerar os gráficos.")
+        else:
+            st.info("Sem histórico suficiente para gerar os gráficos.")    
 
     # --- ABA DE MERCADO DINÂMICA (FORMATO 22,5 CORRIGIDO) ---
     with market_tab:
