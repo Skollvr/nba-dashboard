@@ -19,18 +19,28 @@ from ui_components import (
 )
 
 def get_brasilia_today() -> date:
-    """Lógica de rollover: entre 00:00 e 06:00 foca no dia anterior."""
-    agora = datetime.now(APP_TIMEZONE)
-    if agora.hour < 6:
-        return (agora - timedelta(days=1)).date()
-    if agora.hour >= 22:
-        return (agora + timedelta(days=1)).date()
-    return agora.date()
+    return datetime.now(APP_TIMEZONE).date()
 
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
     inject_css()
-    
+
+    st.markdown('<div class="main-title">NBA Props Dashboard</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="subtitle">Escolha o jogo, defina a métrica e compare projeção, consistência e linha ativa por jogador.</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <div class="hero-pills">
+            <span class="hero-pill">Projeções</span>
+            <span class="hero-pill">Linha manual / BetMGM</span>
+            <span class="hero-pill">Leitura rápida mobile</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     with st.sidebar:
         st.header("Configurações")
         chart_mode = st.pills("Gráfico", CHART_OPTIONS, default="Compacto")
@@ -42,14 +52,24 @@ def main():
         line_value = st.number_input("Linha Manual", value=25.5, step=0.5)
         api_key_available = bool(get_odds_api_key())
         use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
+
         st.divider()
+        st.caption("Este app busca os dados ao abrir a página.")
         if st.button("Forçar atualização"):
             st.cache_data.clear()
             st.rerun()
 
     selected_date = get_brasilia_today()
     season = get_season_string(selected_date)
-    games = get_games_for_date(selected_date)
+
+    try:
+        games = get_games_for_date(selected_date)
+    except Exception as exc:
+        st.error("A NBA demorou ou falhou ao responder na consulta dos jogos. Tente novamente em alguns segundos ou use o botão de atualização.")
+        st.exception(exc)
+        return
+
+    st.caption(f"Temporada detectada: {season}")
 
     if games.empty:
         st.warning(f"Sem jogos para {selected_date.strftime('%d/%m/%Y')}.")
@@ -58,23 +78,30 @@ def main():
     game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
-    away_df, home_df = get_matchup_context(
-        int(selected_game["VISITOR_TEAM_ID"]), int(selected_game["HOME_TEAM_ID"]),
-        selected_game["away_team_name"], selected_game["home_team_name"],
-        season, api_key_available
-    )
+    try:
+        away_df, home_df = get_matchup_context(
+            int(selected_game["VISITOR_TEAM_ID"]),
+            int(selected_game["HOME_TEAM_ID"]),
+            selected_game["away_team_name"],
+            selected_game["home_team_name"],
+            season,
+            use_market_line,
+        )
+    except Exception as exc:
+        st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
+        st.exception(exc)
+        return
 
     render_matchup_header(selected_game)
     render_summary_cards(away_df, home_df, min_games, min_minutes, role_filter)
     render_game_rankings(away_df, home_df, min_games, min_minutes, role_filter, line_metric, line_value, use_market_line)
 
     selected_team = st.segmented_control(
-        "Time em análise", 
-        [selected_game["away_team_name"], selected_game["home_team_name"]], 
+        "Time em análise",
+        [selected_game["away_team_name"], selected_game["home_team_name"]],
         default=selected_game["away_team_name"]
     )
-    
-    # Lógica de sigla robusta para o H2H
+
     if selected_team == selected_game["away_team_name"]:
         target_df = away_df
         opp_abbr = selected_game.get("HOME_TEAM_ABBR", selected_game["home_team_name"])
@@ -85,9 +112,20 @@ def main():
     sort_label = f"{line_metric} L10" if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
 
     render_team_section_v2(
-        selected_team, target_df, season, min_games, min_minutes, role_filter,
-        sort_label, False, chart_mode, line_metric, line_value, use_market_line,
-        cards_per_row, opp_abbr
+        selected_team,
+        target_df,
+        season,
+        min_games,
+        min_minutes,
+        role_filter,
+        sort_label,
+        False,
+        chart_mode,
+        line_metric,
+        line_value,
+        use_market_line,
+        cards_per_row,
+        opp_abbr,
     )
 
 if __name__ == "__main__":
