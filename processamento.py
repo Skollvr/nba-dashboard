@@ -440,10 +440,19 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
         enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
 
     for col in [
-            "MATCHUP_LABEL", "MATCHUP_LABEL_PTS", "MATCHUP_LABEL_REB", "MATCHUP_LABEL_AST",
-            "MATCHUP_LABEL_PRA", "MATCHUP_LABEL_3PM", "MATCHUP_LABEL_FGA", "MATCHUP_LABEL_3PA",
+            "MATCHUP_LABEL",
+            "MATCHUP_LABEL_PTS",
+            "MATCHUP_LABEL_REB",
+            "MATCHUP_LABEL_AST",
+            "MATCHUP_LABEL_PRA",
+            "MATCHUP_LABEL_3PM",
+            "MATCHUP_LABEL_FGA",
+            "MATCHUP_LABEL_3PA",
         ]:
-            enriched[col] = enriched[col].fillna("Neutro")
+    if col not in enriched.columns:
+                enriched[col] = "Neutro"
+    else:
+                enriched[col] = enriched[col].fillna("Neutro")
 
     enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], row["OPP_PTS_ALLOWED"], row["LEAGUE_PTS_BASELINE"]), axis=1)
     enriched["PROJ_REB"] = enriched.apply(lambda row: calculate_projection(row["SEASON_REB"], row["L10_REB"], row["L5_REB"], row["OPP_REB_ALLOWED"], row["LEAGUE_REB_BASELINE"]), axis=1)
