@@ -389,7 +389,7 @@ def render_player_focus_panel(
                     unsafe_allow_html=True,
                 )
 
-        st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
+        st.markdown(render_matchup_detail_box_html(row, visual_metric), unsafe_allow_html=True)
 
     with visual_tab:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
@@ -1820,15 +1820,16 @@ def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_va
         <div class="hero-note" style="margin-top: 0.6rem;">{odds_note}</div>
     </div>
     """
+def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
+    matchup_ctx = get_metric_matchup_context(row, metric)
+    matchup_class = get_matchup_chip_class(matchup_ctx["label"])
 
-def render_matchup_detail_box_html(row: pd.Series) -> str:
-    matchup_class = get_matchup_chip_class(row["MATCHUP_LABEL"])
     return f"""
     <div class="detail-box">
         <div class="detail-box-top">
-            <div class="detail-box-title">Contexto do adversário</div>
+            <div class="detail-box-title">Contexto do adversário — {metric}</div>
             <div class="delta-pill-row">
-                <span class="matchup-chip {matchup_class}">{row['MATCHUP_LABEL']}</span>
+                <span class="matchup-chip {matchup_class}">{matchup_ctx['label']}</span>
             </div>
         </div>
         <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
@@ -1845,14 +1846,15 @@ def render_matchup_detail_box_html(row: pd.Series) -> str:
                 <div class="detail-mini-value">{format_number(row['OPP_AST_ALLOWED'])}</div>
             </div>
             <div class="detail-mini detail-mini-highlight">
-                <div class="detail-mini-label">PRA ced.</div>
-                <div class="detail-mini-value">{format_number(row['OPP_PRA_ALLOWED'])}</div>
+                <div class="detail-mini-label">{metric} foco</div>
+                <div class="detail-mini-value">{format_number(matchup_ctx['allowed'])}</div>
             </div>
         </div>
-        <div class="hero-note">{row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']} • liga {format_number(row['LEAGUE_PRA_BASELINE'])} • diferença {format_signed_number(row['MATCHUP_DIFF'])}</div>
+        <div class="hero-note">
+            {row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']} • liga {format_number(matchup_ctx['baseline'])} • diferença {format_signed_number(matchup_ctx['diff'])}
+        </div>
     </div>
     """
-
 
 def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
