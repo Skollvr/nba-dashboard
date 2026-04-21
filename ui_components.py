@@ -1903,7 +1903,6 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
     )
 
 
-
 def render_player_cards_grid(
     filtered_df: pd.DataFrame,
     line_metric: str,
