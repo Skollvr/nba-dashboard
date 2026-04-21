@@ -1600,7 +1600,7 @@ def render_player_headline_html(
 
     return f"""
     <div class="player-headline-card">
-        <div class="player-headline-label">{confidence_label}</div>
+        <div class="player-headline-label">{confidence_label} • {"🎯 BetMGM" if chosen_ctx.get("line_source") == "BetMGM" else "✏️ Linha manual"}</div>
         <div class="player-headline-value">{headline}</div>
         <div class="player-headline-sub">
             {reason_text}.
