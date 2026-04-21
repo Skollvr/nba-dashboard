@@ -335,6 +335,11 @@ def render_player_focus_panel(
     with overview_tab:
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
         st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
+        st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
+        st.markdown(
+        render_manual_line_detail_box_html(row, line_metric, line_value, use_market_line),
+        unsafe_allow_html=True,
+    )
 
     with detail_tab:
         first_cols = st.columns(2)
