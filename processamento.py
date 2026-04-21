@@ -80,6 +80,70 @@ def classify_trend(delta_pra: float) -> str:
 # ---------------------------------------------------------
 def get_metric_projection_column(metric: str) -> str:
     return {"PRA": "PROJ_PRA", "PTS": "PROJ_PTS", "REB": "PROJ_REB", "AST": "PROJ_AST", "3PM": "PROJ_3PM", "FGA": "PROJ_FGA", "3PA": "PROJ_3PA"}.get(metric, "PROJ_PRA")
+def get_metric_allowed_column(metric: str) -> str:
+    return {
+        "PTS": "OPP_PTS_ALLOWED",
+        "REB": "OPP_REB_ALLOWED",
+        "AST": "OPP_AST_ALLOWED",
+        "PRA": "OPP_PRA_ALLOWED",
+        "3PM": "OPP_3PM_ALLOWED",
+        "FGA": "OPP_FGA_ALLOWED",
+        "3PA": "OPP_3PA_ALLOWED",
+    }.get(metric, "OPP_PRA_ALLOWED")
+
+
+def get_metric_baseline_column(metric: str) -> str:
+    return {
+        "PTS": "LEAGUE_PTS_BASELINE",
+        "REB": "LEAGUE_REB_BASELINE",
+        "AST": "LEAGUE_AST_BASELINE",
+        "PRA": "LEAGUE_PRA_BASELINE",
+        "3PM": "LEAGUE_3PM_BASELINE",
+        "FGA": "LEAGUE_FGA_BASELINE",
+        "3PA": "LEAGUE_3PA_BASELINE",
+    }.get(metric, "LEAGUE_PRA_BASELINE")
+
+
+def get_metric_matchup_diff_column(metric: str) -> str:
+    return {
+        "PTS": "MATCHUP_DIFF_PTS",
+        "REB": "MATCHUP_DIFF_REB",
+        "AST": "MATCHUP_DIFF_AST",
+        "PRA": "MATCHUP_DIFF_PRA",
+        "3PM": "MATCHUP_DIFF_3PM",
+        "FGA": "MATCHUP_DIFF_FGA",
+        "3PA": "MATCHUP_DIFF_3PA",
+    }.get(metric, "MATCHUP_DIFF_PRA")
+
+
+def get_metric_matchup_label_column(metric: str) -> str:
+    return {
+        "PTS": "MATCHUP_LABEL_PTS",
+        "REB": "MATCHUP_LABEL_REB",
+        "AST": "MATCHUP_LABEL_AST",
+        "PRA": "MATCHUP_LABEL_PRA",
+        "3PM": "MATCHUP_LABEL_3PM",
+        "FGA": "MATCHUP_LABEL_FGA",
+        "3PA": "MATCHUP_LABEL_3PA",
+    }.get(metric, "MATCHUP_LABEL_PRA")
+
+
+def get_metric_matchup_context(row: pd.Series, metric: str) -> dict:
+    allowed_col = get_metric_allowed_column(metric)
+    baseline_col = get_metric_baseline_column(metric)
+    diff_col = get_metric_matchup_diff_column(metric)
+    label_col = get_metric_matchup_label_column(metric)
+
+    return {
+        "allowed": float(pd.to_numeric(row.get(allowed_col, 0.0), errors="coerce") or 0.0),
+        "baseline": float(pd.to_numeric(row.get(baseline_col, 0.0), errors="coerce") or 0.0),
+        "diff": float(pd.to_numeric(row.get(diff_col, 0.0), errors="coerce") or 0.0),
+        "label": str(row.get(label_col, "Neutro")),
+        "allowed_col": allowed_col,
+        "baseline_col": baseline_col,
+        "diff_col": diff_col,
+        "label_col": label_col,
+    }
 
 def get_metric_recent_list_column(metric: str) -> str:
     return {"PRA": "RECENT_PRA_L10", "PTS": "RECENT_PTS_L10", "REB": "RECENT_REB_L10", "AST": "RECENT_AST_L10", "3PM": "RECENT_3PM_L10", "FGA": "RECENT_FGA_L10", "3PA": "RECENT_3PA_L10"}.get(metric, "RECENT_PRA_L10")
@@ -149,13 +213,38 @@ def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_
 def get_position_opponent_profile_v2(season: str, opponent_team_id: int, position_group: str) -> dict:
     fallback = {
         "POSITION_GROUP": str(position_group),
-        "OPP_PTS_ALLOWED": 0.0, "OPP_REB_ALLOWED": 0.0, "OPP_AST_ALLOWED": 0.0, 
-        "OPP_PRA_ALLOWED": 0.0, "OPP_3PM_ALLOWED": 0.0, "OPP_FGA_ALLOWED": 0.0, "OPP_3PA_ALLOWED": 0.0,
-        "LEAGUE_PTS_BASELINE": 0.0, "LEAGUE_REB_BASELINE": 0.0, "LEAGUE_AST_BASELINE": 0.0, 
-        "LEAGUE_PRA_BASELINE": 0.0, "LEAGUE_3PM_BASELINE": 0.0, "LEAGUE_FGA_BASELINE": 0.0, "LEAGUE_3PA_BASELINE": 0.0, 
-        "MATCHUP_DIFF": 0.0, "MATCHUP_LABEL": "Neutro",
+        "OPP_PTS_ALLOWED": 0.0,
+        "OPP_REB_ALLOWED": 0.0,
+        "OPP_AST_ALLOWED": 0.0,
+        "OPP_PRA_ALLOWED": 0.0,
+        "OPP_3PM_ALLOWED": 0.0,
+        "OPP_FGA_ALLOWED": 0.0,
+        "OPP_3PA_ALLOWED": 0.0,
+        "LEAGUE_PTS_BASELINE": 0.0,
+        "LEAGUE_REB_BASELINE": 0.0,
+        "LEAGUE_AST_BASELINE": 0.0,
+        "LEAGUE_PRA_BASELINE": 0.0,
+        "LEAGUE_3PM_BASELINE": 0.0,
+        "LEAGUE_FGA_BASELINE": 0.0,
+        "LEAGUE_3PA_BASELINE": 0.0,
+        "MATCHUP_DIFF": 0.0,
+        "MATCHUP_LABEL": "Neutro",
+        "MATCHUP_DIFF_PTS": 0.0,
+        "MATCHUP_LABEL_PTS": "Neutro",
+        "MATCHUP_DIFF_REB": 0.0,
+        "MATCHUP_LABEL_REB": "Neutro",
+        "MATCHUP_DIFF_AST": 0.0,
+        "MATCHUP_LABEL_AST": "Neutro",
+        "MATCHUP_DIFF_PRA": 0.0,
+        "MATCHUP_LABEL_PRA": "Neutro",
+        "MATCHUP_DIFF_3PM": 0.0,
+        "MATCHUP_LABEL_3PM": "Neutro",
+        "MATCHUP_DIFF_FGA": 0.0,
+        "MATCHUP_LABEL_FGA": "Neutro",
+        "MATCHUP_DIFF_3PA": 0.0,
+        "MATCHUP_LABEL_3PA": "Neutro",
     }
-    
+
     try:
         def weighted_profile(df: pd.DataFrame) -> dict:
             if df is None or df.empty or "GP" not in df.columns:
@@ -180,11 +269,17 @@ def get_position_opponent_profile_v2(season: str, opponent_team_id: int, positio
 
         opp_df_raw = get_position_allowed_profile(season, opponent_team_id, position_group)
         league_df_raw = get_league_position_baseline(season, position_group)
-        
+
         opp_profile = weighted_profile(opp_df_raw)
         league_profile = weighted_profile(league_df_raw)
 
-        matchup_diff = float(opp_profile["PRA"]) - float(league_profile["PRA"])
+        diff_pts = float(opp_profile["PTS"]) - float(league_profile["PTS"])
+        diff_reb = float(opp_profile["REB"]) - float(league_profile["REB"])
+        diff_ast = float(opp_profile["AST"]) - float(league_profile["AST"])
+        diff_pra = float(opp_profile["PRA"]) - float(league_profile["PRA"])
+        diff_3pm = float(opp_profile["FG3M"]) - float(league_profile["FG3M"])
+        diff_fga = float(opp_profile["FGA"]) - float(league_profile["FGA"])
+        diff_3pa = float(opp_profile["FG3A"]) - float(league_profile["FG3A"])
 
         return {
             "POSITION_GROUP": str(position_group),
@@ -198,16 +293,30 @@ def get_position_opponent_profile_v2(season: str, opponent_team_id: int, positio
             "LEAGUE_PTS_BASELINE": float(league_profile["PTS"]),
             "LEAGUE_REB_BASELINE": float(league_profile["REB"]),
             "LEAGUE_AST_BASELINE": float(league_profile["AST"]),
+            "LEAGUE_PRA_BASELINE": float(league_profile["PRA"]),
             "LEAGUE_3PM_BASELINE": float(league_profile["FG3M"]),
             "LEAGUE_FGA_BASELINE": float(league_profile["FGA"]),
             "LEAGUE_3PA_BASELINE": float(league_profile["FG3A"]),
-            "LEAGUE_PRA_BASELINE": float(league_profile["PRA"]),
-            "MATCHUP_DIFF": matchup_diff,
-            "MATCHUP_LABEL": classify_matchup_tier(matchup_diff),
+            "MATCHUP_DIFF": diff_pra,
+            "MATCHUP_LABEL": classify_matchup_tier(diff_pra),
+            "MATCHUP_DIFF_PTS": diff_pts,
+            "MATCHUP_LABEL_PTS": classify_matchup_tier(diff_pts),
+            "MATCHUP_DIFF_REB": diff_reb,
+            "MATCHUP_LABEL_REB": classify_matchup_tier(diff_reb),
+            "MATCHUP_DIFF_AST": diff_ast,
+            "MATCHUP_LABEL_AST": classify_matchup_tier(diff_ast),
+            "MATCHUP_DIFF_PRA": diff_pra,
+            "MATCHUP_LABEL_PRA": classify_matchup_tier(diff_pra),
+            "MATCHUP_DIFF_3PM": diff_3pm,
+            "MATCHUP_LABEL_3PM": classify_matchup_tier(diff_3pm),
+            "MATCHUP_DIFF_FGA": diff_fga,
+            "MATCHUP_LABEL_FGA": classify_matchup_tier(diff_fga),
+            "MATCHUP_DIFF_3PA": diff_3pa,
+            "MATCHUP_LABEL_3PA": classify_matchup_tier(diff_3pa),
         }
     except Exception:
         return fallback
-
+        
 # ---------------------------------------------------------
 # 4. CONSTRUÇÃO DE DADOS DOS JOGADORES (PANDAS MÁGICO)
 # ---------------------------------------------------------
@@ -312,15 +421,29 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
 
     if matchup_df.empty or "POSITION_GROUP" not in matchup_df.columns:
         enriched["OPP_TEAM_NAME"] = opponent_team_name
-        fallback_cols = ["OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED", "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED", "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE", "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE", "MATCHUP_DIFF"]
-        for col in fallback_cols: enriched[col] = 0.0
-        enriched["MATCHUP_LABEL"] = "Neutro"
+        fallback_cols = ["OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED", "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED", "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE", "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE", "MATCHUP_DIFF", "MATCHUP_DIFF_PTS", "MATCHUP_DIFF_REB", "MATCHUP_DIFF_AST", "MATCHUP_DIFF_PRA", "MATCHUP_DIFF_3PM", "MATCHUP_DIFF_FGA", "MATCHUP_DIFF_3PA",]
+        for col in ["MATCHUP_LABEL", "MATCHUP_LABEL_PTS", "MATCHUP_LABEL_REB", "MATCHUP_LABEL_AST",
+            "MATCHUP_LABEL_PRA", "MATCHUP_LABEL_3PM", "MATCHUP_LABEL_FGA", "MATCHUP_LABEL_3PA"]:
+        enriched[col] = "Neutro"
     else:
         enriched = enriched.merge(matchup_df, on="POSITION_GROUP", how="left")
         enriched["OPP_TEAM_NAME"] = opponent_team_name
-        for col in ["OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED", "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED", "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE", "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE", "MATCHUP_DIFF"]:
-            enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
-        enriched["MATCHUP_LABEL"] = enriched["MATCHUP_LABEL"].fillna("Neutro")
+        for col in [
+            "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED",
+            "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED",
+            "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE",
+            "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE",
+            "MATCHUP_DIFF",
+            "MATCHUP_DIFF_PTS", "MATCHUP_DIFF_REB", "MATCHUP_DIFF_AST", "MATCHUP_DIFF_PRA",
+            "MATCHUP_DIFF_3PM", "MATCHUP_DIFF_FGA", "MATCHUP_DIFF_3PA",
+        ]:
+        enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
+
+        for col in [
+            "MATCHUP_LABEL", "MATCHUP_LABEL_PTS", "MATCHUP_LABEL_REB", "MATCHUP_LABEL_AST",
+            "MATCHUP_LABEL_PRA", "MATCHUP_LABEL_3PM", "MATCHUP_LABEL_FGA", "MATCHUP_LABEL_3PA",
+        ]:
+            enriched[col] = enriched[col].fillna("Neutro")
 
     enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], row["OPP_PTS_ALLOWED"], row["LEAGUE_PTS_BASELINE"]), axis=1)
     enriched["PROJ_REB"] = enriched.apply(lambda row: calculate_projection(row["SEASON_REB"], row["L10_REB"], row["L5_REB"], row["OPP_REB_ALLOWED"], row["LEAGUE_REB_BASELINE"]), axis=1)
