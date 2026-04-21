@@ -349,7 +349,7 @@ def render_player_focus_panel(
     overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
 
     with overview_tab:
-        render_player_support_tiles(row, line_metric, line_value, use_market_line)
+        render_player_support_tiles(row, visual_metric, line_value, use_market_line)
         st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
         st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
         st.markdown(
@@ -1526,20 +1526,21 @@ def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, u
 
     return best_metric, best_ctx
 
-
-def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str, str]:
+def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str, str, str, str]:
+    matchup_ctx = get_metric_matchup_context(row, metric)
     hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
+
     confidence_label, score = _confidence_label_and_score(
         edge=float(ctx.get("edge", 0.0)),
         hit_ratio=hit_ratio,
         osc_class=str(row.get("OSC_CLASS", "-")),
-        matchup_label=str(row.get("MATCHUP_LABEL", "Neutro")),
+        matchup_label=matchup_ctx["label"],
         form_signal=str(row.get("FORM_SIGNAL", "→ Estável")),
         inj_status=str(row.get("INJ_STATUS", "Available")),
     )
 
     edge = float(ctx.get("edge", 0.0))
-    matchup = str(row.get("MATCHUP_LABEL", "Neutro"))
+    matchup = matchup_ctx["label"]
     osc = str(row.get("OSC_CLASS", "-"))
     form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
 
@@ -1587,10 +1588,11 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
 
     context_line = (
         f"{row.get('OPP_TEAM_NAME', 'Oponente')} cede "
-        f"{format_number(row.get('OPP_PRA_ALLOWED', 0.0) if metric == 'PRA' else row.get(f'OPP_{metric}_ALLOWED', 0.0))} "
+        f"{format_number(matchup_ctx['allowed'])} "
         f"para {row.get('POSITION_GROUP', '-')}"
         f" • linha {format_number(ctx.get('line_value', 0.0))}"
         f" • proj {format_number(ctx.get('projection', 0.0))}"
+        f" • diff {format_signed_number(matchup_ctx['diff'])}"
     )
 
     return confidence_label, headline, reason_text, context_line
