@@ -461,7 +461,7 @@ def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFr
     all_odds_cols = [col for cols in ODDS_METRIC_COLUMNS.values() for col in cols]
 
     if odds_df.empty:
-    for col in all_odds_cols:
+        for col in all_odds_cols:
             if col not in enriched.columns: enriched[col] = None
         return enriched
 
