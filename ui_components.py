@@ -385,7 +385,7 @@ def render_player_focus_panel(
 
         log = get_player_log(int(row["PLAYER_ID"]), season)
 
-        if not log.empty:
+    if not log.empty:
             log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
             log["3PM"] = log.get("FG3M", 0)
             log["3PA"] = log.get("FG3A", 0)
