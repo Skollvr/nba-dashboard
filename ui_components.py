@@ -11,10 +11,15 @@ from config import (
     LINE_METRIC_OPTIONS, CHART_OPTIONS, TEAM_LOOKUP, SORT_OPTIONS
 )
 from processamento import (
-    get_line_context, get_matchup_chip_class, 
-    fetch_latest_injury_report_df, merge_injury_report,
-    filter_and_sort_team_df, build_display_dataframes,
-    build_summary_cards_data, get_metric_projection_column
+    get_line_context,
+    get_matchup_chip_class,
+    get_metric_matchup_context,
+    fetch_latest_injury_report_df,
+    merge_injury_report,
+    filter_and_sort_team_df,
+    build_display_dataframes,
+    build_summary_cards_data,
+    get_metric_projection_column,
 )
 from api_nba import get_player_log
 
@@ -179,11 +184,12 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
                 render_player_headline_html(row, line_metric, line_value, use_market_line),
                 unsafe_allow_html=True,
             )
+                matchup_ctx = get_metric_matchup_context(row, line_metric)
             render_badges(
                 row["ROLE"],
                 row.get("FORM_SIGNAL", "→ Estável"),
                 row.get("OSC_CLASS", "-"),
-                row.get("MATCHUP_LABEL", "Neutro"),
+                matchup_ctx["label"],
             )
 
         # Tiles de suporte e informações de linha originais
