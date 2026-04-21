@@ -313,6 +313,12 @@ def render_player_focus_panel(
                 </div>
             </div>
         """, unsafe_allow_html=True)
+
+        position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+        st.markdown(
+            f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])} • Time {row["TEAM_NAME"]}</div>',
+            unsafe_allow_html=True,
+        )
         
         render_badges(
             row.get("ROLE", "-"),
