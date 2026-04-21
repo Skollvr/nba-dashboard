@@ -184,7 +184,7 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
                 render_player_headline_html(row, line_metric, line_value, use_market_line),
                 unsafe_allow_html=True,
             )
-                matchup_ctx = get_metric_matchup_context(row, line_metric)
+            matchup_ctx = get_metric_matchup_context(row, line_metric)
             render_badges(
                 row["ROLE"],
                 row.get("FORM_SIGNAL", "→ Estável"),
