@@ -336,6 +336,40 @@ def render_player_focus_panel(
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
         st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
 
+    with detail_tab:
+        first_cols = st.columns(2)
+        second_cols = st.columns(2)
+
+        detail_items = [
+            ("PRA", row["SEASON_PRA"], row["L5_PRA"], row["L10_PRA"]),
+            ("PTS", row["SEASON_PTS"], row["L5_PTS"], row["L10_PTS"]),
+            ("REB", row["SEASON_REB"], row["L5_REB"], row["L10_REB"]),
+            ("AST", row["SEASON_AST"], row["L5_AST"], row["L10_AST"]),
+        ]
+
+        for col, item in zip([*first_cols, *second_cols], detail_items):
+            with col:
+                st.markdown(
+                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                    unsafe_allow_html=True,
+                )
+
+        extra_cols = st.columns(3)
+        extra_detail_items = [
+            ("3PM", row["SEASON_3PM"], row["L5_3PM"], row["L10_3PM"]),
+            ("FGA", row["SEASON_FGA"], row["L5_FGA"], row["L10_FGA"]),
+            ("3PA", row["SEASON_3PA"], row["L5_3PA"], row["L10_3PA"]),
+        ]
+
+        for col, item in zip(extra_cols, extra_detail_items):
+            with col:
+                st.markdown(
+                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
+
     with visual_tab:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
 
