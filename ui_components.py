@@ -175,7 +175,10 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
             
             position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
             st.caption(f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}")
-            st.markdown(render_player_headline_html(row), unsafe_allow_html=True)
+            st.markdown(
+                render_player_headline_html(row, line_metric, line_value, use_market_line),
+                unsafe_allow_html=True,
+            )
             render_badges(
                 row["ROLE"],
                 row.get("FORM_SIGNAL", "→ Estável"),
@@ -1424,25 +1427,189 @@ def render_detail_metric_box_html(title: str, temp_val: float, l5_val: float, l1
     </div>
     """
 
+def _parse_ratio_text(text: str) -> float:
+    try:
+        hit, sample = str(text).split("/")
+        hit = float(hit)
+        sample = max(float(sample), 1.0)
+        return hit / sample
+    except Exception:
+        return 0.0
 
-def render_player_headline_html(row: pd.Series) -> str:
-    hit_rate_pct = int(round(float(row.get("HIT_RATE_L10", 0.0)) * 100))
-    hit_rate_text = row.get("HIT_RATE_L10_TEXT", "-")
-    form_signal = row.get("FORM_SIGNAL", "→ Estável")
-    osc_class = row.get("OSC_CLASS", "-")
+
+def _confidence_label_and_score(
+    edge: float,
+    hit_ratio: float,
+    osc_class: str,
+    matchup_label: str,
+    form_signal: str,
+    inj_status: str,
+) -> tuple[str, int]:
+    score = 0
+
+    if edge >= 2.5:
+        score += 3
+    elif edge >= 1.0:
+        score += 2
+    elif edge >= 0.3:
+        score += 1
+    elif edge <= -2.0:
+        score -= 3
+    elif edge <= -0.8:
+        score -= 2
+
+    if hit_ratio >= 0.70:
+        score += 2
+    elif hit_ratio >= 0.55:
+        score += 1
+    elif hit_ratio <= 0.40:
+        score -= 2
+
+    if osc_class == "Baixa":
+        score += 1
+    elif osc_class == "Alta":
+        score -= 1
+
+    if matchup_label == "Favorável":
+        score += 1
+    elif matchup_label == "Difícil":
+        score -= 1
+
+    if "↗" in str(form_signal):
+        score += 1
+    elif "↘" in str(form_signal):
+        score -= 1
+
+    if str(inj_status) in {"Out", "Doubtful"}:
+        score -= 3
+    elif str(inj_status) in {"Questionable"}:
+        score -= 1
+
+    if score >= 5:
+        return "🔥 Confiança Alta", score
+    if score >= 2:
+        return "🟡 Confiança Média", score
+    return "🔴 Confiança Baixa", score
+
+
+def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> tuple[str, dict]:
+    metrics = ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"]
+
+    if not use_market_line:
+        chosen_ctx = get_line_context(row, line_metric, line_value, use_market_line=False)
+        return line_metric, chosen_ctx
+
+    best_metric = line_metric
+    best_ctx = get_line_context(row, line_metric, line_value, use_market_line=True)
+    best_score = -999.0
+
+    for metric in metrics:
+        ctx = get_line_context(row, metric, line_value, use_market_line=True)
+
+        if not ctx.get("has_market_line"):
+            continue
+
+        hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
+        score = (float(ctx.get("edge", 0.0)) * 0.65) + (hit_ratio * 4.0)
+
+        if score > best_score:
+            best_score = score
+            best_metric = metric
+            best_ctx = ctx
+
+    return best_metric, best_ctx
+
+
+def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str, str]:
+    hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
+    confidence_label, score = _confidence_label_and_score(
+        edge=float(ctx.get("edge", 0.0)),
+        hit_ratio=hit_ratio,
+        osc_class=str(row.get("OSC_CLASS", "-")),
+        matchup_label=str(row.get("MATCHUP_LABEL", "Neutro")),
+        form_signal=str(row.get("FORM_SIGNAL", "→ Estável")),
+        inj_status=str(row.get("INJ_STATUS", "Available")),
+    )
+
+    edge = float(ctx.get("edge", 0.0))
+    matchup = str(row.get("MATCHUP_LABEL", "Neutro"))
+    osc = str(row.get("OSC_CLASS", "-"))
+    form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
+
+    if score >= 5:
+        headline = f"Vale ficar de olho em {metric}"
+    elif score >= 2:
+        headline = f"Sinal moderado para {metric}"
+    else:
+        headline = f"Cautela com {metric}"
+
+    reasons = []
+
+    if edge >= 1.5:
+        reasons.append("proj acima da linha")
+    elif edge <= -1.0:
+        reasons.append("proj abaixo da linha")
+
+    if hit_ratio >= 0.70:
+        reasons.append("hit recente forte")
+    elif hit_ratio <= 0.40:
+        reasons.append("hit recente fraco")
+
+    if osc == "Baixa":
+        reasons.append("oscilação baixa")
+    elif osc == "Alta":
+        reasons.append("oscilação alta")
+
+    if matchup == "Favorável":
+        reasons.append("matchup favorável")
+    elif matchup == "Difícil":
+        reasons.append("matchup difícil")
+
+    if "↗" in form_signal:
+        reasons.append("momento em alta")
+    elif "↘" in form_signal:
+        reasons.append("momento em queda")
+
+    if str(row.get("INJ_STATUS", "Available")) in {"Questionable", "Doubtful", "Out"}:
+        reasons.append(f"status {row.get('INJ_STATUS')}")
+
+    if not reasons:
+        reasons.append("sinais mistos no recorte atual")
+
+    reason_text = " • ".join(reasons[:4])
+
+    context_line = (
+        f"{row.get('OPP_TEAM_NAME', 'Oponente')} cede "
+        f"{format_number(row.get('OPP_PRA_ALLOWED', 0.0) if metric == 'PRA' else row.get(f'OPP_{metric}_ALLOWED', 0.0))} "
+        f"para {row.get('POSITION_GROUP', '-')}"
+        f" • linha {format_number(ctx.get('line_value', 0.0))}"
+        f" • proj {format_number(ctx.get('projection', 0.0))}"
+    )
+
+    return confidence_label, headline, reason_text, context_line
+
+def render_player_headline_html(
+    row: pd.Series,
+    line_metric: str,
+    line_value: float,
+    use_market_line: bool,
+) -> str:
+    chosen_metric, chosen_ctx = _best_metric_for_card(row, line_metric, line_value, use_market_line)
+    confidence_label, headline, reason_text, context_line = _build_headline_reason(row, chosen_metric, chosen_ctx)
     matchup_class = get_matchup_chip_class(row.get("MATCHUP_LABEL", "Neutro"))
 
     return f"""
     <div class="player-headline-card">
-        <div class="player-headline-label">Leitura em 3 segundos</div>
-        <div class="player-headline-value">{format_number(row['L10_PRA'])}</div>
+        <div class="player-headline-label">{confidence_label}</div>
+        <div class="player-headline-value">{headline}</div>
         <div class="player-headline-sub">
-            PRA L10 • Proj {format_number(row['PROJ_PRA'])} • Δ vs temp {format_signed_number(row['DELTA_PRA_L10'])}
-            • Hit L10 {hit_rate_text} ({hit_rate_pct}%) • Oscilação {osc_class} • {form_signal}
+            {reason_text}.
         </div>
         <div class="hero-note">
-            {row['OPP_TEAM_NAME']} cede {format_number(row['OPP_PRA_ALLOWED'])} PRA para {row['POSITION_GROUP']} • liga {format_number(row['LEAGUE_PRA_BASELINE'])}
-            <span class="matchup-chip {matchup_class}" style="margin-left:0.4rem;">{row['MATCHUP_LABEL']} vs {row['POSITION_GROUP']}</span>
+            {context_line}
+            <span class="matchup-chip {matchup_class}" style="margin-left:0.4rem;">
+                {row.get("MATCHUP_LABEL", "Neutro")} vs {row.get("POSITION_GROUP", "-")}
+            </span>
         </div>
     </div>
     """
