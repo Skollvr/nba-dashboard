@@ -449,9 +449,9 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
             "MATCHUP_LABEL_FGA",
             "MATCHUP_LABEL_3PA",
         ]:
-    if col not in enriched.columns:
+            if col not in enriched.columns:
                 enriched[col] = "Neutro"
-    else:
+            else:
                 enriched[col] = enriched[col].fillna("Neutro")
 
     enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], row["OPP_PTS_ALLOWED"], row["LEAGUE_PTS_BASELINE"]), axis=1)
