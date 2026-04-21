@@ -428,7 +428,7 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
     else:
         enriched = enriched.merge(matchup_df, on="POSITION_GROUP", how="left")
         enriched["OPP_TEAM_NAME"] = opponent_team_name
-        for col in [
+    for col in [
             "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED",
             "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED",
             "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE",
@@ -439,7 +439,7 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
         ]:
         enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
 
-        for col in [
+    for col in [
             "MATCHUP_LABEL", "MATCHUP_LABEL_PTS", "MATCHUP_LABEL_REB", "MATCHUP_LABEL_AST",
             "MATCHUP_LABEL_PRA", "MATCHUP_LABEL_3PM", "MATCHUP_LABEL_FGA", "MATCHUP_LABEL_3PA",
         ]:
@@ -461,7 +461,7 @@ def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFr
     all_odds_cols = [col for cols in ODDS_METRIC_COLUMNS.values() for col in cols]
 
     if odds_df.empty:
-        for col in all_odds_cols:
+    for col in all_odds_cols:
             if col not in enriched.columns: enriched[col] = None
         return enriched
 
