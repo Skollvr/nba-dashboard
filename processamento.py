@@ -69,6 +69,23 @@ def classify_matchup_tier_by_metric(metric: str, diff_value: float) -> str:
     if diff_value <= -t:
         return "Difícil"
     return "Neutro"
+def classify_matchup_tier_by_metric(metric: str, diff_value: float) -> str:
+    thresholds = {
+        "PTS": 1.5,
+        "REB": 1.0,
+        "AST": 0.8,
+        "PRA": 2.0,
+        "3PM": 0.4,
+        "FGA": 1.2,
+        "3PA": 0.8,
+    }
+    t = thresholds.get(metric, 1.2)
+
+    if diff_value >= t:
+        return "Favorável"
+    if diff_value <= -t:
+        return "Difícil"
+    return "Neutro"
 
 def classify_line_edge(edge: float) -> str:
     if edge >= 1.5: return "Acima"
