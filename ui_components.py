@@ -376,12 +376,10 @@ def render_player_focus_panel(
         st.markdown(render_matchup_detail_box_html(row), unsafe_allow_html=True)
 
     with visual_tab:
-    # 1. Gráfico histórico clássico
     render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
 
     st.divider()
 
-    # 2. Histograma de frequência
     st.markdown(f"### Frequência na Temporada — {visual_metric}")
     st.caption("Veja os montinhos: concentrados à esquerda (piso), espalhados à direita (teto).")
 
@@ -390,7 +388,7 @@ def render_player_focus_panel(
     if not log.empty:
         log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
         log["3PM"] = log.get("FG3M", 0)
-        log["3PA"] = log.get("FG3A", log.get("FGA", 0))
+        log["3PA"] = log.get("FG3A", 0)
 
         visual_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
         active_line = float(visual_ctx["line_value"])
@@ -434,8 +432,8 @@ def render_player_focus_panel(
 
                 if not use_market_line and visual_metric != line_metric:
                     st.warning(
-                        f"Atenção: a linha vertical usa o valor manual da sidebar ({active_line}), "
-                        f"que originalmente foi digitado para {line_metric}."
+                        f"A linha vertical usa o valor manual da sidebar ({active_line}), "
+                        f"que foi digitado para {line_metric}."
                     )
 
                 fig.update_layout(
@@ -448,16 +446,8 @@ def render_player_focus_panel(
                     showlegend=False,
                     dragmode=False,
                 )
-                fig.update_xaxes(
-                    title=f"{visual_metric} por jogo",
-                    showgrid=True,
-                    gridcolor="rgba(148,163,184,0.1)"
-                )
-                fig.update_yaxes(
-                    title="Quantidade de jogos",
-                    showgrid=True,
-                    gridcolor="rgba(148,163,184,0.1)"
-                )
+                fig.update_xaxes(title=f"{visual_metric} por jogo", showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                fig.update_yaxes(title="Quantidade de jogos", showgrid=True, gridcolor="rgba(148,163,184,0.1)")
 
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -465,107 +455,108 @@ def render_player_focus_panel(
                 under_count = int((hist_data < active_line).sum())
                 push_count = int((hist_data == active_line).sum())
 
-                push_html = f'<span style="margin: 0 0.8rem; color: #334155;">|</span><span style="color: #cbd5e1;">PUSH = {push_count}</span>' if push_count > 0 else ""
+                push_html = (
+                    f'<span style="margin: 0 0.8rem; color: #334155;">|</span>'
+                    f'<span style="color: #cbd5e1;">PUSH = {push_count}</span>'
+                    if push_count > 0 else ""
+                )
 
                 st.markdown(
-                    f'''
+                    f"""
                     <div style="font-size: 0.95rem; margin-top: 0.35rem;">
                         <span style="color: #10b981;">OVER NA TEMPORADA = {over_count}</span>
                         <span style="margin: 0 0.8rem; color: #334155;">|</span>
                         <span style="color: #ef4444;">UNDER NA TEMPORADA = {under_count}</span>
                         {push_html}
                     </div>
-                    ''',
+                    """,
                     unsafe_allow_html=True
                 )
 
-        st.divider()
+            st.divider()
 
-        # 3. Dispersão: minutos vs produção
-        st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
-        st.caption("Cada ponto é um jogo. A linha de tendência mostra se a produção sobe junto com os minutos.")
+            st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
+            st.caption("Cada ponto é um jogo. A linha de tendência mostra se a produção sobe junto com os minutos.")
 
-        scatter_df = log[["MIN", active_col, "GAME_DATE"]].copy().dropna()
-        if "MATCHUP" in log.columns:
-            scatter_df["MATCHUP"] = log["MATCHUP"]
+            scatter_df = log[["MIN", active_col, "GAME_DATE"]].copy().dropna()
+            scatter_df["MATCHUP"] = log["MATCHUP"] if "MATCHUP" in log.columns else ""
+
+            if not scatter_df.empty:
+                x = scatter_df["MIN"]
+                y = scatter_df[active_col]
+
+                z = np.polyfit(x, y, 1)
+                p = np.poly1d(z)
+                trend_x = np.array([x.min(), x.max()])
+                trend_y = p(trend_x)
+
+                line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
+
+                fig_scatter = go.Figure()
+                fig_scatter.add_trace(go.Scatter(
+                    x=x,
+                    y=y,
+                    mode="markers",
+                    marker=dict(
+                        size=12,
+                        color=np.where(y >= active_line, "#10b981", "#ef4444"),
+                        line=dict(width=1, color="#f8fafc"),
+                        opacity=0.8,
+                    ),
+                    text=scatter_df.apply(
+                        lambda r: f"Data: {r['GAME_DATE'].strftime('%d/%m')}<br>"
+                                  f"Matchup: {r['MATCHUP']}<br>"
+                                  f"Minutos: {r['MIN']}<br>"
+                                  f"{visual_metric}: {r[active_col]}",
+                        axis=1
+                    ),
+                    hoverinfo="text",
+                    name="Jogos"
+                ))
+
+                fig_scatter.add_trace(go.Scatter(
+                    x=trend_x,
+                    y=trend_y,
+                    mode="lines",
+                    line=dict(color="rgba(255, 255, 255, 0.4)", width=2, dash="dot"),
+                    name="Tendência",
+                    hoverinfo="skip"
+                ))
+
+                fig_scatter.add_hline(
+                    y=active_line,
+                    line_dash="dash",
+                    line_color=line_color,
+                    line_width=2,
+                    annotation_text="Linha",
+                    annotation_position="bottom right"
+                )
+
+                fig_scatter.update_layout(
+                    template="plotly_dark",
+                    height=400,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(15,23,42,0.35)",
+                    xaxis_title="Minutos Jogados",
+                    yaxis_title=f"Valor de {visual_metric}",
+                    showlegend=False,
+                    dragmode=False
+                )
+                fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+
+                st.plotly_chart(fig_scatter, use_container_width=True)
+
+                correl = x.corr(y)
+                if correl > 0.7:
+                    st.success(f"📈 Alta Correlação ({correl:.2f}): produção muito dependente dos minutos.")
+                elif correl > 0.4:
+                    st.info(f"📊 Correlação Moderada ({correl:.2f}): minutos ajudam, mas não explicam tudo.")
+                else:
+                    st.warning(f"📉 Baixa Correlação ({correl:.2f}): produção mais oscilante, pouco dependente dos minutos.")
         else:
-            scatter_df["MATCHUP"] = ""
-
-        if not scatter_df.empty:
-            x = scatter_df["MIN"]
-            y = scatter_df[active_col]
-
-            z = np.polyfit(x, y, 1)
-            p = np.poly1d(z)
-            trend_x = np.array([x.min(), x.max()])
-            trend_y = p(trend_x)
-
-            line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
-
-            fig_scatter = go.Figure()
-
-            fig_scatter.add_trace(go.Scatter(
-                x=x,
-                y=y,
-                mode="markers",
-                marker=dict(
-                    size=12,
-                    color=np.where(y >= active_line, "#10b981", "#ef4444"),
-                    line=dict(width=1, color="#f8fafc"),
-                    opacity=0.8,
-                ),
-                text=scatter_df.apply(
-                    lambda r: f"Data: {r['GAME_DATE'].strftime('%d/%m')}<br>"
-                              f"Matchup: {r['MATCHUP']}<br>"
-                              f"Minutos: {r['MIN']}<br>"
-                              f"{visual_metric}: {r[active_col]}",
-                    axis=1
-                ),
-                hoverinfo="text",
-                name="Jogos"
-            ))
-
-            fig_scatter.add_trace(go.Scatter(
-                x=trend_x,
-                y=trend_y,
-                mode="lines",
-                line=dict(color="rgba(255, 255, 255, 0.4)", width=2, dash="dot"),
-                name="Tendência",
-                hoverinfo="skip"
-            ))
-
-            fig_scatter.add_hline(
-                y=active_line,
-                line_dash="dash",
-                line_color=line_color,
-                line_width=2,
-                annotation_text="Linha",
-                annotation_position="bottom right"
-            )
-
-            fig_scatter.update_layout(
-                template="plotly_dark",
-                height=400,
-                margin=dict(l=20, r=20, t=20, b=20),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(15,23,42,0.35)",
-                xaxis_title="Minutos Jogados",
-                yaxis_title=f"Valor de {visual_metric}",
-                showlegend=False,
-                dragmode=False
-            )
-            fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
-            fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
-
-            st.plotly_chart(fig_scatter, use_container_width=True)
-
-            correl = x.corr(y)
-            if correl > 0.7:
-                st.success(f"📈 Alta Correlação ({correl:.2f}): produção muito dependente dos minutos.")
-            elif correl > 0.4:
-                st.info(f"📊 Correlação Moderada ({correl:.2f}): minutos ajudam, mas não explicam tudo.")
-            else:
-                st.warning(f"📉 Baixa Correlação ({correl:.2f}): produção mais oscilante, pouco dependente dos minutos.")
+            st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
     else:
         st.info("Sem histórico suficiente para gerar os gráficos.")
 
