@@ -727,7 +727,7 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
         )
 
         enriched[f"PROJ_{metric}_V1"] = (
-            enriched[f"BASE_{metric}_V1"]
+        enriched[f"BASE_{metric}_V1"]
             * (1 + 0.10 * enriched[f"MATCHUP_SCORE_{metric}_V1"])
         ).clip(lower=0.0)
 
