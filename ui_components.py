@@ -1648,74 +1648,53 @@ def render_player_headline_html(
     """
 
 def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
+    line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
+
     matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{line_metric}_V1", "Neutro"))
     matchup_score_v1 = float(row.get(f"MATCHUP_SCORE_{line_metric}_V1", 0.0))
-
-    if matchup_label_v1 in {"Favorável", "Muito favorável"}:
-        matchup_class = "quick-stat quick-stat-up"
-    elif matchup_label_v1 in {"Difícil", "Muito difícil"}:
-        matchup_class = "quick-stat quick-stat-down"
-    else:
-        matchup_class = "quick-stat"
-
-    line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
-    if line_context["edge"] > 0.75:
-        line_class = "quick-stat quick-stat-up"
-    elif line_context["edge"] < -0.75:
-        line_class = "quick-stat quick-stat-down"
-    else:
-        line_class = "quick-stat quick-stat-primary"
-
-    pts_hit = row.get("PTS_HIT_RATE_L10_TEXT", "-")
-    reb_hit = row.get("REB_HIT_RATE_L10_TEXT", "-")
-    ast_hit = row.get("AST_HIT_RATE_L10_TEXT", "-")
 
     proj_std = float(row.get(get_metric_projection_column(line_metric), 0.0))
     proj_v1 = float(row.get(f"PROJ_{line_metric}_V1", proj_std))
 
-    odds_meta = ""
-    if line_context["has_market_line"] and line_context["over_dec"] and line_context["under_dec"]:
-        odds_meta = f" • O {format_number(line_context['over_dec'], 2)} • U {format_number(line_context['under_dec'], 2)}"
+    c1, c2, c3, c4, c5 = st.columns(5)
 
-    st.markdown(
-        f"""
-        <div class="player-quick-grid">
-            <div class="quick-stat">
-                <div class="quick-stat-label">PTS L10</div>
-                <div class="quick-stat-value">{format_number(row['L10_PTS'])}</div>
-                <div class="quick-stat-meta">Proj {format_number(row['PROJ_PTS'])} • Hit {pts_hit}</div>
-            </div>
+    with c1:
+        st.markdown("**PTS L10**")
+        st.markdown(f"### {format_number(row.get('L10_PTS', 0.0))}")
+        st.caption(
+            f"Proj {format_number(row.get('PROJ_PTS', 0.0))} • "
+            f"Hit {row.get('PTS_HIT_RATE_L10_TEXT', '-')}"
+        )
 
-            <div class="quick-stat">
-                <div class="quick-stat-label">REB L10</div>
-                <div class="quick-stat-value">{format_number(row['L10_REB'])}</div>
-                <div class="quick-stat-meta">Proj {format_number(row['PROJ_REB'])} • Hit {reb_hit}</div>
-            </div>
+    with c2:
+        st.markdown("**REB L10**")
+        st.markdown(f"### {format_number(row.get('L10_REB', 0.0))}")
+        st.caption(
+            f"Proj {format_number(row.get('PROJ_REB', 0.0))} • "
+            f"Hit {row.get('REB_HIT_RATE_L10_TEXT', '-')}"
+        )
 
-            <div class="quick-stat">
-                <div class="quick-stat-label">AST L10</div>
-                <div class="quick-stat-value">{format_number(row['L10_AST'])}</div>
-                <div class="quick-stat-meta">Proj {format_number(row['PROJ_AST'])} • Hit {ast_hit}</div>
-            </div>
+    with c3:
+        st.markdown("**AST L10**")
+        st.markdown(f"### {format_number(row.get('L10_AST', 0.0))}")
+        st.caption(
+            f"Proj {format_number(row.get('PROJ_AST', 0.0))} • "
+            f"Hit {row.get('AST_HIT_RATE_L10_TEXT', '-')}"
+        )
 
-            <div class="{matchup_class}">
-                <div class="quick-stat-label">MATCHUP V1</div>
-                <div class="quick-stat-value">{matchup_label_v1}</div>
-                <div class="quick-stat-meta">Score {format_signed_number(matchup_score_v1, 2)}</div>
-            </div>
+    with c4:
+        st.markdown("**MATCHUP V1**")
+        st.markdown(f"### {matchup_label_v1}")
+        st.caption(f"Score {format_signed_number(matchup_score_v1, 2)}")
 
-            <div class="{line_class}">
-                <div class="quick-stat-label">{line_context['line_source']} {line_metric}</div>
-                <div class="quick-stat-value">{format_signed_number(line_context['edge'])}</div>
-                <div class="quick-stat-meta">
-                    Proj {format_number(proj_std)} • V1 {format_number(proj_v1)} • {line_context['hit_l10']}{odds_meta}
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
+    with c5:
+        st.markdown(f"**{line_context['line_source']} {line_metric}**")
+        st.markdown(f"### {format_signed_number(line_context['edge'])}")
+        st.caption(
+            f"Proj {format_number(proj_std)} • "
+            f"V1 {format_number(proj_v1)} • "
+            f"L10 {line_context['hit_l10']}"
+        )
 
 def render_projection_detail_box_html(row: pd.Series) -> str:
     return f"""
