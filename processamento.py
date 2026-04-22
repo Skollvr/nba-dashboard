@@ -704,10 +704,10 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
         )
 
         enriched[f"BASE_{metric}_V1"] = (
-        enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
+            enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
         )
 
-        enriched["CONTEXT_ADJ_V1"] = enriched.apply(build_context_adj_v1, axis=1)
+    enriched["CONTEXT_ADJ_V1"] = enriched.apply(build_context_adj_v1, axis=1)
 
     for metric in metric_map.keys():
         scale = get_metric_matchup_scale(metric)
