@@ -185,12 +185,12 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
                 render_player_headline_html(row, line_metric, line_value, use_market_line),
                 unsafe_allow_html=True,
             )
-            matchup_ctx = get_metric_matchup_context(row, line_metric)
+            matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{line_metric}_V1", "Neutro"))
             render_badges(
                 row["ROLE"],
                 row.get("FORM_SIGNAL", "→ Estável"),
                 row.get("OSC_CLASS", "-"),
-                matchup_ctx["label"],
+                matchup_label_v1,
             )
 
         # Tiles de suporte e informações de linha originais
@@ -354,21 +354,21 @@ def render_player_focus_panel(
     with overview_tab:
         render_player_support_tiles(row, visual_metric, line_value, use_market_line)
         
-        st.markdown("#### Teste V1 — MODELO NOVO")
-        
-        st.write({
-            "metric": visual_metric,
-            "PROJ_MIN_V1": row.get("PROJ_MIN_V1"),
-            "BASE_V1": row.get(f"BASE_{visual_metric}_V1"),
-            "RATE_V1": row.get(f"RATE_{visual_metric}_V1"),
-            "DEF_ADJ_V1": row.get(f"DEF_ADJ_{visual_metric}_V1"),
-            "FORM_ADJ_V1": row.get(f"FORM_ADJ_{visual_metric}_V1"),
-            "CONTEXT_ADJ_V1": row.get("CONTEXT_ADJ_V1"),
-            "MATCHUP_SCORE_V1": row.get(f"MATCHUP_SCORE_{visual_metric}_V1"),
-            "MATCHUP_LABEL_V1": row.get(f"MATCHUP_LABEL_{visual_metric}_V1"),
-            "PROJ_V1": row.get(f"PROJ_{visual_metric}_V1"),
-            "PROJ_ATUAL": row.get(get_metric_projection_column(visual_metric)),
-        })
+        proj_std = float(row.get(get_metric_projection_column(visual_metric), 0.0))
+        proj_v1 = float(row.get(f"PROJ_{visual_metric}_V1", proj_std))
+        proj_delta = proj_v1 - proj_std
+
+        c_std, c_v1, c_delta = st.columns(3)
+
+        with c_std:
+            st.metric(f"PROJ padrão {visual_metric}", format_number(proj_std))
+
+        with c_v1:
+            st.metric(f"PROJ V1 {visual_metric}", format_number(proj_v1))
+
+        with c_delta:
+            st.metric("Δ V1", format_signed_number(proj_delta))   
+            
         st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
         st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
         st.markdown(
@@ -1546,20 +1546,21 @@ def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, u
     return best_metric, best_ctx
 
 def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str, str, str, str]:
-    matchup_ctx = get_metric_matchup_context(row, metric)
+    matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
+    matchup_score_v1 = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0))
+    opp_allowed = float(row.get(get_metric_allowed_column(metric), 0.0))
     hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
 
     confidence_label, score = _confidence_label_and_score(
         edge=float(ctx.get("edge", 0.0)),
         hit_ratio=hit_ratio,
         osc_class=str(row.get("OSC_CLASS", "-")),
-        matchup_label=matchup_ctx["label"],
+        matchup_label=matchup_label_v1,
         form_signal=str(row.get("FORM_SIGNAL", "→ Estável")),
         inj_status=str(row.get("INJ_STATUS", "Available")),
     )
 
     edge = float(ctx.get("edge", 0.0))
-    matchup = matchup_ctx["label"]
     osc = str(row.get("OSC_CLASS", "-"))
     form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
 
@@ -1587,9 +1588,9 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     elif osc == "Alta":
         reasons.append("oscilação alta")
 
-    if matchup == "Favorável":
+    if matchup_label_v1 in {"Favorável", "Muito favorável"}:
         reasons.append("matchup favorável")
-    elif matchup == "Difícil":
+    elif matchup_label_v1 in {"Difícil", "Muito difícil"}:
         reasons.append("matchup difícil")
 
     if "↗" in form_signal:
@@ -1607,11 +1608,11 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
 
     context_line = (
         f"{row.get('OPP_TEAM_NAME', 'Oponente')} cede "
-        f"{format_number(matchup_ctx['allowed'])} "
+        f"{format_number(opp_allowed)} "
         f"para {row.get('POSITION_GROUP', '-')}"
         f" • linha {format_number(ctx.get('line_value', 0.0))}"
         f" • proj {format_number(ctx.get('projection', 0.0))}"
-        f" • diff {format_signed_number(matchup_ctx['diff'])}"
+        f" • score {format_signed_number(matchup_score_v1, 2)}"
     )
 
     return confidence_label, headline, reason_text, context_line
@@ -1626,8 +1627,8 @@ def render_player_headline_html(
     chosen_ctx = get_line_context(row, chosen_metric, line_value, use_market_line)
     confidence_label, headline, reason_text, context_line = _build_headline_reason(row, chosen_metric, chosen_ctx)
 
-    matchup_ctx = get_metric_matchup_context(row, chosen_metric)
-    matchup_class = get_matchup_chip_class(matchup_ctx["label"])
+    matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{chosen_metric}_V1", "Neutro"))
+    matchup_class = get_matchup_chip_class(matchup_label_v1)
     source_label = "🎯 BetMGM" if chosen_ctx.get("line_source") == "BetMGM" else "✏️ Linha manual"
 
     return f"""
@@ -1640,20 +1641,22 @@ def render_player_headline_html(
         <div class="hero-note">
             {context_line}
             <span class="matchup-chip {matchup_class}" style="margin-left:0.4rem;">
-                {matchup_ctx["label"]} vs {row.get("POSITION_GROUP", "-")}
+                {matchup_label_v1} vs {row.get("POSITION_GROUP", "-")}
             </span>
         </div>
     </div>
     """
 
 def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
-    matchup_ctx = get_metric_matchup_context(row, line_metric)
+    matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{line_metric}_V1", "Neutro"))
+    matchup_score_v1 = float(row.get(f"MATCHUP_SCORE_{line_metric}_V1", 0.0))
 
-    matchup_class = "quick-stat"
-    if matchup_ctx["label"] == "Favorável":
+    if matchup_label_v1 in {"Favorável", "Muito favorável"}:
         matchup_class = "quick-stat quick-stat-up"
-    elif matchup_ctx["label"] == "Difícil":
+    elif matchup_label_v1 in {"Difícil", "Muito difícil"}:
         matchup_class = "quick-stat quick-stat-down"
+    else:
+        matchup_class = "quick-stat"
 
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
     if line_context["edge"] > 0.75:
@@ -1667,6 +1670,9 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
     reb_hit = row.get("REB_HIT_RATE_L10_TEXT", "-")
     ast_hit = row.get("AST_HIT_RATE_L10_TEXT", "-")
 
+    proj_std = float(row.get(get_metric_projection_column(line_metric), 0.0))
+    proj_v1 = float(row.get(f"PROJ_{line_metric}_V1", proj_std))
+
     odds_meta = ""
     if line_context["has_market_line"] and line_context["over_dec"] and line_context["under_dec"]:
         odds_meta = f" • O {format_number(line_context['over_dec'], 2)} • U {format_number(line_context['under_dec'], 2)}"
@@ -1679,29 +1685,30 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
                 <div class="quick-stat-value">{format_number(row['L10_PTS'])}</div>
                 <div class="quick-stat-meta">Proj {format_number(row['PROJ_PTS'])} • Hit {pts_hit}</div>
             </div>
+
             <div class="quick-stat">
                 <div class="quick-stat-label">REB L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_REB'])}</div>
                 <div class="quick-stat-meta">Proj {format_number(row['PROJ_REB'])} • Hit {reb_hit}</div>
             </div>
+
             <div class="quick-stat">
                 <div class="quick-stat-label">AST L10</div>
                 <div class="quick-stat-value">{format_number(row['L10_AST'])}</div>
                 <div class="quick-stat-meta">Proj {format_number(row['PROJ_AST'])} • Hit {ast_hit}</div>
             </div>
+
             <div class="{matchup_class}">
-                <div class="quick-stat-label">MATCHUP</div>
-                <div class="quick-stat-value">{matchup_ctx['label']}</div>
-                <div class="quick-stat-meta">
-                    {line_metric} cedido {format_number(matchup_ctx['allowed'])} • diff {format_signed_number(matchup_ctx['diff'])}
-                </div>
+                <div class="quick-stat-label">MATCHUP V1</div>
+                <div class="quick-stat-value">{matchup_label_v1}</div>
+                <div class="quick-stat-meta">Score {format_signed_number(matchup_score_v1, 2)}</div>
             </div>
+
             <div class="{line_class}">
-                <div class="quick-stat-label">{line_context['line_source'].upper()} {line_metric}</div>
+                <div class="quick-stat-label">{line_context['line_source']} {line_metric}</div>
                 <div class="quick-stat-value">{format_signed_number(line_context['edge'])}</div>
                 <div class="quick-stat-meta">
-                    Proj {format_number(line_context['projection'])} vs {format_number(line_context['line_value'])}
-                    • L10 {line_context['hit_l10_html']}{odds_meta}
+                    Proj {format_number(proj_std)} • V1 {format_number(proj_v1)} • {line_context['hit_l10']}{odds_meta}
                 </div>
             </div>
         </div>
