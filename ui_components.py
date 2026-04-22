@@ -347,7 +347,7 @@ def render_player_focus_panel(
         focus_matchup_label_v1,
     )
     
-    render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
+    st.write("TESTE A")
 
     overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
 
