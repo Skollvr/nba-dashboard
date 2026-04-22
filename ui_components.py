@@ -351,7 +351,7 @@ def render_player_focus_panel(
     with overview_tab:
         render_player_support_tiles(row, visual_metric, line_value, use_market_line)
         
-        st.markdown("#### Teste V1 — Matchup Model")
+        st.markdown("#### Teste V1 — MODELO NOVO")
         
         st.write({
             "metric": visual_metric,
