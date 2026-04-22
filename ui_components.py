@@ -1905,39 +1905,46 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
         matchup_class = "micro-stat micro-stat-bad"
 
     proj_col = get_metric_projection_column(line_metric)
-    season_col = f"SEASON_{line_metric}" if line_metric != "PRA" else "SEASON_PRA"
-    l10_col = f"L10_{line_metric}" if line_metric != "PRA" else "L10_PRA"
+    season_col = "SEASON_PRA" if line_metric == "PRA" else f"SEASON_{line_metric}"
+    l10_col = "L10_PRA" if line_metric == "PRA" else f"L10_{line_metric}"
 
-    st.markdown(
-        f"""
-        <div class="micro-grid">
-            <div class="micro-stat micro-stat-emph">
-                <div class="micro-label">Proj {line_metric}</div>
-                <div class="micro-value">{format_number(row.get(proj_col, 0.0))}</div>
-                <div class="micro-meta">Temp {format_number(row.get(season_col, 0.0))} • L10 {format_number(row.get(l10_col, 0.0))}</div>
-            </div>
-
-            <div class="{line_class}">
-                <div class="micro-label">{line_context['line_source']} {line_metric}</div>
-                <div class="micro-value">{format_signed_number(line_context['edge'])}</div>
-                <div class="micro-meta">Proj {format_number(line_context['projection'])} vs {format_number(line_context['line_value'])} • L10 {line_context['hit_l10']}</div>
-            </div>
-
-            <div class="{matchup_class}">
-                <div class="micro-label">Matchup</div>
-                <div class="micro-value">{matchup_label_v1}</div>
-                <div class="micro-meta">score {format_signed_number(matchup_score_v1, 2)}</div>
-            </div>
-
-            <div class="micro-stat">
-                <div class="micro-label">Oscilação</div>
-                <div class="micro-value">{row.get('OSC_CLASS', '-')}</div>
-                <div class="micro-meta">{row.get('FORM_SIGNAL', '→ Estável')}</div>
+    html = f"""
+    <div class="micro-grid">
+        <div class="micro-stat micro-stat-emph">
+            <div class="micro-label">Proj {line_metric}</div>
+            <div class="micro-value">{format_number(row.get(proj_col, 0.0))}</div>
+            <div class="micro-meta">
+                Temp {format_number(row.get(season_col, 0.0))} •
+                L10 {format_number(row.get(l10_col, 0.0))}
             </div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+
+        <div class="{line_class}">
+            <div class="micro-label">{line_context['line_source']} {line_metric}</div>
+            <div class="micro-value">{format_signed_number(line_context['edge'])}</div>
+            <div class="micro-meta">
+                Proj {format_number(line_context['projection'])} vs {format_number(line_context['line_value'])} •
+                L10 {line_context['hit_l10']}
+            </div>
+        </div>
+
+        <div class="{matchup_class}">
+            <div class="micro-label">Matchup</div>
+            <div class="micro-value">{matchup_label_v1}</div>
+            <div class="micro-meta">
+                Score {format_signed_number(matchup_score_v1, 2)}
+            </div>
+        </div>
+
+        <div class="micro-stat">
+            <div class="micro-label">Oscilação</div>
+            <div class="micro-value">{row.get('OSC_CLASS', '-')}</div>
+            <div class="micro-meta">{row.get('FORM_SIGNAL', '→ Estável')}</div>
+        </div>
+    </div>
+    """
+
+    st.markdown(html, unsafe_allow_html=True)
 
 def render_player_cards_grid(
     filtered_df: pd.DataFrame,
