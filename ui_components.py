@@ -1886,15 +1886,11 @@ def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
         </div>
     </div>
     """
-
 def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
 
     matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{line_metric}_V1", "Neutro"))
     matchup_score_v1 = float(row.get(f"MATCHUP_SCORE_{line_metric}_V1", 0.0))
-    opp_allowed = float(row.get(get_metric_allowed_column(line_metric), 0.0))
-    opp_team = row.get("OPP_TEAM_NAME", "Oponente")
-    pos_group = row.get("POSITION_GROUP", "-")
 
     line_class = "micro-stat micro-stat-emph"
     if line_context["edge"] > 0.75:
@@ -1930,7 +1926,7 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
             <div class="{matchup_class}">
                 <div class="micro-label">Matchup</div>
                 <div class="micro-value">{matchup_label_v1}</div>
-                <div class="micro-meta">{opp_team} vs {pos_group} • score {format_signed_number(matchup_score_v1, 2)}</div>
+                <div class="micro-meta">score {format_signed_number(matchup_score_v1, 2)}</div>
             </div>
 
             <div class="micro-stat">
