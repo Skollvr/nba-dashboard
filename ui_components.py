@@ -335,15 +335,17 @@ def render_player_focus_panel(
         default=line_metric, 
         key=f"v_met_{row['PLAYER_ID']}"
     )
+
     visual_metric = _visual_metric if _visual_metric else line_metric
-    focus_matchup_ctx = get_metric_matchup_context(row, visual_metric)
+    focus_matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{visual_metric}_V1", "Neutro"))
 
     render_badges(
         row.get("ROLE", "-"),
         row.get("FORM_SIGNAL", "→ Estável"),
         row.get("OSC_CLASS", "-"),
-        focus_matchup_ctx["label"],
+        focus_matchup_label_v1,
     )
+    
     render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
 
     overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
@@ -1385,12 +1387,12 @@ def render_badges(role: str, momentum: str, oscillation: str, matchup: str) -> N
     else:
         oscillation_class = "badge-neutral"
 
-    if matchup == "Favorável":
+    if matchup in {"Favorável", "Muito favorável"}:
         matchup_class = "badge-good"
-    elif matchup == "Difícil":
+    elif matchup in {"Difícil", "Muito difícil"}:
         matchup_class = "badge-bad"
     else:
-        matchup_class = "badge-neutral"
+        matchup_class = "badge-neutral"    
 
     st.markdown(
         f"""
