@@ -602,14 +602,30 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
 
     if matchup_df.empty or "POSITION_GROUP" not in matchup_df.columns:
         enriched["OPP_TEAM_NAME"] = opponent_team_name
-        fallback_cols = ["OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED", "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED", "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE", "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE", "MATCHUP_DIFF", "MATCHUP_DIFF_PTS", "MATCHUP_DIFF_REB", "MATCHUP_DIFF_AST", "MATCHUP_DIFF_PRA", "MATCHUP_DIFF_3PM", "MATCHUP_DIFF_FGA", "MATCHUP_DIFF_3PA",]
-    for col in ["MATCHUP_LABEL", "MATCHUP_LABEL_PTS", "MATCHUP_LABEL_REB", "MATCHUP_LABEL_AST",
-            "MATCHUP_LABEL_PRA", "MATCHUP_LABEL_3PM", "MATCHUP_LABEL_FGA", "MATCHUP_LABEL_3PA"]:
-        enriched[col] = "Neutro"
+
+        fallback_cols = [
+            "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED",
+            "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED",
+            "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE",
+            "LEAGUE_3PM_BASELINE", "LEAGUE_FGA_BASELINE", "LEAGUE_3PA_BASELINE",
+            "MATCHUP_DIFF",
+            "MATCHUP_DIFF_PTS", "MATCHUP_DIFF_REB", "MATCHUP_DIFF_AST", "MATCHUP_DIFF_PRA",
+            "MATCHUP_DIFF_3PM", "MATCHUP_DIFF_FGA", "MATCHUP_DIFF_3PA",
+        ]
+        for col in fallback_cols:
+            enriched[col] = 0.0
+
+        for col in [
+            "MATCHUP_LABEL", "MATCHUP_LABEL_PTS", "MATCHUP_LABEL_REB", "MATCHUP_LABEL_AST",
+            "MATCHUP_LABEL_PRA", "MATCHUP_LABEL_3PM", "MATCHUP_LABEL_FGA", "MATCHUP_LABEL_3PA",
+        ]:
+            enriched[col] = "Neutro"
+
     else:
         enriched = enriched.merge(matchup_df, on="POSITION_GROUP", how="left")
         enriched["OPP_TEAM_NAME"] = opponent_team_name
-    for col in [
+
+        for col in [
             "OPP_PTS_ALLOWED", "OPP_REB_ALLOWED", "OPP_AST_ALLOWED", "OPP_PRA_ALLOWED",
             "OPP_3PM_ALLOWED", "OPP_FGA_ALLOWED", "OPP_3PA_ALLOWED",
             "LEAGUE_PTS_BASELINE", "LEAGUE_REB_BASELINE", "LEAGUE_AST_BASELINE", "LEAGUE_PRA_BASELINE",
@@ -618,9 +634,9 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
             "MATCHUP_DIFF_PTS", "MATCHUP_DIFF_REB", "MATCHUP_DIFF_AST", "MATCHUP_DIFF_PRA",
             "MATCHUP_DIFF_3PM", "MATCHUP_DIFF_FGA", "MATCHUP_DIFF_3PA",
         ]:
-        enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
+            enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(0.0)
 
-    for col in [
+        for col in [
             "MATCHUP_LABEL",
             "MATCHUP_LABEL_PTS",
             "MATCHUP_LABEL_REB",
