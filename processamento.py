@@ -180,6 +180,121 @@ def get_metric_recent_list_column(metric: str) -> str:
 
 def get_metric_market_columns(metric: str) -> tuple:
     return ODDS_METRIC_COLUMNS.get(metric, ("", "", "", ""))
+    
+def get_metric_boxscore_column(metric: str) -> str:
+    return {
+        "PRA": "PRA",
+        "PTS": "PTS",
+        "REB": "REB",
+        "AST": "AST",
+        "3PM": "FG3M",
+        "FGA": "FGA",
+        "3PA": "FG3A",
+    }.get(metric, "PRA")
+
+
+def safe_rate(stat_value: float, minutes_value: float) -> float:
+    try:
+        stat_value = float(stat_value)
+        minutes_value = float(minutes_value)
+        if minutes_value <= 0:
+            return 0.0
+        return stat_value / minutes_value
+    except Exception:
+        return 0.0
+
+
+def blend_rate(season_pm: float, l10_pm: float, l5_pm: float) -> float:
+    return (
+        0.50 * float(season_pm)
+        + 0.30 * float(l10_pm)
+        + 0.20 * float(l5_pm)
+    )
+
+
+def project_minutes_v1(
+    season_min: float,
+    l10_min: float,
+    l5_min: float,
+    role: str,
+    inj_status: str = "Available",
+) -> float:
+    proj = (
+        0.55 * float(season_min)
+        + 0.30 * float(l10_min)
+        + 0.15 * float(l5_min)
+    )
+
+    role = str(role or "")
+    inj_status = str(inj_status or "Available")
+
+    if role == "Titular provável":
+        proj += 1.0
+    elif role == "Reserva":
+        proj -= 0.8
+
+    if inj_status == "Questionable":
+        proj -= 1.5
+    elif inj_status in {"Doubtful", "Out"}:
+        proj = 0.0
+
+    return max(0.0, proj)
+
+def get_metric_matchup_scale(metric: str) -> float:
+    return {
+        "PTS": 1.0,
+        "REB": 0.7,
+        "AST": 0.5,
+        "PRA": 1.5,
+        "3PM": 0.25,
+        "FGA": 0.8,
+        "3PA": 0.5,
+    }.get(metric, 0.8)
+
+
+def clamp_value(value: float, min_value: float, max_value: float) -> float:
+    try:
+        value = float(value)
+    except Exception:
+        return min_value
+    return max(min_value, min(max_value, value))
+
+
+def classify_matchup_score_label(score: float) -> str:
+    if score >= 0.75:
+        return "Muito favorável"
+    if score >= 0.25:
+        return "Favorável"
+    if score <= -0.75:
+        return "Muito difícil"
+    if score <= -0.25:
+        return "Difícil"
+    return "Neutro"
+
+
+def build_context_adj_v1(row: pd.Series) -> float:
+    score = 0.0
+
+    role = str(row.get("ROLE", ""))
+    inj_status = str(row.get("INJ_STATUS", "Available"))
+    form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
+
+    if role == "Titular provável":
+        score += 0.10
+    elif role == "Reserva":
+        score -= 0.05
+
+    if "↗" in form_signal:
+        score += 0.05
+    elif "↘" in form_signal:
+        score -= 0.05
+
+    if inj_status == "Questionable":
+        score -= 0.15
+    elif inj_status in {"Doubtful", "Out"}:
+        score -= 1.00
+
+    return clamp_value(score, -1.0, 1.0)
 
 def get_market_line_for_metric(row: pd.Series, metric: str) -> dict:
     line_col, over_col, under_col, updated_col = get_metric_market_columns(metric)
@@ -387,6 +502,8 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         "THREE_PA_HIT_RATE_L10": 0.0, "THREE_PA_HIT_RATE_L10_TEXT": "-", "OSC_L10": 0.0, "OSC_CLASS": "-", "FORM_SIGNAL": "→ Estável",
         "HOME_PRA": 0.0, "AWAY_PRA": 0.0, "HOME_PTS": 0.0, "AWAY_PTS": 0.0, "HOME_REB": 0.0, "AWAY_REB": 0.0, "HOME_AST": 0.0, "AWAY_AST": 0.0,
         "HOME_3PM": 0.0, "AWAY_3PM": 0.0, "HOME_FGA": 0.0, "AWAY_FGA": 0.0, "HOME_3PA": 0.0, "AWAY_3PA": 0.0,
+        "L10_MIN": 0.0,
+        "L5_MIN": 0.0,
     }
     list_defaults = {
         "RECENT_PRA_L10": [], "RECENT_PTS_L10": [], "RECENT_REB_L10": [], "RECENT_AST_L10": [],
@@ -431,6 +548,11 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
         home_logs = player_logs[player_logs["MATCHUP"].str.contains("vs.", regex=False, na=False)]
         away_logs = player_logs[player_logs["MATCHUP"].str.contains("@", regex=False, na=False)]
 
+        recent5 = recent10.head(5).copy()
+
+        l10_min = float(recent10["MIN"].mean()) if "MIN" in recent10.columns and not recent10.empty else 0.0
+        l5_min = float(recent5["MIN"].mean()) if "MIN" in recent5.columns and not recent5.empty else 0.0
+        
         metrics.append({
             "PLAYER_ID": player_id,
             "HIT_RATE_L10": float(hit_count_pra / sample_size), "HIT_RATE_L10_TEXT": format_ratio_text(hit_count_pra, sample_size),
@@ -452,6 +574,8 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
             "HOME_3PM": float(home_logs["FG3M"].mean()) if not home_logs.empty else 0.0, "AWAY_3PM": float(away_logs["FG3M"].mean()) if not away_logs.empty else 0.0,
             "HOME_FGA": float(home_logs["FGA"].mean()) if not home_logs.empty else 0.0, "AWAY_FGA": float(away_logs["FGA"].mean()) if not away_logs.empty else 0.0,
             "HOME_3PA": float(home_logs["FG3A"].mean()) if not home_logs.empty else 0.0, "AWAY_3PA": float(away_logs["FG3A"].mean()) if not away_logs.empty else 0.0,
+            "L10_MIN": l10_min,
+            "L5_MIN": l5_min,
         })
 
     metrics_df = pd.DataFrame(metrics)
@@ -519,7 +643,100 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
     enriched["PROJ_3PA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], row["OPP_3PA_ALLOWED"], row["LEAGUE_3PA_BASELINE"]), axis=1)
     enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], row["OPP_PRA_ALLOWED"], row["LEAGUE_PRA_BASELINE"]), axis=1)
 
+    enriched["PROJ_MIN_V1"] = enriched.apply(
+        lambda row: project_minutes_v1(
+            row.get("SEASON_MIN", 0.0),
+            row.get("L10_MIN", 0.0),
+            row.get("L5_MIN", 0.0),
+            row.get("ROLE", ""),
+            row.get("INJ_STATUS", "Available"),
+        ),
+        axis=1,
+    )
+
+    metric_map = {
+        "PTS": ("SEASON_PTS", "L10_PTS", "L5_PTS"),
+        "REB": ("SEASON_REB", "L10_REB", "L5_REB"),
+        "AST": ("SEASON_AST", "L10_AST", "L5_AST"),
+        "PRA": ("SEASON_PRA", "L10_PRA", "L5_PRA"),
+        "3PM": ("SEASON_3PM", "L10_3PM", "L5_3PM"),
+        "FGA": ("SEASON_FGA", "L10_FGA", "L5_FGA"),
+        "3PA": ("SEASON_3PA", "L10_3PA", "L5_3PA"),
+    }
+
+    for metric, (season_col, l10_col, l5_col) in metric_map.items():
+        enriched[f"SEASON_PM_{metric}"] = enriched.apply(
+            lambda row: safe_rate(row.get(season_col, 0.0), row.get("SEASON_MIN", 0.0)),
+            axis=1,
+        )
+        enriched[f"L10_PM_{metric}"] = enriched.apply(
+            lambda row: safe_rate(row.get(l10_col, 0.0), row.get("L10_MIN", 0.0)),
+            axis=1,
+        )
+        enriched[f"L5_PM_{metric}"] = enriched.apply(
+            lambda row: safe_rate(row.get(l5_col, 0.0), row.get("L5_MIN", 0.0)),
+            axis=1,
+        )
+
+        enriched[f"RATE_{metric}_V1"] = enriched.apply(
+            lambda row: blend_rate(
+                row.get(f"SEASON_PM_{metric}", 0.0),
+                row.get(f"L10_PM_{metric}", 0.0),
+                row.get(f"L5_PM_{metric}", 0.0),
+            ),
+            axis=1,
+        )
+
+    enriched[f"BASE_{metric}_V1"] = (
+            enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
+        )
+
+        enriched["CONTEXT_ADJ_V1"] = enriched.apply(build_context_adj_v1, axis=1)
+
+    for metric in metric_map.keys():
+        scale = get_metric_matchup_scale(metric)
+
+        diff_col = get_metric_matchup_diff_column(metric)
+
+        enriched[f"DEF_ADJ_{metric}_V1"] = enriched[diff_col].apply(
+            lambda x: clamp_value(float(x) / scale if scale > 0 else 0.0, -2.0, 2.0)
+        )
+
+        enriched[f"FORM_ADJ_{metric}_V1"] = enriched.apply(
+            lambda row: clamp_value(
+                (
+                    0.60 * (
+                        (row.get(f"L10_PM_{metric}", 0.0) - row.get(f"SEASON_PM_{metric}", 0.0))
+                        / max(row.get(f"SEASON_PM_{metric}", 0.0), 0.01)
+                    )
+                    + 0.40 * (
+                        (row.get(f"L5_PM_{metric}", 0.0) - row.get(f"SEASON_PM_{metric}", 0.0))
+                        / max(row.get(f"SEASON_PM_{metric}", 0.0), 0.01)
+                    )
+                ),
+                -1.5,
+                1.5,
+            ),
+            axis=1,
+        )
+
+        enriched[f"MATCHUP_SCORE_{metric}_V1"] = (
+            0.65 * enriched[f"DEF_ADJ_{metric}_V1"]
+            + 0.20 * enriched[f"FORM_ADJ_{metric}_V1"]
+            + 0.15 * enriched["CONTEXT_ADJ_V1"]
+        )
+
+        enriched[f"PROJ_{metric}_V1"] = (
+            enriched[f"BASE_{metric}_V1"]
+            * (1 + 0.10 * enriched[f"MATCHUP_SCORE_{metric}_V1"])
+        ).clip(lower=0.0)
+
+        enriched[f"MATCHUP_LABEL_{metric}_V1"] = enriched[f"MATCHUP_SCORE_{metric}_V1"].apply(
+            classify_matchup_score_label
+        )
     return enriched
+
+    
 
 def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFrame:
     if team_df.empty: return team_df
