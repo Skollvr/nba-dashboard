@@ -350,6 +350,21 @@ def render_player_focus_panel(
 
     with overview_tab:
         render_player_support_tiles(row, visual_metric, line_value, use_market_line)
+        st.markdown("#### Teste V1 — Matchup Model")
+
+        st.write({
+            "metric": visual_metric,
+            "PROJ_MIN_V1": row.get("PROJ_MIN_V1"),
+            "BASE_V1": row.get(f"BASE_{visual_metric}_V1"),
+            "RATE_V1": row.get(f"RATE_{visual_metric}_V1"),
+            "DEF_ADJ_V1": row.get(f"DEF_ADJ_{visual_metric}_V1"),
+            "FORM_ADJ_V1": row.get(f"FORM_ADJ_{visual_metric}_V1"),
+            "CONTEXT_ADJ_V1": row.get("CONTEXT_ADJ_V1"),
+            "MATCHUP_SCORE_V1": row.get(f"MATCHUP_SCORE_{visual_metric}_V1"),
+            "MATCHUP_LABEL_V1": row.get(f"MATCHUP_LABEL_{visual_metric}_V1"),
+            "PROJ_V1": row.get(f"PROJ_{visual_metric}_V1"),
+            "PROJ_ATUAL": row.get(get_metric_projection_column(visual_metric)),
+        })
         st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
         st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
         st.markdown(
