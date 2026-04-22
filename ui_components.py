@@ -20,6 +20,7 @@ from processamento import (
     build_display_dataframes,
     build_summary_cards_data,
     get_metric_projection_column,
+    get_metric_allowed_column
 )
 from api_nba import get_player_log
 
@@ -1888,7 +1889,12 @@ def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
 
 def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
-    matchup_ctx = get_metric_matchup_context(row, line_metric)
+
+    matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{line_metric}_V1", "Neutro"))
+    matchup_score_v1 = float(row.get(f"MATCHUP_SCORE_{line_metric}_V1", 0.0))
+    opp_allowed = float(row.get(get_metric_allowed_column(line_metric), 0.0))
+    opp_team = row.get("OPP_TEAM_NAME", "Oponente")
+    pos_group = row.get("POSITION_GROUP", "-")
 
     line_class = "micro-stat micro-stat-emph"
     if line_context["edge"] > 0.75:
@@ -1897,9 +1903,9 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
         line_class = "micro-stat micro-stat-bad"
 
     matchup_class = "micro-stat"
-    if matchup_ctx["label"] == "Favorável":
+    if matchup_label_v1 in {"Favorável", "Muito favorável"}:
         matchup_class = "micro-stat micro-stat-good"
-    elif matchup_ctx["label"] == "Difícil":
+    elif matchup_label_v1 in {"Difícil", "Muito difícil"}:
         matchup_class = "micro-stat micro-stat-bad"
 
     proj_col = get_metric_projection_column(line_metric)
@@ -1914,26 +1920,28 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
                 <div class="micro-value">{format_number(row.get(proj_col, 0.0))}</div>
                 <div class="micro-meta">Temp {format_number(row.get(season_col, 0.0))} • L10 {format_number(row.get(l10_col, 0.0))}</div>
             </div>
+
             <div class="{line_class}">
                 <div class="micro-label">{line_context['line_source']} {line_metric}</div>
                 <div class="micro-value">{format_signed_number(line_context['edge'])}</div>
                 <div class="micro-meta">Proj {format_number(line_context['projection'])} vs {format_number(line_context['line_value'])} • L10 {line_context['hit_l10']}</div>
             </div>
+
             <div class="{matchup_class}">
                 <div class="micro-label">Matchup</div>
-                <div class="micro-value">{matchup_ctx['label']}</div>
-                <div class="micro-meta">{row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']} • diff {format_signed_number(matchup_ctx['diff'])}</div>
+                <div class="micro-value">{matchup_label_v1}</div>
+                <div class="micro-meta">{opp_team} vs {pos_group} • score {format_signed_number(matchup_score_v1, 2)}</div>
             </div>
+
             <div class="micro-stat">
                 <div class="micro-label">Oscilação</div>
-                <div class="micro-value">{row['OSC_CLASS']}</div>
-                <div class="micro-meta">{row['FORM_SIGNAL']}</div>
+                <div class="micro-value">{row.get('OSC_CLASS', '-')}</div>
+                <div class="micro-meta">{row.get('FORM_SIGNAL', '→ Estável')}</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
 
 def render_player_cards_grid(
     filtered_df: pd.DataFrame,
