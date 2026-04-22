@@ -649,7 +649,7 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
             if col not in enriched.columns:
                 enriched[col] = "Neutro"
             else:
-                enriched[col] = enriched[col].fillna("Neutro")
+                enriched[col] = enriched[col].fillna("Neutro")   
 
     enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], row["OPP_PTS_ALLOWED"], row["LEAGUE_PTS_BASELINE"]), axis=1)
     enriched["PROJ_REB"] = enriched.apply(lambda row: calculate_projection(row["SEASON_REB"], row["L10_REB"], row["L5_REB"], row["OPP_REB_ALLOWED"], row["LEAGUE_REB_BASELINE"]), axis=1)
@@ -704,7 +704,7 @@ def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_
         )
 
         enriched[f"BASE_{metric}_V1"] = (
-            enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
+        enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
         )
 
         enriched["CONTEXT_ADJ_V1"] = enriched.apply(build_context_adj_v1, axis=1)
