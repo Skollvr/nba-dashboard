@@ -199,35 +199,129 @@ def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
 # 3. BUSCA DE ESTATÍSTICAS E LOGS DE JOGADORES
 # ==========================================
 @st.cache_data(ttl=54000, show_spinner=False)
-def get_league_player_stats(season: str, last_n_games: int) -> pd.DataFrame:
-    response = run_api_call_with_retry(
-        lambda: leaguedashplayerstats.LeagueDashPlayerStats(
-            season=season,
-            season_type_all_star="Regular Season",
-            per_mode_detailed="PerGame",
-            measure_type_detailed_defense="Base",
-            last_n_games=last_n_games,
-            month=0,
-            opponent_team_id=0,
-            pace_adjust="N",
-            plus_minus="N",
-            rank="N",
-            period=0,
-            team_id_nullable="",
-            timeout=45,
-        ),
-        endpoint_name="LeagueDashPlayerStats",
-    )
-    frames = response.get_data_frames()
-    if not frames:
-        return pd.DataFrame()
+def get_league_player_stats(
+    season: str,
+    last_n_games: int,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    season_types = get_season_types_for_scope(season_scope)
+    all_frames = []
 
-    df = frames[0].copy()
-    if df.empty:
-        return pd.DataFrame(columns=["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"])
+    for season_type in season_types:
+        try:
+            response = run_api_call_with_retry(
+                lambda stype=season_type: leaguedashplayerstats.LeagueDashPlayerStats(
+                    season=season,
+                    season_type_all_star=stype,
+                    per_mode_detailed="PerGame",
+                    measure_type_detailed_defense="Base",
+                    last_n_games=last_n_games,
+                    month=0,
+                    opponent_team_id=0,
+                    pace_adjust="N",
+                    plus_minus="N",
+                    rank="N",
+                    period=0,
+                    team_id_nullable="",
+                    timeout=45,
+                ),
+                endpoint_name=f"LeagueDashPlayerStats_{season_type}",
+            )
 
-    keep_cols = ["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]
-    return df[[c for c in keep_cols if c in df.columns]].copy()
+            frames = response.get_data_frames()
+
+            if frames and not frames[0].empty:
+                df = frames[0].copy()
+                keep_cols = [
+                    "PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN",
+                    "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"
+                ]
+                df = df[[c for c in keep_cols if c in df.columns]].copy()
+                all_frames.append(df)
+
+        except Exception:
+            continue
+
+    if not all_frames:
+        return pd.DataFrame(
+            columns=[
+                "PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN",
+                "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"
+            ]
+        )
+
+    combined = pd.concat(all_frames, ignore_index=True)
+
+    return aggregate_player_stats_by_gp(combined)
+
+def get_season_types_for_scope(season_scope: str) -> list[str]:
+    """
+    Converte o recorte escolhido na UI para os valores aceitos pela nba_api.
+    """
+    if season_scope == "Playoffs":
+        return ["Playoffs"]
+
+    if season_scope == "PlayIn":
+        return ["PlayIn"]
+
+    if season_scope == "All":
+        return ["Regular Season", "PlayIn", "Playoffs"]
+
+    return ["Regular Season"]
+
+
+def aggregate_player_stats_by_gp(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Agrega múltiplos recortes por jogador usando GP como peso.
+    Necessário para o modo 'Tudo', porque o mesmo jogador pode aparecer
+    em Regular Season, PlayIn e Playoffs.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(
+            columns=[
+                "PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN",
+                "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"
+            ]
+        )
+
+    work = df.copy()
+
+    for col in ["PLAYER_ID", "TEAM_ID", "GP", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
+        if col in work.columns:
+            work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0.0)
+
+    rows = []
+
+    for player_id, group in work.groupby("PLAYER_ID", dropna=False):
+        total_gp = float(group["GP"].sum())
+
+        if total_gp <= 0:
+            weights = None
+        else:
+            weights = group["GP"] / total_gp
+
+        def weighted_avg(col: str) -> float:
+            if col not in group.columns:
+                return 0.0
+            if weights is None:
+                return float(group[col].mean())
+            return float((group[col] * weights).sum())
+
+        rows.append({
+            "PLAYER_ID": player_id,
+            "PLAYER_NAME": group["PLAYER_NAME"].iloc[0] if "PLAYER_NAME" in group.columns else "",
+            "TEAM_ID": int(group["TEAM_ID"].iloc[0]) if "TEAM_ID" in group.columns else 0,
+            "GP": total_gp,
+            "MIN": weighted_avg("MIN"),
+            "PTS": weighted_avg("PTS"),
+            "REB": weighted_avg("REB"),
+            "AST": weighted_avg("AST"),
+            "FG3M": weighted_avg("FG3M"),
+            "FGA": weighted_avg("FGA"),
+            "FG3A": weighted_avg("FG3A"),
+        })
+
+    return pd.DataFrame(rows)
 
 @st.cache_data(ttl=54000, show_spinner=False)
 def get_player_log(player_id: int, season: str) -> pd.DataFrame:
