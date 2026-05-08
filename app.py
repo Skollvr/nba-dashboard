@@ -52,7 +52,20 @@ def main():
         line_value = st.number_input("Linha Manual", value=25.5, step=0.5)
         api_key_available = bool(get_odds_api_key())
         use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
+        season_scope_label = st.pills(
+            "Recorte estatístico",
+            ["Temporada Regular", "Playoffs", "Play-In", "Tudo"],
+            default="Temporada Regular",
+        )
 
+        season_scope_map = {
+            "Temporada Regular": "Regular Season",
+            "Playoffs": "Playoffs",
+            "Play-In": "PlayIn",
+            "Tudo": "All",
+        }
+
+        season_scope = season_scope_map.get(season_scope_label, "Regular Season")        
         st.divider()
         st.caption("Este app busca os dados ao abrir a página.")
         if st.button("Forçar atualização"):
@@ -69,7 +82,7 @@ def main():
         st.exception(exc)
         return
 
-    st.caption(f"Temporada detectada: {season}")
+    st.caption(f"Temporada detectada: {season} • Recorte estatístico: {season_scope_label}")
 
     if games.empty:
         st.warning(f"Sem jogos para {selected_date.strftime('%d/%m/%Y')}.")
