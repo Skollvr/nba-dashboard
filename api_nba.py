@@ -324,10 +324,14 @@ def aggregate_player_stats_by_gp(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 @st.cache_data(ttl=54000, show_spinner=False)
-def get_player_log(player_id: int, season: str) -> pd.DataFrame:
-    season_types = ["Regular Season", "PlayIn", "Playoffs"]
+def get_player_log(
+    player_id: int,
+    season: str,
+    season_scope: str = "All",
+) -> pd.DataFrame:
+    season_types = get_season_types_for_scope(season_scope)
     all_logs = []
-    
+
     for stype in season_types:
         try:
             response = run_api_call_with_retry(
@@ -339,9 +343,14 @@ def get_player_log(player_id: int, season: str) -> pd.DataFrame:
                 ),
                 endpoint_name=f"PlayerGameLog_{stype}",
             )
+
             frames = response.get_data_frames()
+
             if frames and not frames[0].empty:
-                all_logs.append(frames[0])
+                temp_df = frames[0].copy()
+                temp_df["SEASON_SCOPE"] = stype
+                all_logs.append(temp_df)
+
         except Exception:
             continue
 
@@ -350,13 +359,18 @@ def get_player_log(player_id: int, season: str) -> pd.DataFrame:
 
     df = pd.concat(all_logs, ignore_index=True)
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
+
     return df.sort_values("GAME_DATE", ascending=False)
 
 @st.cache_data(ttl=54000, show_spinner=False)
-def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
-    season_types = ["Regular Season", "PlayIn", "Playoffs"]
+def get_team_player_logs(
+    team_id: int,
+    season: str,
+    season_scope: str = "All",
+) -> pd.DataFrame:
+    season_types = get_season_types_for_scope(season_scope)
     all_logs = []
-    
+
     for stype in season_types:
         try:
             response = run_api_call_with_retry(
@@ -368,9 +382,14 @@ def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
                 ),
                 endpoint_name=f"PlayerGameLogs_{stype}",
             )
+
             frames = response.get_data_frames()
+
             if frames and not frames[0].empty:
-                all_logs.append(frames[0])
+                temp_df = frames[0].copy()
+                temp_df["SEASON_SCOPE"] = stype
+                all_logs.append(temp_df)
+
         except Exception:
             continue
 
@@ -379,12 +398,15 @@ def get_team_player_logs(team_id: int, season: str) -> pd.DataFrame:
 
     df = pd.concat(all_logs, ignore_index=True)
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
+
     for col in ["PTS", "REB", "AST", "MIN", "FG3M", "FGA", "FG3A"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
         else:
             df[col] = 0.0
+
     df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
+
     return df.sort_values(["PLAYER_ID", "GAME_DATE"], ascending=[True, False])
 
 # ==========================================
