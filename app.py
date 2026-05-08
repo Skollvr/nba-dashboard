@@ -101,6 +101,7 @@ def main():
             use_market_line,
             season_scope=season_scope,
         )
+        
     except Exception as exc:
         st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
