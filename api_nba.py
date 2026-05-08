@@ -413,59 +413,99 @@ def get_team_player_logs(
 # 4. BUSCA DE MATCHUP DE DEFESA
 # ==========================================
 @st.cache_data(ttl=21600, show_spinner=False)
-def get_position_allowed_profile(season: str, opponent_team_id: int, position_group: str) -> pd.DataFrame:
-    try:
-        response = run_api_call_with_retry(
-            lambda: leaguedashplayerstats.LeagueDashPlayerStats(
-                season=season,
-                season_type_all_star="Regular Season",
-                per_mode_detailed="PerGame",
-                measure_type_detailed_defense="Base",
-                last_n_games=0,
-                month=0,
-                opponent_team_id=opponent_team_id,
-                pace_adjust="N",
-                plus_minus="N",
-                rank="N",
-                period=0,
-                team_id_nullable="",
-                player_position_abbreviation_nullable=position_group,
-                timeout=45,
-            ),
-            endpoint_name=f"LeagueDashPlayerStats OPP {position_group}",
-            retries=2,
-            delay=1.5,
-        )
-        frames = response.get_data_frames()
-        return frames[0].copy() if frames else pd.DataFrame()
-    except Exception:
+def get_position_allowed_profile(
+    season: str,
+    opponent_team_id: int,
+    position_group: str,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    season_types = get_season_types_for_scope(season_scope)
+    all_frames = []
+
+    for season_type in season_types:
+        try:
+            response = run_api_call_with_retry(
+                lambda stype=season_type: leaguedashplayerstats.LeagueDashPlayerStats(
+                    season=season,
+                    season_type_all_star=stype,
+                    per_mode_detailed="PerGame",
+                    measure_type_detailed_defense="Base",
+                    last_n_games=0,
+                    month=0,
+                    opponent_team_id=opponent_team_id,
+                    pace_adjust="N",
+                    plus_minus="N",
+                    rank="N",
+                    period=0,
+                    team_id_nullable="",
+                    player_position_abbreviation_nullable=position_group,
+                    timeout=45,
+                ),
+                endpoint_name=f"LeagueDashPlayerStats OPP {position_group} {season_type}",
+                retries=2,
+                delay=1.5,
+            )
+
+            frames = response.get_data_frames()
+
+            if frames and not frames[0].empty:
+                temp_df = frames[0].copy()
+                temp_df["SEASON_SCOPE"] = season_type
+                all_frames.append(temp_df)
+
+        except Exception:
+            continue
+
+    if not all_frames:
         return pd.DataFrame()
 
+    return pd.concat(all_frames, ignore_index=True)
+
 @st.cache_data(ttl=21600, show_spinner=False)
-def get_league_position_baseline(season: str, position_group: str) -> pd.DataFrame:
-    try:
-        response = run_api_call_with_retry(
-            lambda: leaguedashplayerstats.LeagueDashPlayerStats(
-                season=season,
-                season_type_all_star="Regular Season",
-                per_mode_detailed="PerGame",
-                measure_type_detailed_defense="Base",
-                last_n_games=0,
-                month=0,
-                opponent_team_id=0,
-                pace_adjust="N",
-                plus_minus="N",
-                rank="N",
-                period=0,
-                team_id_nullable="",
-                player_position_abbreviation_nullable=position_group,
-                timeout=45,
-            ),
-            endpoint_name=f"LeagueDashPlayerStats BASE {position_group}",
-            retries=2,
-            delay=1.5,
-        )
-        frames = response.get_data_frames()
-        return frames[0].copy() if frames else pd.DataFrame()
-    except Exception:
+def get_league_position_baseline(
+    season: str,
+    position_group: str,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    season_types = get_season_types_for_scope(season_scope)
+    all_frames = []
+
+    for season_type in season_types:
+        try:
+            response = run_api_call_with_retry(
+                lambda stype=season_type: leaguedashplayerstats.LeagueDashPlayerStats(
+                    season=season,
+                    season_type_all_star=stype,
+                    per_mode_detailed="PerGame",
+                    measure_type_detailed_defense="Base",
+                    last_n_games=0,
+                    month=0,
+                    opponent_team_id=0,
+                    pace_adjust="N",
+                    plus_minus="N",
+                    rank="N",
+                    period=0,
+                    team_id_nullable="",
+                    player_position_abbreviation_nullable=position_group,
+                    timeout=45,
+                ),
+                endpoint_name=f"LeagueDashPlayerStats BASE {position_group} {season_type}",
+                retries=2,
+                delay=1.5,
+            )
+
+            frames = response.get_data_frames()
+
+            if frames and not frames[0].empty:
+                temp_df = frames[0].copy()
+                temp_df["SEASON_SCOPE"] = season_type
+                all_frames.append(temp_df)
+
+        except Exception:
+            continue
+
+    if not all_frames:
         return pd.DataFrame()
+
+    return pd.concat(all_frames, ignore_index=True)
+    
