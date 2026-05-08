@@ -4,6 +4,7 @@ import streamlit as st
 
 from nba_api.stats.endpoints import (
     scoreboardv2,
+    scoreboardv3,
     commonteamroster,
     leaguedashplayerstats,
     playergamelog,
@@ -32,44 +33,140 @@ def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 5, dela
 # ==========================================
 # 2. BUSCA DE JOGOS E TIMES
 # ==========================================
-@st.cache_data(ttl=54000, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date) -> pd.DataFrame:
-    response = run_api_call_with_retry(
-        lambda: scoreboardv2.ScoreboardV2(
-            game_date=target_date.strftime("%Y-%m-%d"),
-            day_offset="0",
-            league_id="00",
-            timeout=45,
-        ),
-        endpoint_name="ScoreboardV2",
-    )
+    """
+    Busca jogos da NBA para a data selecionada.
 
-    game_header = response.game_header.get_data_frame()
-    if game_header.empty:
+    Primeiro tenta ScoreboardV2.
+    Se o V2 voltar vazio, usa ScoreboardV3 como fallback.
+    Isso é importante nos playoffs, porque o V2 pode retornar rowSet vazio
+    mesmo quando existem jogos.
+    """
+
+    def empty_games_df() -> pd.DataFrame:
         return pd.DataFrame(
-            columns=["GAME_ID", "HOME_TEAM_ID", "VISITOR_TEAM_ID", "GAME_STATUS_TEXT", "home_team_name", "away_team_name", "label"]
+            columns=[
+                "GAME_ID",
+                "HOME_TEAM_ID",
+                "VISITOR_TEAM_ID",
+                "GAME_STATUS_TEXT",
+                "HOME_TEAM_ABBR",
+                "VISITOR_TEAM_ABBR",
+                "home_team_name",
+                "away_team_name",
+                "label",
+            ]
         )
 
-    rows = []
-    for _, row in game_header.iterrows():
-        home_team_id = int(row["HOME_TEAM_ID"])
-        away_team_id = int(row["VISITOR_TEAM_ID"])
+    # =====================================================
+    # 1) Tentativa principal: ScoreboardV2
+    # =====================================================
+    try:
+        response = run_api_call_with_retry(
+            lambda: scoreboardv2.ScoreboardV2(
+                game_date=target_date.strftime("%Y-%m-%d"),
+                day_offset="0",
+                league_id="00",
+                timeout=45,
+            ),
+            endpoint_name="ScoreboardV2",
+        )
 
-        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", str(home_team_id))
-        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", str(away_team_id))
-        game_status_text = row.get("GAME_STATUS_TEXT", "Sem status")
+        game_header = response.game_header.get_data_frame()
 
-        rows.append({
-            "GAME_ID": str(row["GAME_ID"]),
-            "HOME_TEAM_ID": home_team_id,
-            "VISITOR_TEAM_ID": away_team_id,
-            "GAME_STATUS_TEXT": game_status_text,
-            "home_team_name": home_team_name,
-            "away_team_name": away_team_name,
-            "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
-        })
+        if game_header is not None and not game_header.empty:
+            rows = []
 
-    return pd.DataFrame(rows)
+            for _, row in game_header.iterrows():
+                home_team_id = int(row["HOME_TEAM_ID"])
+                away_team_id = int(row["VISITOR_TEAM_ID"])
+
+                home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", str(home_team_id))
+                away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", str(away_team_id))
+
+                home_abbr = TEAM_LOOKUP.get(home_team_id, {}).get("abbreviation", "")
+                away_abbr = TEAM_LOOKUP.get(away_team_id, {}).get("abbreviation", "")
+
+                game_status_text = row.get("GAME_STATUS_TEXT", "Sem status")
+
+                rows.append({
+                    "GAME_ID": str(row["GAME_ID"]),
+                    "HOME_TEAM_ID": home_team_id,
+                    "VISITOR_TEAM_ID": away_team_id,
+                    "GAME_STATUS_TEXT": game_status_text,
+                    "HOME_TEAM_ABBR": home_abbr,
+                    "VISITOR_TEAM_ABBR": away_abbr,
+                    "home_team_name": home_team_name,
+                    "away_team_name": away_team_name,
+                    "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
+                })
+
+            return pd.DataFrame(rows)
+
+    except Exception:
+        # Se o V2 falhar, não mata o app. Tenta V3 abaixo.
+        pass
+
+    # =====================================================
+    # 2) Fallback: ScoreboardV3
+    # =====================================================
+    try:
+        response_v3 = run_api_call_with_retry(
+            lambda: scoreboardv3.ScoreboardV3(
+                game_date=target_date.strftime("%Y-%m-%d"),
+                league_id="00",
+                timeout=45,
+            ),
+            endpoint_name="ScoreboardV3",
+        )
+
+        payload = response_v3.get_dict()
+        games = payload.get("scoreboard", {}).get("games", [])
+
+        if not games:
+            return empty_games_df()
+
+        rows = []
+
+        for game in games:
+            home = game.get("homeTeam", {}) or {}
+            away = game.get("awayTeam", {}) or {}
+
+            home_team_id = int(home.get("teamId", 0) or 0)
+            away_team_id = int(away.get("teamId", 0) or 0)
+
+            home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get(
+                "full_name",
+                f"{home.get('teamCity', '')} {home.get('teamName', '')}".strip()
+            )
+
+            away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get(
+                "full_name",
+                f"{away.get('teamCity', '')} {away.get('teamName', '')}".strip()
+            )
+
+            home_abbr = home.get("teamTricode", "") or TEAM_LOOKUP.get(home_team_id, {}).get("abbreviation", "")
+            away_abbr = away.get("teamTricode", "") or TEAM_LOOKUP.get(away_team_id, {}).get("abbreviation", "")
+
+            game_status_text = game.get("gameStatusText", "Sem status")
+
+            rows.append({
+                "GAME_ID": str(game.get("gameId", "")),
+                "HOME_TEAM_ID": home_team_id,
+                "VISITOR_TEAM_ID": away_team_id,
+                "GAME_STATUS_TEXT": game_status_text,
+                "HOME_TEAM_ABBR": home_abbr,
+                "VISITOR_TEAM_ABBR": away_abbr,
+                "home_team_name": home_team_name,
+                "away_team_name": away_team_name,
+                "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
+            })
+
+        return pd.DataFrame(rows)
+
+    except Exception:
+        return empty_games_df()
 
 @st.cache_data(ttl=54000, show_spinner=True)
 def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
