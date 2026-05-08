@@ -355,7 +355,12 @@ def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_
     }
 
 @st.cache_data(ttl=21600, show_spinner=False)
-def get_position_opponent_profile_v2(season: str, opponent_team_id: int, position_group: str) -> dict:
+def get_position_opponent_profile_v2(
+    season: str,
+    opponent_team_id: int,
+    position_group: str,
+    season_scope: str = "Regular Season",
+) -> dict:
     fallback = {
         "POSITION_GROUP": str(position_group),
         "OPP_PTS_ALLOWED": 0.0,
@@ -439,8 +444,18 @@ def get_position_opponent_profile_v2(season: str, opponent_team_id: int, positio
                 "GP": total_gp,
             }
 
-        opp_df_raw = get_position_allowed_profile(season, opponent_team_id, position_group)
-        league_df_raw = get_league_position_baseline(season, position_group)
+        opp_raw = get_position_allowed_profile(
+            season,
+            opponent_team_id,
+            position_group,
+            season_scope=season_scope,
+        )
+
+        league_raw = get_league_position_baseline(
+            season,
+            position_group,
+            season_scope=season_scope,
+        )        
 
         opp_profile = weighted_profile(opp_df_raw)
         league_profile = weighted_profile(league_df_raw)
