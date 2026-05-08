@@ -591,13 +591,33 @@ def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.Dat
 
     return enriched
 
-def enrich_team_with_context(team_df: pd.DataFrame, team_id: int, opponent_team_id: int, opponent_team_name: str, season: str) -> pd.DataFrame:
+def enrich_team_with_context(
+    team_df: pd.DataFrame,
+    team_id: int,
+    opponent_team_id: int,
+    opponent_team_name: str,
+    season: str,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    
     if team_df.empty: return team_df
 
-    team_logs = get_team_player_logs(team_id, season)
+    team_logs = get_team_player_logs(
+    team_id,
+    season,
+    season_scope=season_scope,
+)
     enriched = build_form_context(team_df, team_logs)
 
-    matchup_rows = [get_position_opponent_profile_v2(season, opponent_team_id, pos) for pos in ["G", "F", "C"]]
+    matchup_rows = [
+    get_position_opponent_profile_v2(
+        season,
+        opponent_team_id,
+        pos,
+        season_scope=season_scope,
+    )
+    for pos in ["G", "F", "C"]
+]
     matchup_df = pd.DataFrame(matchup_rows)
 
     if matchup_df.empty or "POSITION_GROUP" not in matchup_df.columns:
