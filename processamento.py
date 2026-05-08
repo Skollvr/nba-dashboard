@@ -878,22 +878,61 @@ def build_team_table(
     return team_df[["PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP", "ROLE", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB", "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM", "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA", "SEASON_3PA", "L5_3PA", "L10_3PA", "SEASON_PRA", "L5_PRA", "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND"]].copy()
 
 @st.cache_data(ttl=54000, show_spinner=False)
-def get_matchup_context(away_team_id: int, home_team_id: int, away_team_name: str, home_team_name: str, season: str, include_market: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
-    away_df = build_team_table(away_team_id, season)
-    home_df = build_team_table(home_team_id, season)
+def get_matchup_context(
+    away_team_id: int,
+    home_team_id: int,
+    away_team_name: str,
+    home_team_name: str,
+    season: str,
+    include_market: bool,
+    season_scope: str = "Regular Season",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
 
-    away_df = enrich_team_with_context(team_df=away_df, team_id=away_team_id, opponent_team_id=home_team_id, opponent_team_name=home_team_name, season=season)
-    home_df = enrich_team_with_context(team_df=home_df, team_id=home_team_id, opponent_team_id=away_team_id, opponent_team_name=away_team_name, season=season)
+    away_df = build_team_table(
+        away_team_id,
+        season,
+        season_scope=season_scope,
+    )
+
+    home_df = build_team_table(
+        home_team_id,
+        season,
+        season_scope=season_scope,
+    )
+
+    away_df = enrich_team_with_context(
+        team_df=away_df,
+        team_id=away_team_id,
+        opponent_team_id=home_team_id,
+        opponent_team_name=home_team_name,
+        season=season,
+        season_scope=season_scope,
+    )
+
+    home_df = enrich_team_with_context(
+        team_df=home_df,
+        team_id=home_team_id,
+        opponent_team_id=away_team_id,
+        opponent_team_name=away_team_name,
+        season=season,
+        season_scope=season_scope,
+    )
 
     away_df["TEAM_NAME"] = away_team_name
     home_df["TEAM_NAME"] = home_team_name
+
     away_df["IS_HOME"] = False
     home_df["IS_HOME"] = True
 
     odds_df = pd.DataFrame()
+
     if include_market:
         odds_events = fetch_nba_odds_events()
-        selected_odds_event = find_matching_odds_event(odds_events, home_team_name=home_team_name, away_team_name=away_team_name)
+        selected_odds_event = find_matching_odds_event(
+            odds_events,
+            home_team_name=home_team_name,
+            away_team_name=away_team_name,
+        )
         odds_df = extract_betmgm_player_props(selected_odds_event)
 
     away_df = merge_betmgm_odds(away_df, odds_df)
