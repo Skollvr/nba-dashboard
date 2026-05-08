@@ -784,11 +784,27 @@ def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFr
     return merged
 
 @st.cache_data(ttl=54000, show_spinner=False)
-def build_team_table(team_id: int, season: str) -> pd.DataFrame:
+def build_team_table(
+    team_id: int,
+    season: str,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
     roster = get_team_roster(team_id, season)
-    season_stats = get_league_player_stats(season, last_n_games=0)
-    last5_stats = get_league_player_stats(season, last_n_games=5)
-    last10_stats = get_league_player_stats(season, last_n_games=10)
+        season_stats = get_league_player_stats(
+        season,
+        last_n_games=0,
+        season_scope=season_scope,
+    )
+    last5_stats = get_league_player_stats(
+        season,
+        last_n_games=5,
+        season_scope=season_scope,
+    )
+    last10_stats = get_league_player_stats(
+        season,
+        last_n_games=10,
+        season_scope=season_scope,
+    )
 
     if roster.empty: return pd.DataFrame()
 
