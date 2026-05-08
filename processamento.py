@@ -825,23 +825,27 @@ def build_team_table(
     season_scope: str = "Regular Season",
 ) -> pd.DataFrame:
     roster = get_team_roster(team_id, season)
-        season_stats = get_league_player_stats(
+
+    season_stats = get_league_player_stats(
         season,
         last_n_games=0,
         season_scope=season_scope,
     )
+
     last5_stats = get_league_player_stats(
         season,
         last_n_games=5,
         season_scope=season_scope,
     )
+
     last10_stats = get_league_player_stats(
         season,
         last_n_games=10,
         season_scope=season_scope,
     )
 
-    if roster.empty: return pd.DataFrame()
+    if roster.empty:
+        return pd.DataFrame()
 
     roster = roster[[c for c in ["PLAYER", "PLAYER_ID", "POSITION"] if c in roster.columns]].copy()
     if "POSITION" not in roster.columns: roster["POSITION"] = ""
