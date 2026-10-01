@@ -853,9 +853,12 @@ def build_team_table(
         ].copy()
 
         if not fallback_roster.empty:
-            roster = fallback_roster.rename(
+            fallback_roster = fallback_roster.rename(
                 columns={"PLAYER_NAME": "PLAYER"}
-            )[[c for c in ["PLAYER", "PLAYER_ID"] if c in fallback_roster.rename(columns={"PLAYER_NAME": "PLAYER"}).columns]]
+            )
+            roster = fallback_roster[
+                [c for c in ["PLAYER", "PLAYER_ID"] if c in fallback_roster.columns]
+            ].copy()
             roster["POSITION"] = ""
 
     last5_stats = get_league_player_stats(
