@@ -34,38 +34,42 @@ def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 5, dela
 # ==========================================
 # 2. BUSCA DE JOGOS E TIMES
 # ==========================================
-NBA_SCHEDULE_CDN_URLS = (
-    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json",
-    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json",
-)
+NBA_SCHEDULE_CDN_URL = "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json"
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=86400, show_spinner=False)
 def fetch_nba_schedule_cdn() -> dict:
-    """Baixa o calendário completo da temporada pelo CDN oficial da NBA."""
-    last_error = None
+    """Baixa o calendário completo pelo CDN oficial da NBA com falha rápida."""
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/124.0.0.0 Safari/537.36"
         ),
-        "Accept": "application/json,text/plain,*/*",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin": "https://www.nba.com",
         "Referer": "https://www.nba.com/",
     }
 
-    for url in NBA_SCHEDULE_CDN_URLS:
-        try:
-            response = requests.get(url, headers=headers, timeout=12)
-            response.raise_for_status()
-            payload = response.json()
-            game_dates = payload.get("leagueSchedule", {}).get("gameDates", [])
-            if isinstance(game_dates, list) and game_dates:
-                return payload
-        except Exception as exc:
-            last_error = exc
+    try:
+        response = requests.get(
+            NBA_SCHEDULE_CDN_URL,
+            headers=headers,
+            timeout=(3, 6),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(
+            "O calendário oficial da NBA não respondeu rapidamente."
+        ) from exc
 
-    raise RuntimeError("Não foi possível baixar o calendário oficial da NBA pelo CDN.") from last_error
+    game_dates = payload.get("leagueSchedule", {}).get("gameDates", [])
+    if not isinstance(game_dates, list) or not game_dates:
+        raise RuntimeError("O calendário oficial da NBA retornou sem jogos.")
+
+    return payload
 
 
 def _games_from_schedule_payload(payload: dict, target_date) -> pd.DataFrame:
@@ -163,12 +167,16 @@ def get_games_for_date(target_date) -> pd.DataFrame:
     try:
         schedule_payload = fetch_nba_schedule_cdn()
         return _games_from_schedule_payload(schedule_payload, target_date)
-    except Exception:
-        # Se o CDN falhar, preservamos os scoreboards como fallback.
-        pass
+    except Exception as exc:
+        raise RuntimeError(
+            "Não foi possível carregar a agenda da NBA pelo calendário oficial. "
+            "Tente novamente em alguns segundos."
+        ) from exc
 
     # =====================================================
-    # 2) Fallback: ScoreboardV2
+    # Fallbacks antigos mantidos abaixo apenas para referência futura.
+    # O fluxo interativo não chega até eles: evitamos travamentos longos
+    # durante a navegação entre datas no Streamlit Cloud.
     # =====================================================
     v2_error = None
     try:
