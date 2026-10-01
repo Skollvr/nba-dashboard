@@ -31,6 +31,29 @@ def _reset_selected_date_to_today() -> None:
     st.session_state["selected_game_date"] = get_brasilia_today()
 
 
+def get_previous_season_string(season: str) -> str:
+    start_year = int(str(season).split("-", 1)[0])
+    previous_start = start_year - 1
+    previous_end = str(start_year)[-2:]
+    return f"{previous_start}-{previous_end}"
+
+
+def get_analysis_season(selected_date: date, today: date) -> str:
+    """
+    Usa a temporada anterior como base no começo de uma nova temporada,
+    quando a amostra corrente ainda é pequena. O corte de 15/11 representa
+    aproximadamente as primeiras semanas / cerca de 10 jogos por time.
+    """
+    game_season = get_season_string(selected_date)
+    start_year = int(game_season.split("-", 1)[0])
+    early_season_cutoff = date(start_year, 11, 15)
+
+    if today < early_season_cutoff and selected_date >= date(start_year, 10, 1):
+        return get_previous_season_string(game_season)
+
+    return game_season
+
+
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
     inject_css()
@@ -130,9 +153,16 @@ def main():
             st.rerun()
 
     season = get_season_string(selected_date)
+    analysis_season = get_analysis_season(selected_date, today)
     selected_date_key = selected_date.isoformat()
 
-    st.caption(f"Temporada detectada: {season} • Recorte estatístico: {season_scope_label}")
+    if analysis_season != season:
+        st.caption(
+            f"Temporada do jogo: {season} • Base estatística: {analysis_season} "
+            f"(início de temporada) • Recorte: {season_scope_label}"
+        )
+    else:
+        st.caption(f"Temporada detectada: {season} • Recorte estatístico: {season_scope_label}")
 
     if search_games:
         st.session_state.pop("loaded_matchup_key", None)
@@ -173,6 +203,7 @@ def main():
         f"{selected_date.isoformat()}::"
         f"{selected_game['GAME_ID']}::"
         f"{season_scope}::"
+        f"{analysis_season}::"
         f"{int(use_market_line)}"
     )
 
@@ -189,7 +220,7 @@ def main():
                 int(selected_game["HOME_TEAM_ID"]),
                 selected_game["away_team_name"],
                 selected_game["home_team_name"],
-                season,
+                analysis_season,
                 use_market_line,
                 season_scope=season_scope,
             )
@@ -222,7 +253,7 @@ def main():
     render_team_section_v2(
         selected_team,
         target_df,
-        season,
+        analysis_season,
         min_games,
         min_minutes,
         role_filter,
