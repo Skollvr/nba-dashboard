@@ -4,6 +4,7 @@ import requests
 import streamlit as st
 
 from nba_api.stats.endpoints import (
+    scoreboardv2,
     commonteamroster,
     leaguedashplayerstats,
     playergamelog,
@@ -41,6 +42,66 @@ TEAM_ID_BY_ABBR = {
     for team_id, team_data in TEAM_LOOKUP.items()
     if team_data.get("abbreviation")
 }
+
+
+def _empty_games_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "GAME_ID",
+            "HOME_TEAM_ID",
+            "VISITOR_TEAM_ID",
+            "GAME_STATUS_TEXT",
+            "HOME_TEAM_ABBR",
+            "VISITOR_TEAM_ABBR",
+            "home_team_name",
+            "away_team_name",
+            "label",
+        ]
+    )
+
+
+def _games_from_nba_scoreboard_v2(game_header: pd.DataFrame) -> pd.DataFrame:
+    """Converte o GameHeader do ScoreboardV2 para o formato usado pelo app."""
+    if game_header is None or game_header.empty:
+        return _empty_games_df()
+
+    rows = []
+
+    for _, row in game_header.iterrows():
+        home_team_id = int(row["HOME_TEAM_ID"])
+        away_team_id = int(row["VISITOR_TEAM_ID"])
+
+        home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", str(home_team_id))
+        away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", str(away_team_id))
+        home_abbr = TEAM_LOOKUP.get(home_team_id, {}).get("abbreviation", "")
+        away_abbr = TEAM_LOOKUP.get(away_team_id, {}).get("abbreviation", "")
+        game_status_text = row.get("GAME_STATUS_TEXT", "Sem status")
+
+        rows.append({
+            "GAME_ID": str(row["GAME_ID"]),
+            "HOME_TEAM_ID": home_team_id,
+            "VISITOR_TEAM_ID": away_team_id,
+            "GAME_STATUS_TEXT": game_status_text,
+            "HOME_TEAM_ABBR": home_abbr,
+            "VISITOR_TEAM_ABBR": away_abbr,
+            "home_team_name": home_team_name,
+            "away_team_name": away_team_name,
+            "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
+        })
+
+    return pd.DataFrame(rows, columns=_empty_games_df().columns)
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_nba_scoreboard_v2_once(target_date) -> pd.DataFrame:
+    """Tenta a fonte original da NBA uma única vez, com timeout curto."""
+    response = scoreboardv2.ScoreboardV2(
+        game_date=target_date.strftime("%Y-%m-%d"),
+        day_offset="0",
+        league_id="00",
+        timeout=8,
+    )
+    return _games_from_nba_scoreboard_v2(response.game_header.get_data_frame())
 
 
 def _nba_team_from_espn(competitor: dict) -> tuple[int, str, str]:
@@ -162,13 +223,35 @@ def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date) -> pd.DataFrame:
     """
-    Busca os jogos da data selecionada sem depender de stats.nba.com.
+    Busca os jogos da data selecionada.
 
-    A agenda vem do scoreboard público da ESPN. Os times são convertidos
-    pelas siglas para os IDs oficiais da NBA usados no restante do dashboard.
+    1) Tenta primeiro o ScoreboardV2 original da NBA, como nas versões antigas
+       do app, mas com uma única tentativa e timeout curto.
+    2) Se a NBA falhar ou retornar vazio, usa o scoreboard público da ESPN
+       como fallback para confirmar a agenda.
     """
-    payload = fetch_espn_games_for_date(target_date)
-    return _games_from_espn_payload(payload)
+    nba_error = None
+
+    try:
+        nba_games = fetch_nba_scoreboard_v2_once(target_date)
+        if not nba_games.empty:
+            return nba_games
+    except Exception as exc:
+        nba_error = exc
+
+    try:
+        espn_payload = fetch_espn_games_for_date(target_date)
+        return _games_from_espn_payload(espn_payload)
+    except Exception as espn_exc:
+        if nba_error is not None:
+            raise RuntimeError(
+                "Não foi possível consultar a agenda: NBA e fallback ESPN falharam."
+            ) from espn_exc
+
+        raise RuntimeError(
+            "A NBA retornou sem jogos e o fallback ESPN falhou; "
+            "não foi possível confirmar a agenda."
+        ) from espn_exc
 
 
 @st.cache_data(ttl=54000, show_spinner=True)
