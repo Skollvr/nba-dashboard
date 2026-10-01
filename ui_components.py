@@ -283,7 +283,8 @@ def render_player_focus_panel(
     use_market_line: bool,
     season: str,
     chart_mode: str,
-    opp_abbr: str
+    opp_abbr: str,
+    season_scope: str = "Regular Season",
 ) -> None:
     # --- RASTREADOR DE CORES (GSW/CHA FIX) ---
     t_name = str(row.get('TEAM_NAME', '')).upper()
@@ -411,14 +412,14 @@ def render_player_focus_panel(
         st.markdown(render_matchup_detail_box_html(row, visual_metric), unsafe_allow_html=True)
 
     with visual_tab:
-        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
+        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric, season_scope=season_scope)
 
         st.divider()
 
         st.markdown(f"### Frequência na Temporada — {visual_metric}")
         st.caption("Veja os montinhos: concentrados à esquerda (piso), espalhados à direita (teto).")
 
-        log = get_player_log(int(row["PLAYER_ID"]), season)
+        log = get_player_log(int(row["PLAYER_ID"]), season, season_scope=season_scope)
 
         if not log.empty:
             log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
@@ -691,7 +692,8 @@ def render_team_section_v2(
     line_value: float,
     use_market_line: bool,
     cards_per_row: int,
-    opp_abbr
+    opp_abbr,
+    season_scope: str = "Regular Season",
 ) -> None:
     if team_df.empty:
         st.warning(f"Não encontrei dados para {team_name}.")
@@ -752,6 +754,7 @@ def render_team_section_v2(
             season,
             chart_mode,
             opp_abbr,
+            season_scope=season_scope,
         )
 
     st.divider()
@@ -1266,8 +1269,15 @@ def render_game_rankings(
     with tab_cons:
         st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
 
-def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str, visual_metric: str) -> None:
-    log = get_player_log(player_id, season)
+def render_player_chart(
+    player_name: str,
+    player_id: int,
+    season: str,
+    chart_mode: str,
+    visual_metric: str,
+    season_scope: str = "Regular Season",
+) -> None:
+    log = get_player_log(player_id, season, season_scope=season_scope)
     if log.empty:
         st.info("Sem histórico suficiente para esse jogador.")
         return
@@ -1470,25 +1480,25 @@ def _confidence_label_and_score(
     matchup_label: str,
     form_signal: str,
     inj_status: str,
-) -> tuple[str, int]:
+) -> tuple[str, int, str]:
+    """Pontua a confiança na direção indicada pela projeção (OVER ou UNDER)."""
     score = 0
+    direction = "OVER" if edge >= 0 else "UNDER"
+    edge_strength = abs(float(edge))
 
-    if edge >= 2.5:
+    if edge_strength >= 2.5:
         score += 3
-    elif edge >= 1.0:
+    elif edge_strength >= 1.0:
         score += 2
-    elif edge >= 0.3:
+    elif edge_strength >= 0.3:
         score += 1
-    elif edge <= -2.0:
-        score -= 3
-    elif edge <= -0.8:
-        score -= 2
 
-    if hit_ratio >= 0.70:
+    directional_hit_ratio = hit_ratio if direction == "OVER" else (1.0 - hit_ratio)
+    if directional_hit_ratio >= 0.70:
         score += 2
-    elif hit_ratio >= 0.55:
+    elif directional_hit_ratio >= 0.55:
         score += 1
-    elif hit_ratio <= 0.40:
+    elif directional_hit_ratio <= 0.40:
         score -= 2
 
     if osc_class == "Baixa":
@@ -1496,26 +1506,30 @@ def _confidence_label_and_score(
     elif osc_class == "Alta":
         score -= 1
 
-    if matchup_label == "Favorável":
+    favorable_matchup = matchup_label in {"Favorável", "Muito favorável"}
+    difficult_matchup = matchup_label in {"Difícil", "Muito difícil"}
+    if (direction == "OVER" and favorable_matchup) or (direction == "UNDER" and difficult_matchup):
         score += 1
-    elif matchup_label == "Difícil":
+    elif (direction == "OVER" and difficult_matchup) or (direction == "UNDER" and favorable_matchup):
         score -= 1
 
-    if "↗" in str(form_signal):
+    form_signal = str(form_signal)
+    if (direction == "OVER" and "↗" in form_signal) or (direction == "UNDER" and "↘" in form_signal):
         score += 1
-    elif "↘" in str(form_signal):
+    elif (direction == "OVER" and "↘" in form_signal) or (direction == "UNDER" and "↗" in form_signal):
         score -= 1
 
+    # Availability uncertainty reduces confidence in either betting direction.
     if str(inj_status) in {"Out", "Doubtful"}:
         score -= 3
-    elif str(inj_status) in {"Questionable"}:
+    elif str(inj_status) == "Questionable":
         score -= 1
 
     if score >= 5:
-        return "🔥 Confiança Alta", score
+        return "🔥 Confiança Alta", score, direction
     if score >= 2:
-        return "🟡 Confiança Média", score
-    return "🔴 Confiança Baixa", score
+        return "🟡 Confiança Média", score, direction
+    return "🔴 Confiança Baixa", score, direction
 
 
 def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> tuple[str, dict]:
@@ -1551,7 +1565,7 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     opp_allowed = float(row.get(get_metric_allowed_column(metric), 0.0))
     hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
 
-    confidence_label, score = _confidence_label_and_score(
+    confidence_label, score, direction = _confidence_label_and_score(
         edge=float(ctx.get("edge", 0.0)),
         hit_ratio=hit_ratio,
         osc_class=str(row.get("OSC_CLASS", "-")),
@@ -1563,25 +1577,26 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     edge = float(ctx.get("edge", 0.0))
     osc = str(row.get("OSC_CLASS", "-"))
     form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
+    directional_hit_ratio = hit_ratio if direction == "OVER" else (1.0 - hit_ratio)
 
     if score >= 5:
-        headline = f"Vale ficar de olho em {metric}"
+        headline = f"Sinal forte para {direction} em {metric}"
     elif score >= 2:
-        headline = f"Sinal moderado para {metric}"
+        headline = f"Sinal moderado para {direction} em {metric}"
     else:
-        headline = f"Cautela com {metric}"
+        headline = f"Cautela com {direction} em {metric}"
 
     reasons = []
 
-    if edge >= 1.5:
+    if edge >= 1.0:
         reasons.append("proj acima da linha")
     elif edge <= -1.0:
         reasons.append("proj abaixo da linha")
 
-    if hit_ratio >= 0.70:
-        reasons.append("hit recente forte")
-    elif hit_ratio <= 0.40:
-        reasons.append("hit recente fraco")
+    if directional_hit_ratio >= 0.70:
+        reasons.append(f"{direction} recente forte")
+    elif directional_hit_ratio <= 0.40:
+        reasons.append(f"{direction} recente fraco")
 
     if osc == "Baixa":
         reasons.append("oscilação baixa")
@@ -1589,9 +1604,9 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
         reasons.append("oscilação alta")
 
     if matchup_label_v1 in {"Favorável", "Muito favorável"}:
-        reasons.append("matchup favorável")
+        reasons.append("matchup favorável à produção")
     elif matchup_label_v1 in {"Difícil", "Muito difícil"}:
-        reasons.append("matchup difícil")
+        reasons.append("matchup difícil para produção")
 
     if "↗" in form_signal:
         reasons.append("momento em alta")
