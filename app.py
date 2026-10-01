@@ -90,6 +90,11 @@ def main():
             )
 
         st.caption(f"Agenda selecionada: {selected_date.strftime('%d/%m/%Y')}")
+        search_games = st.button(
+            "Buscar jogos",
+            type="primary",
+            use_container_width=True,
+        )
         st.divider()
 
         chart_mode = st.pills("Gráfico", CHART_OPTIONS, default="Compacto")
@@ -122,21 +127,39 @@ def main():
             st.rerun()
 
     season = get_season_string(selected_date)
-
-    try:
-        with st.spinner(f"Buscando jogos de {selected_date.strftime('%d/%m/%Y')}..."):
-            games = get_games_for_date(selected_date)
-    except Exception as exc:
-        st.error("A NBA demorou ou falhou ao responder na consulta dos jogos. Tente novamente em alguns segundos ou use o botão de atualização.")
-        st.exception(exc)
-        return
+    selected_date_key = selected_date.isoformat()
 
     st.caption(f"Temporada detectada: {season} • Recorte estatístico: {season_scope_label}")
+
+    if search_games:
+        st.session_state.pop("loaded_matchup_key", None)
+        try:
+            with st.spinner(f"Buscando jogos de {selected_date.strftime('%d/%m/%Y')}..."):
+                games = get_games_for_date(selected_date)
+        except Exception as exc:
+            st.session_state.pop("agenda_games", None)
+            st.session_state.pop("agenda_date_key", None)
+            st.error("A NBA demorou ou falhou ao responder na consulta dos jogos. Tente novamente em alguns segundos.")
+            st.exception(exc)
+            return
+
+        st.session_state["agenda_games"] = games
+        st.session_state["agenda_date_key"] = selected_date_key
+
+    agenda_date_key = st.session_state.get("agenda_date_key")
+    games = st.session_state.get("agenda_games")
+
+    if agenda_date_key != selected_date_key or games is None:
+        st.info(
+            f"Selecione a data desejada e clique em **Buscar jogos** para carregar a agenda de "
+            f"{selected_date.strftime('%d/%m/%Y')}."
+        )
+        return
 
     if games.empty:
         st.warning(
             f"Sem jogos para {selected_date.strftime('%d/%m/%Y')}. "
-            "Escolha outra data na barra lateral ou use os botões de navegação."
+            "Escolha outra data e clique em Buscar jogos."
         )
         return
 
