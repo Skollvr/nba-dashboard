@@ -320,9 +320,13 @@ def calculate_projection(season_value: float, l10_value: float, l5_value: float,
 
 def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_line: bool = False) -> dict:
     projection_col = get_metric_projection_column(metric)
+    projection_v1_col = f"PROJ_{metric}_V1"
     recent_list_col = get_metric_recent_list_column(metric)
 
-    projection = float(row.get(projection_col, 0.0))
+    # Prefer the context-aware V1 projection when available. It incorporates
+    # projected minutes, recent rate, matchup and injury status.
+    projection_raw = row.get(projection_v1_col, row.get(projection_col, 0.0))
+    projection = float(pd.to_numeric(projection_raw, errors="coerce") or 0.0)
     market_info = get_market_line_for_metric(row, metric)
     market_line = pd.to_numeric(market_info.get("line"), errors="coerce")
     use_market = bool(use_market_line and pd.notna(market_line))
