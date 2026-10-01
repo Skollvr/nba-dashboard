@@ -124,7 +124,8 @@ def main():
     season = get_season_string(selected_date)
 
     try:
-        games = get_games_for_date(selected_date)
+        with st.spinner(f"Buscando jogos de {selected_date.strftime('%d/%m/%Y')}..."):
+            games = get_games_for_date(selected_date)
     except Exception as exc:
         st.error("A NBA demorou ou falhou ao responder na consulta dos jogos. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
@@ -142,18 +143,33 @@ def main():
     game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
+    selected_game_key = (
+        f"{selected_date.isoformat()}::"
+        f"{selected_game['GAME_ID']}::"
+        f"{season_scope}::"
+        f"{int(use_market_line)}"
+    )
+
+    if st.session_state.get("loaded_matchup_key") != selected_game_key:
+        st.info("Jogo selecionado. Clique abaixo para carregar estatísticas, projeções e matchup.")
+        if not st.button("Carregar confronto", type="primary", use_container_width=True):
+            return
+        st.session_state["loaded_matchup_key"] = selected_game_key
+
     try:
-        away_df, home_df = get_matchup_context(
-            int(selected_game["VISITOR_TEAM_ID"]),
-            int(selected_game["HOME_TEAM_ID"]),
-            selected_game["away_team_name"],
-            selected_game["home_team_name"],
-            season,
-            use_market_line,
-            season_scope=season_scope,
-        )
+        with st.spinner("Carregando dados do confronto..."):
+            away_df, home_df = get_matchup_context(
+                int(selected_game["VISITOR_TEAM_ID"]),
+                int(selected_game["HOME_TEAM_ID"]),
+                selected_game["away_team_name"],
+                selected_game["home_team_name"],
+                season,
+                use_market_line,
+                season_scope=season_scope,
+            )
         
     except Exception as exc:
+        st.session_state.pop("loaded_matchup_key", None)
         st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
         st.exception(exc)
         return
