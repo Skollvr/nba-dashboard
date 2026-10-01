@@ -457,8 +457,8 @@ def get_position_opponent_profile_v2(
             season_scope=season_scope,
         )        
 
-        opp_profile = weighted_profile(opp_df_raw)
-        league_profile = weighted_profile(league_df_raw)
+        opp_profile = weighted_profile(opp_raw)
+        league_profile = weighted_profile(league_raw)
 
         diff_pts = float(opp_profile["PTS"]) - float(league_profile["PTS"])
         diff_reb = float(opp_profile["REB"]) - float(league_profile["REB"])
