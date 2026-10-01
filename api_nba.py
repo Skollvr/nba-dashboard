@@ -223,35 +223,44 @@ def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date) -> pd.DataFrame:
     """
-    Busca os jogos da data selecionada.
+    Busca os jogos da data selecionada combinando NBA e ESPN.
 
-    1) Tenta primeiro o ScoreboardV2 original da NBA, como nas versões antigas
-       do app, mas com uma única tentativa e timeout curto.
-    2) Se a NBA falhar ou retornar vazio, usa o scoreboard público da ESPN
-       como fallback para confirmar a agenda.
+    O ScoreboardV2 pode ocasionalmente devolver uma agenda parcial para datas
+    futuras. Por isso, consultamos também a ESPN e fazemos a união dos jogos,
+    removendo duplicados pelo par visitante/casa.
     """
+    nba_games = _empty_games_df()
+    espn_games = _empty_games_df()
     nba_error = None
+    espn_error = None
 
     try:
         nba_games = fetch_nba_scoreboard_v2_once(target_date)
-        if not nba_games.empty:
-            return nba_games
     except Exception as exc:
         nba_error = exc
 
     try:
         espn_payload = fetch_espn_games_for_date(target_date)
-        return _games_from_espn_payload(espn_payload)
-    except Exception as espn_exc:
-        if nba_error is not None:
-            raise RuntimeError(
-                "Não foi possível consultar a agenda: NBA e fallback ESPN falharam."
-            ) from espn_exc
+        espn_games = _games_from_espn_payload(espn_payload)
+    except Exception as exc:
+        espn_error = exc
 
+    frames = [df for df in [nba_games, espn_games] if df is not None and not df.empty]
+
+    if frames:
+        combined = pd.concat(frames, ignore_index=True)
+        combined = combined.drop_duplicates(
+            subset=["VISITOR_TEAM_ID", "HOME_TEAM_ID"],
+            keep="first",
+        ).reset_index(drop=True)
+        return combined
+
+    if nba_error is not None and espn_error is not None:
         raise RuntimeError(
-            "A NBA retornou sem jogos e o fallback ESPN falhou; "
-            "não foi possível confirmar a agenda."
-        ) from espn_exc
+            "Não foi possível consultar a agenda: NBA e ESPN falharam."
+        ) from espn_error
+
+    return _empty_games_df()
 
 
 @st.cache_data(ttl=54000, show_spinner=True)
