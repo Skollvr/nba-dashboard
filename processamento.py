@@ -828,13 +828,35 @@ def build_team_table(
     season: str,
     season_scope: str = "Regular Season",
 ) -> pd.DataFrame:
-    roster = get_team_roster(team_id, season)
-
+    # LeagueDashPlayerStats já traz PLAYER_ID, PLAYER_NAME e TEAM_ID.
+    # Buscamos essa base primeiro para termos um fallback caso
+    # CommonTeamRoster não responda no Streamlit Cloud.
     season_stats = get_league_player_stats(
         season,
         last_n_games=0,
         season_scope=season_scope,
     )
+
+    try:
+        roster = get_team_roster(team_id, season)
+    except Exception:
+        roster = pd.DataFrame()
+
+    if roster.empty and not season_stats.empty and "TEAM_ID" in season_stats.columns:
+        fallback_roster = season_stats.copy()
+        fallback_roster["TEAM_ID"] = pd.to_numeric(
+            fallback_roster["TEAM_ID"],
+            errors="coerce",
+        )
+        fallback_roster = fallback_roster[
+            fallback_roster["TEAM_ID"] == int(team_id)
+        ].copy()
+
+        if not fallback_roster.empty:
+            roster = fallback_roster.rename(
+                columns={"PLAYER_NAME": "PLAYER"}
+            )[[c for c in ["PLAYER", "PLAYER_ID"] if c in fallback_roster.rename(columns={"PLAYER_NAME": "PLAYER"}).columns]]
+            roster["POSITION"] = ""
 
     last5_stats = get_league_player_stats(
         season,
