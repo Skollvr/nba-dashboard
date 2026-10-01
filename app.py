@@ -121,9 +121,12 @@ def main():
 
         season_scope = season_scope_map.get(season_scope_label, "Regular Season")        
         st.divider()
-        st.caption("Este app busca os dados ao abrir a página.")
+        st.caption("A agenda só é consultada quando você clicar em Buscar jogos.")
         if st.button("Forçar atualização"):
             st.cache_data.clear()
+            st.session_state.pop("agenda_games", None)
+            st.session_state.pop("agenda_date_key", None)
+            st.session_state.pop("loaded_matchup_key", None)
             st.rerun()
 
     season = get_season_string(selected_date)
