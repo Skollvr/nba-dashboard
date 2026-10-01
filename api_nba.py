@@ -17,7 +17,7 @@ from config import TEAM_LOOKUP
 # ==========================================
 # 1. FUNÇÃO MESTRE DE TENTATIVAS (RETRY)
 # ==========================================
-def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 5, delay: float = 2.5):
+def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 2, delay: float = 1.0):
     """Tenta chamar a API da NBA com pausas progressivas para evitar bloqueios."""
     last_error = None
     for attempt in range(retries):
@@ -269,7 +269,7 @@ def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
         lambda: commonteamroster.CommonTeamRoster(
             team_id=team_id,
             season=season,
-            timeout=45,
+            timeout=15,
         ),
         endpoint_name="CommonTeamRoster",
     )
@@ -318,7 +318,7 @@ def get_league_player_stats(
                     rank="N",
                     period=0,
                     team_id_nullable="",
-                    timeout=45,
+                    timeout=15,
                 ),
                 endpoint_name=f"LeagueDashPlayerStats_{season_type}",
             )
@@ -434,7 +434,7 @@ def get_player_log(
                     player_id=player_id,
                     season=season,
                     season_type_all_star=st,
-                    timeout=45,
+                    timeout=15,
                 ),
                 endpoint_name=f"PlayerGameLog_{stype}",
             )
@@ -473,7 +473,7 @@ def get_team_player_logs(
                     team_id_nullable=team_id,
                     season_nullable=season,
                     season_type_nullable=st,
-                    timeout=45,
+                    timeout=15,
                 ),
                 endpoint_name=f"PlayerGameLogs_{stype}",
             )
@@ -534,11 +534,11 @@ def get_position_allowed_profile(
                     period=0,
                     team_id_nullable="",
                     player_position_abbreviation_nullable=position_group,
-                    timeout=45,
+                    timeout=15,
                 ),
                 endpoint_name=f"LeagueDashPlayerStats OPP {position_group} {season_type}",
-                retries=2,
-                delay=1.5,
+                retries=1,
+                delay=1.0,
             )
 
             frames = response.get_data_frames()
@@ -582,11 +582,11 @@ def get_league_position_baseline(
                     period=0,
                     team_id_nullable="",
                     player_position_abbreviation_nullable=position_group,
-                    timeout=45,
+                    timeout=15,
                 ),
                 endpoint_name=f"LeagueDashPlayerStats BASE {position_group} {season_type}",
-                retries=2,
-                delay=1.5,
+                retries=1,
+                delay=1.0,
             )
 
             frames = response.get_data_frames()
