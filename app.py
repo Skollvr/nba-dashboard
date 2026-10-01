@@ -141,6 +141,7 @@ def main():
         use_market_line,
         cards_per_row,
         opp_abbr,
+        season_scope=season_scope,
     )
 
 if __name__ == "__main__":
