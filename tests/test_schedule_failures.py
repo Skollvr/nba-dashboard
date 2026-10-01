@@ -46,6 +46,58 @@ class ScheduleFailureTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         mock_espn.assert_not_called()
 
+
+    @patch("api_nba.fetch_espn_games_for_date")
+    @patch("api_nba.fetch_nba_scoreboard_v2_once")
+    def test_partial_nba_schedule_is_completed_by_espn(self, mock_nba, mock_espn):
+        mock_nba.return_value = pd.DataFrame(
+            [
+                {
+                    "GAME_ID": "nba-1",
+                    "HOME_TEAM_ID": 1610612765,
+                    "VISITOR_TEAM_ID": 1610612738,
+                    "GAME_STATUS_TEXT": "3:00 PM ET",
+                    "HOME_TEAM_ABBR": "DET",
+                    "VISITOR_TEAM_ABBR": "BOS",
+                    "home_team_name": "Detroit Pistons",
+                    "away_team_name": "Boston Celtics",
+                    "label": "Boston Celtics @ Detroit Pistons • 3:00 PM ET",
+                }
+            ]
+        )
+        mock_espn.return_value = {
+            "events": [
+                {
+                    "id": "espn-1",
+                    "status": {"type": {"shortDetail": "3:00 PM ET"}},
+                    "competitions": [{"competitors": [
+                        {"homeAway": "away", "team": {"abbreviation": "BOS", "displayName": "Boston Celtics"}},
+                        {"homeAway": "home", "team": {"abbreviation": "DET", "displayName": "Detroit Pistons"}},
+                    ]}],
+                },
+                {
+                    "id": "espn-2",
+                    "status": {"type": {"shortDetail": "7:00 PM ET"}},
+                    "competitions": [{"competitors": [
+                        {"homeAway": "away", "team": {"abbreviation": "PHI", "displayName": "Philadelphia 76ers"}},
+                        {"homeAway": "home", "team": {"abbreviation": "NYK", "displayName": "New York Knicks"}},
+                    ]}],
+                },
+                {
+                    "id": "espn-3",
+                    "status": {"type": {"shortDetail": "9:30 PM ET"}},
+                    "competitions": [{"competitors": [
+                        {"homeAway": "away", "team": {"abbreviation": "OKC", "displayName": "Oklahoma City Thunder"}},
+                        {"homeAway": "home", "team": {"abbreviation": "SAS", "displayName": "San Antonio Spurs"}},
+                    ]}],
+                },
+            ]
+        }
+
+        result = get_games_for_date(date(2026, 10, 20))
+
+        self.assertEqual(len(result), 3)
+
     @patch("api_nba.fetch_espn_games_for_date")
     @patch("api_nba.fetch_nba_scoreboard_v2_once")
     def test_both_sources_failing_raises(self, mock_nba, mock_espn):
