@@ -69,9 +69,11 @@ def get_games_for_date(target_date) -> pd.DataFrame:
                 game_date=target_date.strftime("%Y-%m-%d"),
                 day_offset="0",
                 league_id="00",
-                timeout=45,
+                timeout=12,
             ),
             endpoint_name="ScoreboardV2",
+            retries=2,
+            delay=1.0,
         )
 
         game_header = response.game_header.get_data_frame()
@@ -117,9 +119,11 @@ def get_games_for_date(target_date) -> pd.DataFrame:
             lambda: scoreboardv3.ScoreboardV3(
                 game_date=target_date.strftime("%Y-%m-%d"),
                 league_id="00",
-                timeout=45,
+                timeout=12,
             ),
             endpoint_name="ScoreboardV3",
+            retries=2,
+            delay=1.0,
         )
 
         payload = response_v3.get_dict()
