@@ -889,20 +889,31 @@ def get_matchup_context(
     season: str,
     include_market: bool,
     season_scope: str = "Regular Season",
+    progress_callback=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
 
+    def report(message: str) -> None:
+        if progress_callback is not None:
+            try:
+                progress_callback(message)
+            except Exception:
+                pass
+
+    report(f"Carregando elenco e médias de {away_team_name}...")
     away_df = build_team_table(
         away_team_id,
         season,
         season_scope=season_scope,
     )
 
+    report(f"Carregando elenco e médias de {home_team_name}...")
     home_df = build_team_table(
         home_team_id,
         season,
         season_scope=season_scope,
     )
 
+    report("Consultando Injury Report...")
     # Injuries must be merged before projections are calculated so
     # Questionable/Doubtful/Out can influence minutes/context and rankings.
     try:
@@ -927,6 +938,7 @@ def get_matchup_context(
         game_matchup=game_matchup,
     )
 
+    report(f"Carregando histórico e matchup de {away_team_name}...")
     away_df = enrich_team_with_context(
         team_df=away_df,
         team_id=away_team_id,
@@ -936,6 +948,7 @@ def get_matchup_context(
         season_scope=season_scope,
     )
 
+    report(f"Carregando histórico e matchup de {home_team_name}...")
     home_df = enrich_team_with_context(
         team_df=home_df,
         team_id=home_team_id,
@@ -954,6 +967,7 @@ def get_matchup_context(
     odds_df = pd.DataFrame()
 
     if include_market:
+        report("Consultando linhas de mercado...")
         odds_events = fetch_nba_odds_events()
         selected_odds_event = find_matching_odds_event(
             odds_events,
@@ -962,6 +976,7 @@ def get_matchup_context(
         )
         odds_df = extract_betmgm_player_props(selected_odds_event)
 
+    report("Finalizando projeções e cards...")
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
 
