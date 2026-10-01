@@ -214,7 +214,7 @@ def main():
         st.session_state["loaded_matchup_key"] = selected_game_key
 
     try:
-        with st.spinner("Carregando dados do confronto..."):
+        with st.status("Carregando dados do confronto...", expanded=True) as load_status:
             away_df, home_df = get_matchup_context(
                 int(selected_game["VISITOR_TEAM_ID"]),
                 int(selected_game["HOME_TEAM_ID"]),
@@ -223,6 +223,12 @@ def main():
                 analysis_season,
                 use_market_line,
                 season_scope=season_scope,
+                progress_callback=load_status.write,
+            )
+            load_status.update(
+                label="Dados do confronto carregados.",
+                state="complete",
+                expanded=False,
             )
         
     except Exception as exc:
