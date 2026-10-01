@@ -1,5 +1,6 @@
 import time
 import pandas as pd
+import requests
 import streamlit as st
 
 from nba_api.stats.endpoints import (
@@ -33,15 +34,112 @@ def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 5, dela
 # ==========================================
 # 2. BUSCA DE JOGOS E TIMES
 # ==========================================
+NBA_SCHEDULE_CDN_URLS = (
+    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json",
+    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json",
+)
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_nba_schedule_cdn() -> dict:
+    """Baixa o calendário completo da temporada pelo CDN oficial da NBA."""
+    last_error = None
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": "https://www.nba.com/",
+    }
+
+    for url in NBA_SCHEDULE_CDN_URLS:
+        try:
+            response = requests.get(url, headers=headers, timeout=12)
+            response.raise_for_status()
+            payload = response.json()
+            game_dates = payload.get("leagueSchedule", {}).get("gameDates", [])
+            if isinstance(game_dates, list) and game_dates:
+                return payload
+        except Exception as exc:
+            last_error = exc
+
+    raise RuntimeError("Não foi possível baixar o calendário oficial da NBA pelo CDN.") from last_error
+
+
+def _games_from_schedule_payload(payload: dict, target_date) -> pd.DataFrame:
+    """Filtra o calendário completo para apenas a data escolhida."""
+    columns = [
+        "GAME_ID",
+        "HOME_TEAM_ID",
+        "VISITOR_TEAM_ID",
+        "GAME_STATUS_TEXT",
+        "HOME_TEAM_ABBR",
+        "VISITOR_TEAM_ABBR",
+        "home_team_name",
+        "away_team_name",
+        "label",
+    ]
+
+    league_schedule = payload.get("leagueSchedule", {}) if isinstance(payload, dict) else {}
+    game_dates = league_schedule.get("gameDates", [])
+    if not isinstance(game_dates, list):
+        return pd.DataFrame(columns=columns)
+
+    rows = []
+
+    for date_block in game_dates:
+        raw_date = str(date_block.get("gameDate", "") or "").strip()
+        parsed_date = pd.to_datetime(raw_date, errors="coerce")
+        if pd.isna(parsed_date) or parsed_date.date() != target_date:
+            continue
+
+        for game in date_block.get("games", []) or []:
+            home = game.get("homeTeam", {}) or {}
+            away = game.get("awayTeam", {}) or {}
+
+            home_team_id = int(home.get("teamId", 0) or 0)
+            away_team_id = int(away.get("teamId", 0) or 0)
+
+            home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get(
+                "full_name",
+                f"{home.get('teamCity', '')} {home.get('teamName', '')}".strip(),
+            )
+            away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get(
+                "full_name",
+                f"{away.get('teamCity', '')} {away.get('teamName', '')}".strip(),
+            )
+
+            home_abbr = home.get("teamTricode", "") or TEAM_LOOKUP.get(home_team_id, {}).get("abbreviation", "")
+            away_abbr = away.get("teamTricode", "") or TEAM_LOOKUP.get(away_team_id, {}).get("abbreviation", "")
+            game_status_text = game.get("gameStatusText", "Sem status") or "Sem status"
+
+            rows.append({
+                "GAME_ID": str(game.get("gameId", "")),
+                "HOME_TEAM_ID": home_team_id,
+                "VISITOR_TEAM_ID": away_team_id,
+                "GAME_STATUS_TEXT": game_status_text,
+                "HOME_TEAM_ABBR": home_abbr,
+                "VISITOR_TEAM_ABBR": away_abbr,
+                "home_team_name": home_team_name,
+                "away_team_name": away_team_name,
+                "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
+            })
+
+        break
+
+    return pd.DataFrame(rows, columns=columns)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date) -> pd.DataFrame:
     """
     Busca jogos da NBA para a data selecionada.
 
-    Primeiro tenta ScoreboardV2.
-    Se o V2 voltar vazio, usa ScoreboardV3 como fallback.
-    Isso é importante nos playoffs, porque o V2 pode retornar rowSet vazio
-    mesmo quando existem jogos.
+    Primeiro usa o calendário completo do CDN oficial da NBA, que fica em cache
+    e permite trocar de data sem repetir chamadas pesadas. ScoreboardV2/V3 ficam
+    apenas como fallback caso o CDN esteja indisponível.
     """
 
     def empty_games_df() -> pd.DataFrame:
@@ -60,7 +158,17 @@ def get_games_for_date(target_date) -> pd.DataFrame:
         )
 
     # =====================================================
-    # 1) Tentativa principal: ScoreboardV2
+    # 1) Tentativa principal: calendário completo via CDN
+    # =====================================================
+    try:
+        schedule_payload = fetch_nba_schedule_cdn()
+        return _games_from_schedule_payload(schedule_payload, target_date)
+    except Exception:
+        # Se o CDN falhar, preservamos os scoreboards como fallback.
+        pass
+
+    # =====================================================
+    # 2) Fallback: ScoreboardV2
     # =====================================================
     v2_error = None
     try:
@@ -112,7 +220,7 @@ def get_games_for_date(target_date) -> pd.DataFrame:
         v2_error = exc
 
     # =====================================================
-    # 2) Fallback: ScoreboardV3
+    # 3) Último fallback: ScoreboardV3
     # =====================================================
     try:
         response_v3 = run_api_call_with_retry(
