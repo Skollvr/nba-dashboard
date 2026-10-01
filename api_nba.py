@@ -62,6 +62,7 @@ def get_games_for_date(target_date) -> pd.DataFrame:
     # =====================================================
     # 1) Tentativa principal: ScoreboardV2
     # =====================================================
+    v2_error = None
     try:
         response = run_api_call_with_retry(
             lambda: scoreboardv2.ScoreboardV2(
@@ -104,9 +105,9 @@ def get_games_for_date(target_date) -> pd.DataFrame:
 
             return pd.DataFrame(rows)
 
-    except Exception:
-        # Se o V2 falhar, não mata o app. Tenta V3 abaixo.
-        pass
+    except Exception as exc:
+        # Se o V2 falhar, tentamos o V3 antes de concluir que a agenda está indisponível.
+        v2_error = exc
 
     # =====================================================
     # 2) Fallback: ScoreboardV3
@@ -165,8 +166,14 @@ def get_games_for_date(target_date) -> pd.DataFrame:
 
         return pd.DataFrame(rows)
 
-    except Exception:
-        return empty_games_df()
+    except Exception as exc:
+        if v2_error is not None:
+            raise RuntimeError(
+                "Não foi possível consultar a agenda da NBA: ScoreboardV2 e ScoreboardV3 falharam."
+            ) from exc
+        raise RuntimeError(
+            "O ScoreboardV2 retornou sem jogos e o ScoreboardV3 falhou; não foi possível confirmar a agenda."
+        ) from exc
 
 @st.cache_data(ttl=54000, show_spinner=True)
 def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
