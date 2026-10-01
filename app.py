@@ -43,6 +43,12 @@ def main():
 
     with st.sidebar:
         st.header("Configurações")
+        selected_date = st.date_input(
+            "Data dos jogos",
+            value=get_brasilia_today(),
+            format="DD/MM/YYYY",
+        )
+        st.divider()
         chart_mode = st.pills("Gráfico", CHART_OPTIONS, default="Compacto")
         cards_per_row = st.pills("Cards/Linha", [1, 2], default=2)
         min_games = st.slider("Min Jogos", 0, 82, 5)
@@ -72,7 +78,6 @@ def main():
             st.cache_data.clear()
             st.rerun()
 
-    selected_date = get_brasilia_today()
     season = get_season_string(selected_date)
 
     try:
