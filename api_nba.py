@@ -4,8 +4,6 @@ import requests
 import streamlit as st
 
 from nba_api.stats.endpoints import (
-    scoreboardv2,
-    scoreboardv3,
     commonteamroster,
     leaguedashplayerstats,
     playergamelog,
@@ -34,12 +32,37 @@ def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 5, dela
 # ==========================================
 # 2. BUSCA DE JOGOS E TIMES
 # ==========================================
-NBA_SCHEDULE_CDN_URL = "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json"
+ESPN_NBA_SCOREBOARD_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+)
+
+TEAM_ID_BY_ABBR = {
+    str(team_data.get("abbreviation", "")).upper(): int(team_id)
+    for team_id, team_data in TEAM_LOOKUP.items()
+    if team_data.get("abbreviation")
+}
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def fetch_nba_schedule_cdn() -> dict:
-    """Baixa o calendário completo pelo CDN oficial da NBA com falha rápida."""
+def _nba_team_from_espn(competitor: dict) -> tuple[int, str, str]:
+    team = competitor.get("team", {}) or {}
+    abbr = str(team.get("abbreviation", "") or "").upper().strip()
+    team_id = TEAM_ID_BY_ABBR.get(abbr, 0)
+
+    if team_id:
+        team_name = TEAM_LOOKUP.get(team_id, {}).get(
+            "full_name",
+            str(team.get("displayName", "") or abbr),
+        )
+    else:
+        team_name = str(team.get("displayName", "") or team.get("shortDisplayName", "") or abbr)
+
+    return team_id, team_name, abbr
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_espn_games_for_date(target_date) -> dict:
+    """Busca apenas a agenda do dia no scoreboard público da ESPN."""
+    params = {"dates": target_date.strftime("%Y%m%d")}
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -47,33 +70,30 @@ def fetch_nba_schedule_cdn() -> dict:
             "Chrome/124.0.0.0 Safari/537.36"
         ),
         "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Origin": "https://www.nba.com",
-        "Referer": "https://www.nba.com/",
     }
 
     try:
         response = requests.get(
-            NBA_SCHEDULE_CDN_URL,
+            ESPN_NBA_SCOREBOARD_URL,
+            params=params,
             headers=headers,
-            timeout=(3, 6),
+            timeout=(3, 8),
         )
         response.raise_for_status()
         payload = response.json()
     except Exception as exc:
         raise RuntimeError(
-            "O calendário oficial da NBA não respondeu rapidamente."
+            "A agenda alternativa não respondeu rapidamente."
         ) from exc
 
-    game_dates = payload.get("leagueSchedule", {}).get("gameDates", [])
-    if not isinstance(game_dates, list) or not game_dates:
-        raise RuntimeError("O calendário oficial da NBA retornou sem jogos.")
+    events = payload.get("events", [])
+    if not isinstance(events, list):
+        raise RuntimeError("A agenda alternativa retornou um formato inesperado.")
 
     return payload
 
 
-def _games_from_schedule_payload(payload: dict, target_date) -> pd.DataFrame:
-    """Filtra o calendário completo para apenas a data escolhida."""
+def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
     columns = [
         "GAME_ID",
         "HOME_TEAM_ID",
@@ -86,52 +106,55 @@ def _games_from_schedule_payload(payload: dict, target_date) -> pd.DataFrame:
         "label",
     ]
 
-    league_schedule = payload.get("leagueSchedule", {}) if isinstance(payload, dict) else {}
-    game_dates = league_schedule.get("gameDates", [])
-    if not isinstance(game_dates, list):
-        return pd.DataFrame(columns=columns)
-
     rows = []
 
-    for date_block in game_dates:
-        raw_date = str(date_block.get("gameDate", "") or "").strip()
-        parsed_date = pd.to_datetime(raw_date, errors="coerce")
-        if pd.isna(parsed_date) or parsed_date.date() != target_date:
+    for event in payload.get("events", []) or []:
+        competitions = event.get("competitions", []) or []
+        if not competitions:
             continue
 
-        for game in date_block.get("games", []) or []:
-            home = game.get("homeTeam", {}) or {}
-            away = game.get("awayTeam", {}) or {}
+        competition = competitions[0] or {}
+        competitors = competition.get("competitors", []) or []
 
-            home_team_id = int(home.get("teamId", 0) or 0)
-            away_team_id = int(away.get("teamId", 0) or 0)
+        home_comp = next(
+            (item for item in competitors if item.get("homeAway") == "home"),
+            None,
+        )
+        away_comp = next(
+            (item for item in competitors if item.get("homeAway") == "away"),
+            None,
+        )
 
-            home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get(
-                "full_name",
-                f"{home.get('teamCity', '')} {home.get('teamName', '')}".strip(),
-            )
-            away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get(
-                "full_name",
-                f"{away.get('teamCity', '')} {away.get('teamName', '')}".strip(),
-            )
+        if not home_comp or not away_comp:
+            continue
 
-            home_abbr = home.get("teamTricode", "") or TEAM_LOOKUP.get(home_team_id, {}).get("abbreviation", "")
-            away_abbr = away.get("teamTricode", "") or TEAM_LOOKUP.get(away_team_id, {}).get("abbreviation", "")
-            game_status_text = game.get("gameStatusText", "Sem status") or "Sem status"
+        home_team_id, home_team_name, home_abbr = _nba_team_from_espn(home_comp)
+        away_team_id, away_team_name, away_abbr = _nba_team_from_espn(away_comp)
 
-            rows.append({
-                "GAME_ID": str(game.get("gameId", "")),
-                "HOME_TEAM_ID": home_team_id,
-                "VISITOR_TEAM_ID": away_team_id,
-                "GAME_STATUS_TEXT": game_status_text,
-                "HOME_TEAM_ABBR": home_abbr,
-                "VISITOR_TEAM_ABBR": away_abbr,
-                "home_team_name": home_team_name,
-                "away_team_name": away_team_name,
-                "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
-            })
+        # O restante do dashboard depende dos IDs oficiais da NBA.
+        # Se a ESPN devolver uma sigla desconhecida, ignoramos a linha em vez
+        # de carregar um confronto com IDs inválidos.
+        if not home_team_id or not away_team_id:
+            continue
 
-        break
+        status_type = (event.get("status", {}) or {}).get("type", {}) or {}
+        game_status_text = (
+            status_type.get("shortDetail")
+            or status_type.get("detail")
+            or "Agendado"
+        )
+
+        rows.append({
+            "GAME_ID": str(event.get("id", "")),
+            "HOME_TEAM_ID": home_team_id,
+            "VISITOR_TEAM_ID": away_team_id,
+            "GAME_STATUS_TEXT": str(game_status_text),
+            "HOME_TEAM_ABBR": home_abbr,
+            "VISITOR_TEAM_ABBR": away_abbr,
+            "home_team_name": home_team_name,
+            "away_team_name": away_team_name,
+            "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
+        })
 
     return pd.DataFrame(rows, columns=columns)
 
@@ -139,161 +162,14 @@ def _games_from_schedule_payload(payload: dict, target_date) -> pd.DataFrame:
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date) -> pd.DataFrame:
     """
-    Busca jogos da NBA para a data selecionada.
+    Busca os jogos da data selecionada sem depender de stats.nba.com.
 
-    Primeiro usa o calendário completo do CDN oficial da NBA, que fica em cache
-    e permite trocar de data sem repetir chamadas pesadas. ScoreboardV2/V3 ficam
-    apenas como fallback caso o CDN esteja indisponível.
+    A agenda vem do scoreboard público da ESPN. Os times são convertidos
+    pelas siglas para os IDs oficiais da NBA usados no restante do dashboard.
     """
+    payload = fetch_espn_games_for_date(target_date)
+    return _games_from_espn_payload(payload)
 
-    def empty_games_df() -> pd.DataFrame:
-        return pd.DataFrame(
-            columns=[
-                "GAME_ID",
-                "HOME_TEAM_ID",
-                "VISITOR_TEAM_ID",
-                "GAME_STATUS_TEXT",
-                "HOME_TEAM_ABBR",
-                "VISITOR_TEAM_ABBR",
-                "home_team_name",
-                "away_team_name",
-                "label",
-            ]
-        )
-
-    # =====================================================
-    # 1) Tentativa principal: calendário completo via CDN
-    # =====================================================
-    try:
-        schedule_payload = fetch_nba_schedule_cdn()
-        return _games_from_schedule_payload(schedule_payload, target_date)
-    except Exception as exc:
-        raise RuntimeError(
-            "Não foi possível carregar a agenda da NBA pelo calendário oficial. "
-            "Tente novamente em alguns segundos."
-        ) from exc
-
-    # =====================================================
-    # Fallbacks antigos mantidos abaixo apenas para referência futura.
-    # O fluxo interativo não chega até eles: evitamos travamentos longos
-    # durante a navegação entre datas no Streamlit Cloud.
-    # =====================================================
-    v2_error = None
-    try:
-        response = run_api_call_with_retry(
-            lambda: scoreboardv2.ScoreboardV2(
-                game_date=target_date.strftime("%Y-%m-%d"),
-                day_offset="0",
-                league_id="00",
-                timeout=12,
-            ),
-            endpoint_name="ScoreboardV2",
-            retries=2,
-            delay=1.0,
-        )
-
-        game_header = response.game_header.get_data_frame()
-
-        if game_header is not None and not game_header.empty:
-            rows = []
-
-            for _, row in game_header.iterrows():
-                home_team_id = int(row["HOME_TEAM_ID"])
-                away_team_id = int(row["VISITOR_TEAM_ID"])
-
-                home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get("full_name", str(home_team_id))
-                away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get("full_name", str(away_team_id))
-
-                home_abbr = TEAM_LOOKUP.get(home_team_id, {}).get("abbreviation", "")
-                away_abbr = TEAM_LOOKUP.get(away_team_id, {}).get("abbreviation", "")
-
-                game_status_text = row.get("GAME_STATUS_TEXT", "Sem status")
-
-                rows.append({
-                    "GAME_ID": str(row["GAME_ID"]),
-                    "HOME_TEAM_ID": home_team_id,
-                    "VISITOR_TEAM_ID": away_team_id,
-                    "GAME_STATUS_TEXT": game_status_text,
-                    "HOME_TEAM_ABBR": home_abbr,
-                    "VISITOR_TEAM_ABBR": away_abbr,
-                    "home_team_name": home_team_name,
-                    "away_team_name": away_team_name,
-                    "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
-                })
-
-            return pd.DataFrame(rows)
-
-    except Exception as exc:
-        # Se o V2 falhar, tentamos o V3 antes de concluir que a agenda está indisponível.
-        v2_error = exc
-
-    # =====================================================
-    # 3) Último fallback: ScoreboardV3
-    # =====================================================
-    try:
-        response_v3 = run_api_call_with_retry(
-            lambda: scoreboardv3.ScoreboardV3(
-                game_date=target_date.strftime("%Y-%m-%d"),
-                league_id="00",
-                timeout=12,
-            ),
-            endpoint_name="ScoreboardV3",
-            retries=2,
-            delay=1.0,
-        )
-
-        payload = response_v3.get_dict()
-        games = payload.get("scoreboard", {}).get("games", [])
-
-        if not games:
-            return empty_games_df()
-
-        rows = []
-
-        for game in games:
-            home = game.get("homeTeam", {}) or {}
-            away = game.get("awayTeam", {}) or {}
-
-            home_team_id = int(home.get("teamId", 0) or 0)
-            away_team_id = int(away.get("teamId", 0) or 0)
-
-            home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get(
-                "full_name",
-                f"{home.get('teamCity', '')} {home.get('teamName', '')}".strip()
-            )
-
-            away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get(
-                "full_name",
-                f"{away.get('teamCity', '')} {away.get('teamName', '')}".strip()
-            )
-
-            home_abbr = home.get("teamTricode", "") or TEAM_LOOKUP.get(home_team_id, {}).get("abbreviation", "")
-            away_abbr = away.get("teamTricode", "") or TEAM_LOOKUP.get(away_team_id, {}).get("abbreviation", "")
-
-            game_status_text = game.get("gameStatusText", "Sem status")
-
-            rows.append({
-                "GAME_ID": str(game.get("gameId", "")),
-                "HOME_TEAM_ID": home_team_id,
-                "VISITOR_TEAM_ID": away_team_id,
-                "GAME_STATUS_TEXT": game_status_text,
-                "HOME_TEAM_ABBR": home_abbr,
-                "VISITOR_TEAM_ABBR": away_abbr,
-                "home_team_name": home_team_name,
-                "away_team_name": away_team_name,
-                "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
-            })
-
-        return pd.DataFrame(rows)
-
-    except Exception as exc:
-        if v2_error is not None:
-            raise RuntimeError(
-                "Não foi possível consultar a agenda da NBA: ScoreboardV2 e ScoreboardV3 falharam."
-            ) from exc
-        raise RuntimeError(
-            "O ScoreboardV2 retornou sem jogos e o ScoreboardV3 falhou; não foi possível confirmar a agenda."
-        ) from exc
 
 @st.cache_data(ttl=54000, show_spinner=True)
 def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
