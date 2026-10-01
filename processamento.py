@@ -877,7 +877,6 @@ def build_team_table(
 
     return team_df[["PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP", "ROLE", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB", "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM", "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA", "SEASON_3PA", "L5_3PA", "L10_3PA", "SEASON_PRA", "L5_PRA", "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND"]].copy()
 
-@st.cache_data(ttl=54000, show_spinner=False)
 def get_matchup_context(
     away_team_id: int,
     home_team_id: int,
@@ -898,6 +897,30 @@ def get_matchup_context(
         home_team_id,
         season,
         season_scope=season_scope,
+    )
+
+    # Injuries must be merged before projections are calculated so
+    # Questionable/Doubtful/Out can influence minutes/context and rankings.
+    try:
+        injury_df = fetch_latest_injury_report_df()
+    except Exception:
+        injury_df = pd.DataFrame()
+
+    game_matchup = f"{TEAM_ABBR_LOOKUP.get(int(away_team_id), '')}@{TEAM_ABBR_LOOKUP.get(int(home_team_id), '')}"
+
+    away_df = merge_injury_report(
+        away_df,
+        injury_df,
+        away_team_name,
+        away_team_id,
+        game_matchup=game_matchup,
+    )
+    home_df = merge_injury_report(
+        home_df,
+        injury_df,
+        home_team_name,
+        home_team_id,
+        game_matchup=game_matchup,
     )
 
     away_df = enrich_team_with_context(
@@ -1012,7 +1035,10 @@ def get_matchup_injury_context(away_team_id: int, home_team_id: int, away_team_n
 # ---------------------------------------------------------
 def apply_filters(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str) -> pd.DataFrame:
     filtered = team_df[(team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)].copy()
-    if role_filter != "Todos": filtered = filtered[filtered["ROLE"] == role_filter].copy()
+    if "IS_UNAVAILABLE" in filtered.columns:
+        filtered = filtered[~filtered["IS_UNAVAILABLE"].fillna(False)].copy()
+    if role_filter != "Todos":
+        filtered = filtered[filtered["ROLE"] == role_filter].copy()
     return filtered
 
 def filter_and_sort_team_df(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str, sort_column: str, ascending: bool) -> pd.DataFrame:
