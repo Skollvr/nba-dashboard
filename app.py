@@ -21,6 +21,16 @@ from ui_components import (
 def get_brasilia_today() -> date:
     return datetime.now(APP_TIMEZONE).date()
 
+
+def _shift_selected_date(days: int) -> None:
+    current = st.session_state.get("selected_game_date", get_brasilia_today())
+    st.session_state["selected_game_date"] = current + timedelta(days=days)
+
+
+def _reset_selected_date_to_today() -> None:
+    st.session_state["selected_game_date"] = get_brasilia_today()
+
+
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
     inject_css()
@@ -41,8 +51,47 @@ def main():
         unsafe_allow_html=True,
     )
 
+    today = get_brasilia_today()
+    if "selected_game_date" not in st.session_state:
+        st.session_state["selected_game_date"] = today
+
     with st.sidebar:
         st.header("Configurações")
+
+        st.subheader("Jogos")
+        selected_date = st.date_input(
+            "Data dos jogos",
+            key="selected_game_date",
+            format="DD/MM/YYYY",
+        )
+
+        nav_prev, nav_today, nav_next = st.columns(3)
+        with nav_prev:
+            st.button(
+                "◀",
+                help="Dia anterior",
+                use_container_width=True,
+                on_click=_shift_selected_date,
+                args=(-1,),
+            )
+        with nav_today:
+            st.button(
+                "Hoje",
+                use_container_width=True,
+                on_click=_reset_selected_date_to_today,
+            )
+        with nav_next:
+            st.button(
+                "▶",
+                help="Próximo dia",
+                use_container_width=True,
+                on_click=_shift_selected_date,
+                args=(1,),
+            )
+
+        st.caption(f"Agenda selecionada: {selected_date.strftime('%d/%m/%Y')}")
+        st.divider()
+
         chart_mode = st.pills("Gráfico", CHART_OPTIONS, default="Compacto")
         cards_per_row = st.pills("Cards/Linha", [1, 2], default=2)
         min_games = st.slider("Min Jogos", 0, 82, 5)
@@ -72,7 +121,6 @@ def main():
             st.cache_data.clear()
             st.rerun()
 
-    selected_date = get_brasilia_today()
     season = get_season_string(selected_date)
 
     try:
@@ -85,7 +133,10 @@ def main():
     st.caption(f"Temporada detectada: {season} • Recorte estatístico: {season_scope_label}")
 
     if games.empty:
-        st.warning(f"Sem jogos para {selected_date.strftime('%d/%m/%Y')}.")
+        st.warning(
+            f"Sem jogos para {selected_date.strftime('%d/%m/%Y')}. "
+            "Escolha outra data na barra lateral ou use os botões de navegação."
+        )
         return
 
     game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
