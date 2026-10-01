@@ -28,7 +28,9 @@ def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 2, dela
             if attempt < retries - 1:
                 # Pausa progressiva para acalmar os servidores da NBA (2.5s, 5s, 7.5s...)
                 time.sleep(delay * (attempt + 1))
-    raise RuntimeError(f"A NBA bloqueou a consulta de {endpoint_name}. Aguarde 2 minutos e recarregue a página.") from last_error
+    raise RuntimeError(
+        f"A consulta {endpoint_name} da NBA não respondeu a tempo após {retries} tentativa(s)."
+    ) from last_error
 
 # ==========================================
 # 2. BUSCA DE JOGOS E TIMES
