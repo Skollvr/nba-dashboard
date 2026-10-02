@@ -343,8 +343,8 @@ def render_player_focus_panel(
 
     render_badges(
         row.get("ROLE", "-"),
-        row.get("FORM_SIGNAL", "→ Estável"),
-        row.get("OSC_CLASS", "-"),
+        row.get(f"FORM_{visual_metric}_SIGNAL", row.get("FORM_SIGNAL", "→ Estável")),
+        row.get(f"OSC_{visual_metric}_CLASS", row.get("OSC_CLASS", "-")),
         focus_matchup_label_v1,
     )
 
@@ -1565,13 +1565,18 @@ def _parse_ratio_text(text: str) -> float:
 
 def _confidence_label_and_score(
     edge: float,
-    hit_ratio: float,
+    directional_hit_ratio: float,
     osc_class: str,
     matchup_label: str,
     form_signal: str,
     inj_status: str,
 ) -> tuple[str, int, str]:
-    """Pontua a confiança na direção indicada pela projeção (OVER ou UNDER)."""
+    """
+    Pontua a força do sinal na direção da projeção.
+
+    É um score heurístico para ordenar/explicar sinais, não uma probabilidade
+    calibrada de acerto.
+    """
     score = 0
     direction = "OVER" if edge >= 0 else "UNDER"
     edge_strength = abs(float(edge))
@@ -1583,7 +1588,6 @@ def _confidence_label_and_score(
     elif edge_strength >= 0.3:
         score += 1
 
-    directional_hit_ratio = hit_ratio if direction == "OVER" else (1.0 - hit_ratio)
     if directional_hit_ratio >= 0.70:
         score += 2
     elif directional_hit_ratio >= 0.55:
@@ -1609,17 +1613,16 @@ def _confidence_label_and_score(
     elif (direction == "OVER" and "↘" in form_signal) or (direction == "UNDER" and "↗" in form_signal):
         score -= 1
 
-    # Availability uncertainty reduces confidence in either betting direction.
     if str(inj_status) in {"Out", "Doubtful"}:
         score -= 3
     elif str(inj_status) == "Questionable":
         score -= 1
 
     if score >= 5:
-        return "🔥 Confiança Alta", score, direction
+        return "🔥 Força Alta", score, direction
     if score >= 2:
-        return "🟡 Confiança Média", score, direction
-    return "🔴 Confiança Baixa", score, direction
+        return "🟡 Força Média", score, direction
+    return "🔴 Força Baixa", score, direction
 
 
 def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> tuple[str, dict]:
@@ -1639,8 +1642,14 @@ def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, u
         if not ctx.get("has_market_line"):
             continue
 
-        hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
-        score = (float(ctx.get("edge", 0.0)) * 0.65) + (hit_ratio * 4.0)
+        edge = float(ctx.get("edge", 0.0))
+        direction = "OVER" if edge >= 0 else "UNDER"
+        directional_hit_ratio = _parse_ratio_text(
+            ctx.get("hit_l10", "0/1")
+            if direction == "OVER"
+            else ctx.get("under_l10", "0/1")
+        )
+        score = (abs(edge) * 0.65) + (directional_hit_ratio * 4.0)
 
         if score > best_score:
             best_score = score
@@ -1650,16 +1659,30 @@ def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, u
     return best_metric, best_ctx
 
 def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str, str, str, str]:
-    matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
-    matchup_score_v1 = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0))
-    opp_allowed = float(row.get(get_metric_allowed_column(metric), 0.0))
+    matchup_label = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
+    matchup_score = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0) or 0.0)
+    defense_label = str(row.get(f"DEF_LABEL_{metric}_V2", "Neutro"))
+    h2h_label = str(row.get(f"H2H_LABEL_{metric}_V2", "Sem amostra"))
+    h2h_gp = int(float(row.get("H2H_GP", 0.0) or 0.0))
+    h2h_avg = float(row.get(f"H2H_{metric}", 0.0) or 0.0)
+    effect_pct = float(row.get(f"MATCHUP_EFFECT_PCT_{metric}_V2", 0.0) or 0.0) * 100.0
+    position_group = str(row.get("POSITION_GROUP", "-"))
+    opponent = str(row.get("OPP_TEAM_NAME", "Oponente"))
+
+    matchup_parts = [f"Defesa vs {position_group}: {defense_label}"]
+    if h2h_gp > 0:
+        matchup_parts.append(
+            f"H2H {h2h_avg:.1f} em {h2h_gp}j ({h2h_label})"
+        )
+    else:
+        matchup_parts.append("H2H sem amostra")
+    matchup_parts.append(f"ajuste {effect_pct:+.1f}%")
+    matchup_text = " • ".join(matchup_parts)
 
     if not ctx.get("has_active_line", False):
         context_line = (
-            f"{row.get('OPP_TEAM_NAME', 'Oponente')} cede "
-            f"{format_number(opp_allowed)} para {row.get('POSITION_GROUP', '-')}"
+            f"{opponent} • {matchup_text}"
             f" • proj {format_number(ctx.get('projection', 0.0))}"
-            f" • score {format_signed_number(matchup_score_v1, 2)}"
         )
         return (
             "⚪ Sem linha",
@@ -1668,21 +1691,27 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
             context_line,
         )
 
-    hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
-
-    confidence_label, score, direction = _confidence_label_and_score(
-        edge=float(ctx.get("edge", 0.0)),
-        hit_ratio=hit_ratio,
-        osc_class=str(row.get("OSC_CLASS", "-")),
-        matchup_label=matchup_label_v1,
-        form_signal=str(row.get("FORM_SIGNAL", "→ Estável")),
-        inj_status=str(row.get("INJ_STATUS", "Available")),
+    edge = float(ctx.get("edge", 0.0))
+    direction = "OVER" if edge >= 0 else "UNDER"
+    directional_hit_ratio = _parse_ratio_text(
+        ctx.get("hit_l10", "0/1")
+        if direction == "OVER"
+        else ctx.get("under_l10", "0/1")
     )
 
-    edge = float(ctx.get("edge", 0.0))
-    osc = str(row.get("OSC_CLASS", "-"))
-    form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
-    directional_hit_ratio = hit_ratio if direction == "OVER" else (1.0 - hit_ratio)
+    osc = str(row.get(f"OSC_{metric}_CLASS", row.get("OSC_CLASS", "-")))
+    form_signal = str(
+        row.get(f"FORM_{metric}_SIGNAL", row.get("FORM_SIGNAL", "→ Estável"))
+    )
+
+    strength_label, score, direction = _confidence_label_and_score(
+        edge=edge,
+        directional_hit_ratio=directional_hit_ratio,
+        osc_class=osc,
+        matchup_label=matchup_label,
+        form_signal=form_signal,
+        inj_status=str(row.get("INJ_STATUS", "Available")),
+    )
 
     if score >= 5:
         headline = f"Sinal forte para {direction} em {metric}"
@@ -1703,15 +1732,20 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     elif directional_hit_ratio <= 0.40:
         reasons.append(f"{direction} recente fraco")
 
+    if matchup_label in {"Favorável", "Muito favorável"}:
+        reasons.append("matchup final favorável")
+    elif matchup_label in {"Difícil", "Muito difícil"}:
+        reasons.append("matchup final difícil")
+
+    if h2h_gp > 0 and h2h_label in {"Favorável", "Muito favorável"}:
+        reasons.append("H2H favorável")
+    elif h2h_gp > 0 and h2h_label in {"Difícil", "Muito difícil"}:
+        reasons.append("H2H difícil")
+
     if osc == "Baixa":
         reasons.append("oscilação baixa")
     elif osc == "Alta":
         reasons.append("oscilação alta")
-
-    if matchup_label_v1 in {"Favorável", "Muito favorável"}:
-        reasons.append("matchup favorável à produção")
-    elif matchup_label_v1 in {"Difícil", "Muito difícil"}:
-        reasons.append("matchup difícil para produção")
 
     if "↗" in form_signal:
         reasons.append("momento em alta")
@@ -1727,15 +1761,14 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     reason_text = " • ".join(reasons[:4])
 
     context_line = (
-        f"{row.get('OPP_TEAM_NAME', 'Oponente')} cede "
-        f"{format_number(opp_allowed)} "
-        f"para {row.get('POSITION_GROUP', '-')}"
-        f" • linha {format_number(ctx.get('line_value', 0.0))}"
+        f"{opponent} • {matchup_text}"
+        f" • linha {format_number(ctx.get('line_value'))}"
         f" • proj {format_number(ctx.get('projection', 0.0))}"
-        f" • score {format_signed_number(matchup_score_v1, 2)}"
+        f" • score {format_signed_number(matchup_score, 2)}"
     )
 
-    return confidence_label, headline, reason_text, context_line
+    return strength_label, headline, reason_text, context_line
+
 
 def render_player_headline_html(
     row: pd.Series,
@@ -1766,7 +1799,7 @@ def render_player_headline_html(
         <div class="hero-note">
             {context_line}
             <span class="matchup-chip {matchup_class}" style="margin-left:0.4rem;">
-                {matchup_label_v1} vs {row.get("POSITION_GROUP", "-")}
+                Matchup final: {matchup_label_v1}
             </span>
         </div>
     </div>
@@ -1808,9 +1841,16 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
         )
 
     with c4:
-        st.markdown("**MATCHUP V1**")
+        defense_label = str(row.get(f"DEF_LABEL_{line_metric}_V2", "Neutro"))
+        h2h_label = str(row.get(f"H2H_LABEL_{line_metric}_V2", "Sem amostra"))
+        h2h_gp = int(float(row.get("H2H_GP", 0.0) or 0.0))
+        st.markdown("**MATCHUP FINAL**")
         st.markdown(f"### {matchup_label_v1}")
-        st.caption(f"Score {format_signed_number(matchup_score_v1, 2)}")
+        h2h_text = f"H2H {h2h_label} ({h2h_gp}j)" if h2h_gp > 0 else "H2H sem amostra"
+        st.caption(
+            f"Def {defense_label} • {h2h_text} • "
+            f"Score {format_signed_number(matchup_score_v1, 2)}"
+        )
 
     with c5:
         if line_context.get("has_active_line", False):
