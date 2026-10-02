@@ -206,11 +206,21 @@ def safe_rate(stat_value: float, minutes_value: float) -> float:
 
 
 def blend_rate(season_pm: float, l10_pm: float, l5_pm: float) -> float:
-    return (
-        0.50 * float(season_pm)
-        + 0.30 * float(l10_pm)
-        + 0.20 * float(l5_pm)
-    )
+    """
+    Combina produção por minuto sem tratar ausência de amostra como produção zero.
+    Se L5/L10 não existirem, os pesos disponíveis são renormalizados.
+    """
+    values = [
+        (float(season_pm), 0.50),
+        (float(l10_pm), 0.30),
+        (float(l5_pm), 0.20),
+    ]
+    available = [(value, weight) for value, weight in values if value > 0]
+    if not available:
+        return 0.0
+
+    weight_sum = sum(weight for _, weight in available)
+    return sum(value * weight for value, weight in available) / weight_sum
 
 
 def project_minutes_v1(
@@ -220,11 +230,23 @@ def project_minutes_v1(
     role: str,
     inj_status: str = "Available",
 ) -> float:
-    proj = (
-        0.55 * float(season_min)
-        + 0.30 * float(l10_min)
-        + 0.15 * float(l5_min)
-    )
+    """
+    Projeta minutos renormalizando pesos quando L5/L10 não estão disponíveis.
+    Isso evita derrubar artificialmente jogadores transferidos ou com histórico
+    incompleto para metade dos minutos reais.
+    """
+    samples = [
+        (float(season_min), 0.55),
+        (float(l10_min), 0.30),
+        (float(l5_min), 0.15),
+    ]
+    available = [(value, weight) for value, weight in samples if value > 0]
+
+    if available:
+        weight_sum = sum(weight for _, weight in available)
+        proj = sum(value * weight for value, weight in available) / weight_sum
+    else:
+        proj = 0.0
 
     role = str(role or "")
     inj_status = str(inj_status or "Available")
@@ -959,49 +981,93 @@ def enrich_team_with_context(
             enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
         )
 
-    enriched["CONTEXT_ADJ_V1"] = enriched.apply(build_context_adj_v1, axis=1)
-
-    for metric in metric_map.keys():
+    # O matchup passa a representar apenas o confronto em si:
+    # defesa posicional do adversário + histórico individual do jogador (H2H).
+    # Forma recente já está embutida na taxa L10/L5 e função/titularidade já entra
+    # na projeção de minutos; portanto não duplicamos esses efeitos aqui.
+    for metric, (season_col, _, _) in metric_map.items():
         scale = get_metric_matchup_scale(metric)
-
         diff_col = get_metric_matchup_diff_column(metric)
 
-        enriched[f"DEF_ADJ_{metric}_V1"] = enriched[diff_col].apply(
-            lambda x: clamp_value(float(x) / scale if scale > 0 else 0.0, -2.0, 2.0)
-        )
-
-        enriched[f"FORM_ADJ_{metric}_V1"] = enriched.apply(
-            lambda row: clamp_value(
-                (
-                    0.60 * (
-                        (row.get(f"L10_PM_{metric}", 0.0) - row.get(f"SEASON_PM_{metric}", 0.0))
-                        / max(row.get(f"SEASON_PM_{metric}", 0.0), 0.01)
-                    )
-                    + 0.40 * (
-                        (row.get(f"L5_PM_{metric}", 0.0) - row.get(f"SEASON_PM_{metric}", 0.0))
-                        / max(row.get(f"SEASON_PM_{metric}", 0.0), 0.01)
-                    )
-                ),
+        enriched[f"DEF_SCORE_{metric}_V2"] = enriched[diff_col].apply(
+            lambda x: clamp_value(
+                float(x) / scale if scale > 0 else 0.0,
                 -1.5,
                 1.5,
+            )
+        )
+        enriched[f"DEF_LABEL_{metric}_V2"] = enriched[f"DEF_SCORE_{metric}_V2"].apply(
+            classify_matchup_score_label
+        )
+
+        enriched[f"H2H_RELIABILITY_{metric}_V2"] = (
+            pd.to_numeric(enriched.get("H2H_GP", 0.0), errors="coerce")
+            .fillna(0.0)
+            .apply(lambda gp: clamp_value(float(gp) / 4.0, 0.0, 1.0))
+        )
+
+        def _h2h_score(row):
+            h2h_gp = float(row.get("H2H_GP", 0.0) or 0.0)
+            season_value = float(row.get(season_col, 0.0) or 0.0)
+            h2h_value = float(row.get(f"H2H_{metric}", 0.0) or 0.0)
+
+            if h2h_gp <= 0 or season_value <= 0:
+                return 0.0
+
+            delta_pct = (h2h_value - season_value) / max(abs(season_value), 0.01)
+            # Aproximadamente 12% acima/abaixo da média individual equivale a
+            # um ponto de score. O efeito final ainda é limitado e ponderado
+            # pelo número de confrontos disponíveis.
+            return clamp_value(delta_pct / 0.12, -1.5, 1.5)
+
+        enriched[f"H2H_SCORE_{metric}_V2"] = enriched.apply(_h2h_score, axis=1)
+        enriched[f"H2H_LABEL_{metric}_V2"] = enriched.apply(
+            lambda row: (
+                classify_matchup_score_label(row.get(f"H2H_SCORE_{metric}_V2", 0.0))
+                if float(row.get("H2H_GP", 0.0) or 0.0) > 0
+                else "Sem amostra"
             ),
             axis=1,
         )
 
-        enriched[f"MATCHUP_SCORE_{metric}_V1"] = (
-            0.65 * enriched[f"DEF_ADJ_{metric}_V1"]
-            + 0.20 * enriched[f"FORM_ADJ_{metric}_V1"]
-            + 0.15 * enriched["CONTEXT_ADJ_V1"]
+        def _combined_matchup_score(row):
+            def_score = float(row.get(f"DEF_SCORE_{metric}_V2", 0.0) or 0.0)
+            h2h_score = float(row.get(f"H2H_SCORE_{metric}_V2", 0.0) or 0.0)
+            reliability = float(row.get(f"H2H_RELIABILITY_{metric}_V2", 0.0) or 0.0)
+
+            defense_weight = 0.60
+            h2h_weight = 0.40 * reliability
+            denominator = defense_weight + h2h_weight
+
+            if denominator <= 0:
+                return 0.0
+
+            return clamp_value(
+                (defense_weight * def_score + h2h_weight * h2h_score) / denominator,
+                -1.5,
+                1.5,
+            )
+
+        enriched[f"MATCHUP_SCORE_{metric}_V1"] = enriched.apply(
+            _combined_matchup_score,
+            axis=1,
+        )
+
+        enriched[f"MATCHUP_EFFECT_PCT_{metric}_V2"] = enriched[
+            f"MATCHUP_SCORE_{metric}_V1"
+        ].apply(
+            lambda score: clamp_value(0.08 * float(score), -0.12, 0.12)
         )
 
         enriched[f"PROJ_{metric}_V1"] = (
-        enriched[f"BASE_{metric}_V1"]
-            * (1 + 0.10 * enriched[f"MATCHUP_SCORE_{metric}_V1"])
+            enriched[f"BASE_{metric}_V1"]
+            * (1 + enriched[f"MATCHUP_EFFECT_PCT_{metric}_V2"])
         ).clip(lower=0.0)
 
-        enriched[f"MATCHUP_LABEL_{metric}_V1"] = enriched[f"MATCHUP_SCORE_{metric}_V1"].apply(
-            classify_matchup_score_label
-        )
+        enriched[f"MATCHUP_LABEL_{metric}_V1"] = enriched[
+            f"MATCHUP_SCORE_{metric}_V1"
+        ].apply(classify_matchup_score_label)
+
     return enriched
 
     
