@@ -827,6 +827,7 @@ def build_team_table(
     team_id: int,
     season: str,
     season_scope: str = "Regular Season",
+    roster_season: str | None = None,
 ) -> pd.DataFrame:
     # LeagueDashPlayerStats já traz PLAYER_ID, PLAYER_NAME e TEAM_ID.
     # Buscamos essa base primeiro para termos um fallback caso
@@ -837,13 +838,29 @@ def build_team_table(
         season_scope=season_scope,
     )
 
+    roster_season = roster_season or season
+
     try:
-        roster = get_team_roster(team_id, season)
+        roster = get_team_roster(team_id, roster_season)
     except Exception:
         roster = pd.DataFrame()
 
-    if roster.empty and not season_stats.empty and "TEAM_ID" in season_stats.columns:
-        fallback_roster = season_stats.copy()
+    fallback_source = season_stats
+
+    if roster.empty and roster_season != season:
+        try:
+            current_roster_stats = get_league_player_stats(
+                roster_season,
+                last_n_games=0,
+                season_scope="Regular Season",
+            )
+            if not current_roster_stats.empty:
+                fallback_source = current_roster_stats
+        except Exception:
+            pass
+
+    if roster.empty and not fallback_source.empty and "TEAM_ID" in fallback_source.columns:
+        fallback_roster = fallback_source.copy()
         fallback_roster["TEAM_ID"] = pd.to_numeric(
             fallback_roster["TEAM_ID"],
             errors="coerce",
@@ -914,6 +931,7 @@ def get_matchup_context(
     season: str,
     include_market: bool,
     season_scope: str = "Regular Season",
+    roster_season: str | None = None,
     progress_callback=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
 
@@ -929,6 +947,7 @@ def get_matchup_context(
         away_team_id,
         season,
         season_scope=season_scope,
+        roster_season=roster_season,
     )
 
     report(f"Carregando elenco e médias de {home_team_name}...")
@@ -936,6 +955,7 @@ def get_matchup_context(
         home_team_id,
         season,
         season_scope=season_scope,
+        roster_season=roster_season,
     )
 
     report("Consultando Injury Report...")
