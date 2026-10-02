@@ -976,28 +976,13 @@ def enrich_team_with_context(
 
     opponent_abbr = TEAM_ABBR_LOOKUP.get(int(opponent_team_id), "")
 
-    previous_season = get_previous_season_string(season)
-    previous_logs = get_league_player_logs(
-        previous_season,
-        season_scope=season_scope,
-    )
-
-    h2h_frames = [
-        frame
-        for frame in [league_logs, previous_logs]
-        if frame is not None and not frame.empty
-    ]
-    h2h_history_logs = (
-        pd.concat(h2h_frames, ignore_index=True)
-        if h2h_frames
-        else league_logs
-    )
-
+    # Para a temporada atual, o modelo usa somente dados da própria temporada.
+    # Não misturamos H2H da temporada anterior, pois elencos e contextos mudam.
     enriched = build_form_context(
         team_df,
         league_logs,
         opponent_abbr=opponent_abbr,
-        h2h_history_logs=h2h_history_logs,
+        h2h_history_logs=league_logs,
     )
 
     matchup_rows = [
@@ -1070,11 +1055,33 @@ def enrich_team_with_context(
     )
 
     opponent_defense = pd.DataFrame()
+    current_team_defense = pd.DataFrame()
     if team_defense is not None and not team_defense.empty:
         opponent_defense = team_defense[
             pd.to_numeric(team_defense["TEAM_ID"], errors="coerce")
             == int(opponent_team_id)
         ].copy()
+        current_team_defense = team_defense[
+            pd.to_numeric(team_defense["TEAM_ID"], errors="coerce")
+            == int(team_id)
+        ].copy()
+
+    if not current_team_defense.empty:
+        current_team_gp = float(
+            pd.to_numeric(
+                current_team_defense.iloc[0].get("TEAM_GP", 0),
+                errors="coerce",
+            )
+            or 0.0
+        )
+    else:
+        current_team_gp = float(
+            pd.to_numeric(enriched.get("SEASON_GP"), errors="coerce").max()
+            if "SEASON_GP" in enriched.columns and not enriched.empty
+            else 0.0
+        )
+
+    enriched["TEAM_GP_CURRENT"] = current_team_gp
 
     for metric in ["PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA"]:
         pct_col = f"TEAM_DEF_PCT_{metric}"
