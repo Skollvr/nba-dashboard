@@ -44,11 +44,17 @@ def american_to_decimal(american_odds) -> Optional[float]:
     return None
 
 def get_odds_api_key() -> str:
-    secrets_obj = getattr(st, "secrets", None)
-    if secrets_obj:
+    # No Streamlit Cloud, st.secrets pode existir; em outros hosts (como Render)
+    # pode não haver arquivo secrets.toml. Nesse caso, seguimos normalmente
+    # para variável de ambiente sem interromper a inicialização do app.
+    try:
+        secrets_obj = st.secrets
         for key_name in ["SPORTSGAMEODDS_API_KEY", "sportsgameodds_api_key"]:
             if key_name in secrets_obj:
                 return str(secrets_obj[key_name]).strip()
+    except Exception:
+        pass
+
     return os.getenv("SPORTSGAMEODDS_API_KEY", "").strip()
 
 # ==========================================
