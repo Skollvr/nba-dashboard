@@ -180,7 +180,12 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
         """, unsafe_allow_html=True)
             
             position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
-            st.caption(f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}")
+            st.caption(
+                f"Pos {position} • GP {int(row['SEASON_GP'])} • "
+                f"MIN temp {format_number(row['SEASON_MIN'])} • "
+                f"MIN proj {format_number(row.get('PROJ_MIN_V1', 0.0))} "
+                f"({row.get('MINUTES_SOURCE', 'Modelo interno')})"
+            )
             st.markdown(
                 render_player_headline_html(row, line_metric, line_value, use_market_line),
                 unsafe_allow_html=True,
@@ -327,7 +332,10 @@ def render_player_focus_panel(
 
         position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
         st.markdown(
-            f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])} • Time {row["TEAM_NAME"]}</div>',
+            f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • '
+            f'MIN temp {format_number(row["SEASON_MIN"])} • '
+            f'MIN proj {format_number(row.get("PROJ_MIN_V1", 0.0))} '
+            f'({row.get("MINUTES_SOURCE", "Modelo interno")}) • Time {row["TEAM_NAME"]}</div>',
             unsafe_allow_html=True,
         )
             
@@ -868,7 +876,9 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
 
 def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
-        '<div class="section-note">Estrutura de rotação do time já filtrada por indisponibilidade oficial quando o injury report estiver carregado.</div>',
+        '<div class="section-note">Rotação do dia. Quando o feed oficial estiver disponível, '
+        'o status Projetado/Confirmado substitui a estimativa por minutos. O status visual não '
+        'adiciona bônus artificial à projeção de minutos.</div>',
         unsafe_allow_html=True,
     )
 
@@ -876,76 +886,107 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     if "IS_UNAVAILABLE" in lineup_df.columns:
         lineup_df = lineup_df[~lineup_df["IS_UNAVAILABLE"]].copy()
 
-    starters = lineup_df[lineup_df["ROLE"] == "Titular provável"].copy()
-    bench = lineup_df[lineup_df["ROLE"] != "Titular provável"].copy()
+    starter_roles = {
+        "Titular confirmado",
+        "Titular projetado",
+        "Estimativa por minutos",
+    }
+    starters = lineup_df[lineup_df["ROLE"].isin(starter_roles)].copy()
+    rotation = lineup_df[~lineup_df["ROLE"].isin(starter_roles)].copy()
+
+    confirmed_count = int((lineup_df["ROLE"] == "Titular confirmado").sum())
+    projected_count = int((lineup_df["ROLE"] == "Titular projetado").sum())
 
     top_cols = st.columns([1.2, 1.2, 1.6])
     with top_cols[0]:
         st.markdown(
             render_single_card(
-                "Titulares prováveis",
+                "Grupo inicial",
                 str(len(starters)),
                 team_name,
-                "Média MIN",
-                format_number(starters["SEASON_MIN"].mean() if not starters.empty else 0),
-                "PRA médio",
-                format_number(starters["SEASON_PRA"].mean() if not starters.empty else 0),
+                "Confirmados",
+                str(confirmed_count),
+                "Projetados",
+                str(projected_count),
             ),
             unsafe_allow_html=True,
         )
     with top_cols[1]:
+        proj_min_mean = pd.to_numeric(
+            lineup_df.get("PROJ_MIN_V1", 0.0),
+            errors="coerce",
+        ).mean()
         st.markdown(
             render_single_card(
-                "Reservas",
-                str(len(bench)),
+                "Rotação",
+                str(len(rotation)),
                 team_name,
-                "Média MIN",
-                format_number(bench["SEASON_MIN"].mean() if not bench.empty else 0),
-                "PRA médio",
-                format_number(bench["SEASON_PRA"].mean() if not bench.empty else 0),
+                "Proj MIN média",
+                format_number(proj_min_mean),
+                "Fonte",
+                "NBA / interno",
             ),
             unsafe_allow_html=True,
         )
     with top_cols[2]:
-        st.info("Jogadores Out/Doubtful saem automaticamente da leitura quando o injury report oficial estiver carregado.")
+        st.info(
+            "Sem lineup oficial, o Top 5 por minutos aparece apenas como "
+            "'Estimativa por minutos'. Ele não recebe bônus na projeção."
+        )
 
-    st.markdown("#### Provável escalação")
+    view_cols = [
+        "PLAYER",
+        "POSITION",
+        "ROLE",
+        "PROJ_MIN_V1",
+        "MINUTES_SOURCE",
+        "SEASON_MIN",
+        "L10_MIN_MED",
+        "INJ_STATUS",
+    ]
+
+    available_cols = [col for col in view_cols if col in lineup_df.columns]
+
+    st.markdown("#### Grupo inicial / estimado")
     starter_view = (
-        starters[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"]].copy()
+        starters[[col for col in available_cols if col in starters.columns]].copy()
         if not starters.empty
-        else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"])
+        else pd.DataFrame(columns=available_cols)
     )
     starter_view = starter_view.rename(
         columns={
             "PLAYER": "Jogador",
             "POSITION": "Pos",
-            "SEASON_MIN": "MIN",
-            "SEASON_PRA": "PRA Temp",
-            "L10_PRA": "PRA L10",
-            "TREND": "Trend",
+            "ROLE": "Status lineup",
+            "PROJ_MIN_V1": "MIN proj",
+            "MINUTES_SOURCE": "Fonte MIN",
+            "SEASON_MIN": "MIN temp",
+            "L10_MIN_MED": "Mediana MIN L10",
             "INJ_STATUS": "Status",
         }
     )
-    st.dataframe(style_table(starter_view, quick_view=True), use_container_width=True)
+    st.dataframe(starter_view, use_container_width=True, hide_index=True)
 
     st.markdown("#### Rotação / banco")
-    bench_view = (
-        bench[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"]].copy()
-        if not bench.empty
-        else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"])
+    rotation_view = (
+        rotation[[col for col in available_cols if col in rotation.columns]].copy()
+        if not rotation.empty
+        else pd.DataFrame(columns=available_cols)
     )
-    bench_view = bench_view.rename(
+    rotation_view = rotation_view.rename(
         columns={
             "PLAYER": "Jogador",
             "POSITION": "Pos",
-            "SEASON_MIN": "MIN",
-            "SEASON_PRA": "PRA Temp",
-            "L10_PRA": "PRA L10",
-            "TREND": "Trend",
+            "ROLE": "Status lineup",
+            "PROJ_MIN_V1": "MIN proj",
+            "MINUTES_SOURCE": "Fonte MIN",
+            "SEASON_MIN": "MIN temp",
+            "L10_MIN_MED": "Mediana MIN L10",
             "INJ_STATUS": "Status",
         }
     )
-    st.dataframe(style_table(bench_view, quick_view=True), use_container_width=True)
+    st.dataframe(rotation_view, use_container_width=True, hide_index=True)
+
 
 def get_team_logo_url(team_id: int) -> str:
     return TEAM_LOGO_URL.format(team_id=team_id)
@@ -1481,7 +1522,8 @@ def render_player_chart(
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L10: {recent_view[visual_metric].mean():.1f}")
 def render_badges(role: str, momentum: str, oscillation: str, matchup: str) -> None:
-    role_class = "badge-starter" if role == "Titular provável" else "badge-bench"
+    starter_roles = {"Titular confirmado", "Titular projetado", "Estimativa por minutos"}
+    role_class = "badge-starter" if role in starter_roles else "badge-bench"
 
     if str(momentum).startswith(("↗", "↑")):
         momentum_class = "badge-good"
@@ -2398,6 +2440,7 @@ def main() -> None:
             home_team_name=selected_game["home_team_name"],
             season=season,
             include_market=api_key_available,
+            target_date=selected_date,
         )
     except Exception as exc:
         st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
@@ -2473,8 +2516,9 @@ def main() -> None:
     st.markdown(
         """
         <div class="small-note">
-        Nota: "Titular provável" neste MVP significa os 5 jogadores com mais minutos por jogo na temporada.
-        É um atalho útil para análise, não a escalação oficial confirmada do jogo.
+        Rotação: "Estimativa por minutos" é apenas um fallback visual. Quando o feed diário da NBA
+        trouxer status projetado/confirmado, ele passa a ter prioridade. A classificação visual não
+        adiciona minutos automaticamente ao jogador.
         </div>
         """,
         unsafe_allow_html=True,
