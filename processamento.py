@@ -1,3 +1,5 @@
+from datetime import date
+
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -14,6 +16,7 @@ from api_nba import (
     get_league_player_logs, get_position_allowed_profile,
     get_league_position_baseline, get_team_defense_percentiles
 )
+from api_lineups import get_daily_lineups
 
 # 3. API de Odds
 from api_odds import (
@@ -289,20 +292,26 @@ def blend_rate(season_pm: float, l10_pm: float, l5_pm: float) -> float:
 
 def project_minutes_v1(
     season_min: float,
-    l10_min: float,
-    l5_min: float,
-    role: str,
+    l10_median: float,
+    l5_median: float,
     inj_status: str = "Available",
 ) -> float:
     """
-    Projeta minutos renormalizando pesos quando L5/L10 não estão disponíveis.
-    Isso evita derrubar artificialmente jogadores transferidos ou com histórico
-    incompleto para metade dos minutos reais.
+    Fallback interno de minutos para 2026-27.
+
+    Não há mais bônus/penalidade automática por "titular" ou "reserva".
+    A estimativa usa a rotação observada na própria temporada:
+      40% média da temporada
+      35% mediana dos últimos 10
+      25% mediana dos últimos 5
+
+    Pesos ausentes são renormalizados. Uma fonte externa de minutos, quando
+    validada, tem prioridade fora desta função.
     """
     samples = [
-        (float(season_min), 0.55),
-        (float(l10_min), 0.30),
-        (float(l5_min), 0.15),
+        (float(season_min), 0.40),
+        (float(l10_median), 0.35),
+        (float(l5_median), 0.25),
     ]
     available = [(value, weight) for value, weight in samples if value > 0]
 
@@ -312,17 +321,8 @@ def project_minutes_v1(
     else:
         proj = 0.0
 
-    role = str(role or "")
     inj_status = str(inj_status or "Available")
-
-    if role == "Titular provável":
-        proj += 1.0
-    elif role == "Reserva":
-        proj -= 0.8
-
-    if inj_status == "Questionable":
-        proj -= 1.5
-    elif inj_status in {"Doubtful", "Out"}:
+    if inj_status in {"Doubtful", "Out"}:
         proj = 0.0
 
     return max(0.0, proj)
@@ -765,6 +765,9 @@ def build_form_context(
         "AWAY_3PA": 0.0,
         "L10_MIN": 0.0,
         "L5_MIN": 0.0,
+        "L10_MIN_MED": 0.0,
+        "L5_MIN_MED": 0.0,
+        "MIN_STD_L10": 0.0,
         "H2H_GP": 0.0,
     }
 
@@ -846,6 +849,9 @@ def build_form_context(
             "PLAYER_ID": player_id,
             "L10_MIN": float(recent10["MIN"].mean()) if "MIN" in recent10.columns and not recent10.empty else 0.0,
             "L5_MIN": float(recent5["MIN"].mean()) if "MIN" in recent5.columns and not recent5.empty else 0.0,
+            "L10_MIN_MED": float(recent10["MIN"].median()) if "MIN" in recent10.columns and not recent10.empty else 0.0,
+            "L5_MIN_MED": float(recent5["MIN"].median()) if "MIN" in recent5.columns and not recent5.empty else 0.0,
+            "MIN_STD_L10": float(recent10["MIN"].std(ddof=0)) if "MIN" in recent10.columns and len(recent10) > 1 else 0.0,
             "H2H_GP": float(len(h2h_logs)),
         }
 
@@ -1114,13 +1120,40 @@ def enrich_team_with_context(
     enriched["PROJ_3PA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], row["OPP_3PA_ALLOWED"], row["LEAGUE_3PA_BASELINE"]), axis=1)
     enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], row["OPP_PRA_ALLOWED"], row["LEAGUE_PRA_BASELINE"]), axis=1)
 
-    enriched["PROJ_MIN_V1"] = enriched.apply(
+    enriched["PROJ_MIN_INTERNAL"] = enriched.apply(
         lambda row: project_minutes_v1(
             row.get("SEASON_MIN", 0.0),
-            row.get("L10_MIN", 0.0),
-            row.get("L5_MIN", 0.0),
-            row.get("ROLE", ""),
+            row.get("L10_MIN_MED", row.get("L10_MIN", 0.0)),
+            row.get("L5_MIN_MED", row.get("L5_MIN", 0.0)),
             row.get("INJ_STATUS", "Available"),
+        ),
+        axis=1,
+    )
+
+    if "PROJECTED_MINUTES_EXTERNAL" not in enriched.columns:
+        enriched["PROJECTED_MINUTES_EXTERNAL"] = np.nan
+
+    enriched["PROJECTED_MINUTES_EXTERNAL"] = pd.to_numeric(
+        enriched["PROJECTED_MINUTES_EXTERNAL"],
+        errors="coerce",
+    )
+
+    enriched["PROJ_MIN_V1"] = enriched.apply(
+        lambda row: (
+            float(row.get("PROJECTED_MINUTES_EXTERNAL"))
+            if pd.notna(row.get("PROJECTED_MINUTES_EXTERNAL"))
+            and float(row.get("PROJECTED_MINUTES_EXTERNAL")) > 0
+            else float(row.get("PROJ_MIN_INTERNAL", 0.0))
+        ),
+        axis=1,
+    )
+
+    enriched["MINUTES_SOURCE"] = enriched.apply(
+        lambda row: (
+            str(row.get("LINEUP_SOURCE", "Fonte externa") or "Fonte externa")
+            if pd.notna(row.get("PROJECTED_MINUTES_EXTERNAL"))
+            and float(row.get("PROJECTED_MINUTES_EXTERNAL")) > 0
+            else "Modelo interno"
         ),
         axis=1,
     )
@@ -1403,11 +1436,106 @@ def build_team_table(
     team_df["POSITION_GROUP"] = team_df["POSITION"].apply(normalize_position_group)
     team_df["PLAYER_KEY"] = team_df["PLAYER"].apply(normalize_text)
 
-    team_df["ROLE"] = "Reserva"
-    starter_ids = team_df.sort_values(by=["SEASON_MIN", "SEASON_GP", "PLAYER"], ascending=[False, False, True]).head(5)["PLAYER_ID"].tolist()
-    team_df.loc[team_df["PLAYER_ID"].isin(starter_ids), "ROLE"] = "Titular provável"
+    team_df["ROLE"] = "Rotação"
+    starter_ids = team_df.sort_values(
+        by=["SEASON_MIN", "SEASON_GP", "PLAYER"],
+        ascending=[False, False, True],
+    ).head(5)["PLAYER_ID"].tolist()
+    team_df.loc[
+        team_df["PLAYER_ID"].isin(starter_ids),
+        "ROLE",
+    ] = "Estimativa por minutos"
+    team_df["LINEUP_STATUS"] = team_df["ROLE"]
+    team_df["LINEUP_SOURCE"] = "Modelo interno"
+    team_df["PROJECTED_MINUTES_EXTERNAL"] = np.nan
 
-    return team_df[["PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP", "ROLE", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB", "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM", "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA", "SEASON_3PA", "L5_3PA", "L10_3PA", "SEASON_PRA", "L5_PRA", "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND"]].copy()
+    return team_df[["PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP", "ROLE", "LINEUP_STATUS", "LINEUP_SOURCE", "PROJECTED_MINUTES_EXTERNAL", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB", "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM", "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA", "SEASON_3PA", "L5_3PA", "L10_3PA", "SEASON_PRA", "L5_PRA", "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND"]].copy()
+
+def merge_daily_lineups(
+    team_df: pd.DataFrame,
+    lineups_df: pd.DataFrame,
+    team_id: int,
+) -> pd.DataFrame:
+    """
+    Aplica status de lineup/minutos externos ao roster.
+
+    Se o feed não tiver dados válidos, mantém o fallback puramente descritivo:
+    Top 5 por minutos = "Estimativa por minutos"; demais = "Rotação".
+    Esse fallback não altera mais os minutos projetados.
+    """
+    if team_df is None or team_df.empty:
+        return team_df
+
+    enriched = team_df.copy()
+
+    if "LINEUP_STATUS" not in enriched.columns:
+        enriched["LINEUP_STATUS"] = enriched.get("ROLE", "Rotação")
+    if "LINEUP_SOURCE" not in enriched.columns:
+        enriched["LINEUP_SOURCE"] = "Modelo interno"
+    if "PROJECTED_MINUTES_EXTERNAL" not in enriched.columns:
+        enriched["PROJECTED_MINUTES_EXTERNAL"] = np.nan
+
+    if lineups_df is None or lineups_df.empty:
+        return enriched
+
+    work = lineups_df.copy()
+    if "TEAM_ID" in work.columns:
+        team_ids = pd.to_numeric(work["TEAM_ID"], errors="coerce")
+        team_filtered = work[(team_ids == int(team_id)) | team_ids.isna()].copy()
+        if not team_filtered.empty:
+            work = team_filtered
+
+    work["_PLAYER_KEY"] = work.get("PLAYER", "").fillna("").astype(str).apply(normalize_text)
+
+    by_id = {}
+    if "PLAYER_ID" in work.columns:
+        for _, item in work[work["PLAYER_ID"].notna()].iterrows():
+            try:
+                by_id[int(float(item["PLAYER_ID"]))] = item
+            except Exception:
+                pass
+
+    by_name = {
+        str(item.get("_PLAYER_KEY", "")): item
+        for _, item in work.iterrows()
+        if str(item.get("_PLAYER_KEY", ""))
+    }
+
+    def _match(row):
+        try:
+            pid = int(float(row.get("PLAYER_ID")))
+        except Exception:
+            pid = None
+
+        if pid is not None and pid in by_id:
+            return by_id[pid]
+
+        return by_name.get(normalize_text(row.get("PLAYER", "")))
+
+    for idx_row, player in enriched.iterrows():
+        match = _match(player)
+        if match is None:
+            continue
+
+        status = str(match.get("LINEUP_STATUS", "") or "").strip()
+        source = str(match.get("LINEUP_SOURCE", "NBA Daily Lineups") or "NBA Daily Lineups")
+        projected_minutes = pd.to_numeric(
+            match.get("PROJECTED_MINUTES_EXTERNAL"),
+            errors="coerce",
+        )
+
+        if status:
+            enriched.at[idx_row, "LINEUP_STATUS"] = status
+            if status in {"Titular confirmado", "Titular projetado", "Rotação"}:
+                enriched.at[idx_row, "ROLE"] = status
+
+        enriched.at[idx_row, "LINEUP_SOURCE"] = source
+
+        if pd.notna(projected_minutes) and float(projected_minutes) > 0:
+            enriched.at[idx_row, "PROJECTED_MINUTES_EXTERNAL"] = float(projected_minutes)
+
+    return enriched
+
 
 def get_matchup_context(
     away_team_id: int,
@@ -1418,6 +1546,7 @@ def get_matchup_context(
     include_market: bool,
     season_scope: str = "Regular Season",
     roster_season: str | None = None,
+    target_date: date | None = None,
     progress_callback=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
 
@@ -1443,6 +1572,17 @@ def get_matchup_context(
         season_scope=season_scope,
         roster_season=roster_season,
     )
+
+    report("Consultando lineups e rotação do dia...")
+    lineups_df = pd.DataFrame()
+    if target_date is not None:
+        try:
+            lineups_df = get_daily_lineups(target_date)
+        except Exception:
+            lineups_df = pd.DataFrame()
+
+    away_df = merge_daily_lineups(away_df, lineups_df, away_team_id)
+    home_df = merge_daily_lineups(home_df, lineups_df, home_team_id)
 
     report("Consultando Injury Report...")
     # Injuries must be merged before projections are calculated so
