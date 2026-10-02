@@ -830,16 +830,26 @@ def get_team_defense_percentiles(
     if result.empty:
         return result
 
+    team_count = int(len(result))
+    result["TEAM_DEF_TEAM_COUNT"] = team_count
+
     for metric in metric_names:
         value_col = f"TEAM_DEF_{metric}"
         pct_col = f"TEAM_DEF_PCT_{metric}"
+        rank_col = f"TEAM_DEF_RANK_{metric}"
 
-        # Quanto mais o time permite, maior o percentil e mais favorável
+        # Quanto mais o time permite, maior o percentil/rank e mais favorável
         # tende a ser o matchup para aquele fundamento.
         result[pct_col] = (
             result[value_col]
             .rank(method="average", pct=True, ascending=True)
             .clip(0.0, 1.0)
+        )
+        result[rank_col] = (
+            result[value_col]
+            .rank(method="average", ascending=True)
+            .round()
+            .astype(int)
         )
 
     return result
