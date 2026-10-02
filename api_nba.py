@@ -661,6 +661,64 @@ def get_team_player_logs(
 
     return df.sort_values(["PLAYER_ID", "GAME_DATE"], ascending=[True, False])
 
+
+@st.cache_data(ttl=54000, show_spinner=False)
+def get_league_player_logs(
+    season: str,
+    season_scope: str = "All",
+) -> pd.DataFrame:
+    """
+    Busca logs individuais de toda a liga para a temporada/recorte.
+
+    Usamos esta base no motor de projeção para que jogadores transferidos
+    mantenham L5/L10 e histórico H2H mesmo quando jogavam por outro time.
+    """
+    season_types = get_season_types_for_scope(season_scope)
+    all_logs = []
+
+    for stype in season_types:
+        try:
+            response = run_api_call_with_retry(
+                lambda st=stype: playergamelogs.PlayerGameLogs(
+                    team_id_nullable=0,
+                    season_nullable=season,
+                    season_type_nullable=st,
+                    timeout=20,
+                ),
+                endpoint_name=f"LeaguePlayerGameLogs_{stype}",
+                retries=2,
+                delay=1.0,
+            )
+
+            frames = response.get_data_frames()
+
+            if frames and not frames[0].empty:
+                temp_df = frames[0].copy()
+                temp_df["SEASON_SCOPE"] = stype
+                all_logs.append(temp_df)
+
+        except Exception:
+            continue
+
+    if not all_logs:
+        return pd.DataFrame()
+
+    df = pd.concat(all_logs, ignore_index=True)
+    df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
+
+    for col in ["PLAYER_ID", "TEAM_ID", "PTS", "REB", "AST", "MIN", "FG3M", "FGA", "FG3A"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    for col in ["PTS", "REB", "AST", "MIN", "FG3M", "FGA", "FG3A"]:
+        if col not in df.columns:
+            df[col] = 0.0
+        df[col] = df[col].fillna(0.0)
+
+    df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
+
+    return df.sort_values(["PLAYER_ID", "GAME_DATE"], ascending=[True, False])
+
 # ==========================================
 # 4. BUSCA DE MATCHUP DE DEFESA
 # ==========================================
