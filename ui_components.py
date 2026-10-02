@@ -1873,45 +1873,51 @@ def render_projection_detail_box_html(row: pd.Series) -> str:
     return f"""
     <div class="detail-box">
         <div class="detail-box-top">
-            <div class="detail-box-title">Projeções do modelo</div>
+            <div class="detail-box-title">Projeções contextuais do modelo</div>
             <div class="delta-pill-row">
-                <span class="delta-pill delta-flat">peso L10 maior</span>
+                <span class="delta-pill delta-flat">minutos + forma + defesa/H2H</span>
             </div>
         </div>
         <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj PTS</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_PTS'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_PTS_V1', row.get('PROJ_PTS', 0.0)))}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj REB</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_REB'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_REB_V1', row.get('PROJ_REB', 0.0)))}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj AST</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_AST'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_AST_V1', row.get('PROJ_AST', 0.0)))}</div>
             </div>
             <div class="detail-mini detail-mini-highlight">
                 <div class="detail-mini-label">Proj PRA</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_PRA'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_PRA_V1', row.get('PROJ_PRA', 0.0)))}</div>
             </div>
         </div>
         <div class="detail-mini-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top:0.55rem;">
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj 3PM</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_3PM'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_3PM_V1', row.get('PROJ_3PM', 0.0)))}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj FGA</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_FGA'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_FGA_V1', row.get('PROJ_FGA', 0.0)))}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj 3PA</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_3PA'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_3PA_V1', row.get('PROJ_3PA', 0.0)))}</div>
             </div>
+        </div>
+        <div class="hero-note" style="margin-top:0.6rem;">
+            A projeção contextual usa produção por minuto, minutos projetados e um ajuste limitado
+            de matchup. O matchup combina defesa posicional e histórico H2H com peso reduzido
+            quando a amostra é pequena.
         </div>
     </div>
     """
+
 
 def render_split_detail_box_html(row: pd.Series, line_metric: str) -> str:
     is_home = row.get("IS_HOME", False)
