@@ -49,7 +49,7 @@ def get_odds_api_key() -> str:
 # ==========================================
 # 3. BUSCA DOS EVENTOS DA API
 # ==========================================
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_nba_odds_events() -> list[dict]:
     api_key = get_odds_api_key()
     if not api_key:
@@ -161,3 +161,11 @@ def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
             rows[key][under_col] = decimal_value
 
     return pd.DataFrame(rows.values())
+
+
+def clear_odds_cache() -> None:
+    """Limpa apenas eventos/linhas de odds."""
+    try:
+        fetch_nba_odds_events.clear()
+    except Exception:
+        pass
