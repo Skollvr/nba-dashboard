@@ -7,6 +7,7 @@ from nba_api.stats.endpoints import (
     scoreboardv2,
     commonteamroster,
     leaguedashplayerstats,
+    leaguedashteamstats,
     playergamelog,
     playergamelogs,
 )
@@ -722,6 +723,128 @@ def get_league_player_logs(
 # ==========================================
 # 4. BUSCA DE MATCHUP DE DEFESA
 # ==========================================
+@st.cache_data(ttl=21600, show_spinner=False)
+def get_team_defense_percentiles(
+    season: str,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    """
+    Retorna percentis defensivos dos 30 times usando estatísticas de oponente.
+
+    Percentil alto = adversário mais permissivo naquele fundamento
+    (matchup mais favorável ao jogador).
+    Percentil baixo = adversário mais restritivo.
+    """
+    season_types = get_season_types_for_scope(season_scope)
+    all_frames = []
+
+    for season_type in season_types:
+        try:
+            response = run_api_call_with_retry(
+                lambda stype=season_type: leaguedashteamstats.LeagueDashTeamStats(
+                    season=season,
+                    season_type_all_star=stype,
+                    per_mode_detailed="PerGame",
+                    measure_type_detailed_defense="Opponent",
+                    last_n_games=0,
+                    month=0,
+                    opponent_team_id=0,
+                    pace_adjust="N",
+                    plus_minus="N",
+                    rank="N",
+                    period=0,
+                    team_id_nullable="",
+                    timeout=15,
+                ),
+                endpoint_name=f"LeagueDashTeamStats Opponent {season_type}",
+                retries=2,
+                delay=1.0,
+            )
+
+            frames = response.get_data_frames()
+            if frames and not frames[0].empty:
+                df = frames[0].copy()
+                df["SEASON_SCOPE"] = season_type
+                all_frames.append(df)
+
+        except Exception:
+            continue
+
+    if not all_frames:
+        return pd.DataFrame()
+
+    raw = pd.concat(all_frames, ignore_index=True)
+
+    if "TEAM_ID" not in raw.columns:
+        return pd.DataFrame()
+
+    raw["TEAM_ID"] = pd.to_numeric(raw["TEAM_ID"], errors="coerce")
+    raw["GP"] = pd.to_numeric(raw.get("GP", 0), errors="coerce").fillna(0.0)
+
+    source_map = {
+        "PTS": ["OPP_PTS", "PTS"],
+        "REB": ["OPP_REB", "REB"],
+        "AST": ["OPP_AST", "AST"],
+        "3PM": ["OPP_FG3M", "FG3M"],
+        "FGA": ["OPP_FGA", "FGA"],
+        "3PA": ["OPP_FG3A", "FG3A"],
+    }
+
+    for metric, candidates in source_map.items():
+        source_col = next((col for col in candidates if col in raw.columns), None)
+        if source_col is None:
+            raw[f"_DEF_{metric}"] = 0.0
+        else:
+            raw[f"_DEF_{metric}"] = pd.to_numeric(
+                raw[source_col], errors="coerce"
+            ).fillna(0.0)
+
+    raw["_DEF_PRA"] = raw["_DEF_PTS"] + raw["_DEF_REB"] + raw["_DEF_AST"]
+
+    rows = []
+    metric_names = ["PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA"]
+
+    for team_id, group in raw.groupby("TEAM_ID", dropna=False):
+        if pd.isna(team_id):
+            continue
+
+        gp_sum = float(group["GP"].sum())
+        if gp_sum > 0:
+            weights = group["GP"] / gp_sum
+        else:
+            weights = None
+
+        row = {"TEAM_ID": int(team_id)}
+
+        for metric in metric_names:
+            col = f"_DEF_{metric}"
+            if weights is None:
+                value = float(group[col].mean())
+            else:
+                value = float((group[col] * weights).sum())
+            row[f"TEAM_DEF_{metric}"] = value
+
+        rows.append(row)
+
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+
+    for metric in metric_names:
+        value_col = f"TEAM_DEF_{metric}"
+        pct_col = f"TEAM_DEF_PCT_{metric}"
+
+        # Quanto mais o time permite, maior o percentil e mais favorável
+        # tende a ser o matchup para aquele fundamento.
+        result[pct_col] = (
+            result[value_col]
+            .rank(method="average", pct=True, ascending=True)
+            .clip(0.0, 1.0)
+        )
+
+    return result
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def get_position_allowed_profile(
     season: str,
