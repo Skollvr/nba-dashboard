@@ -152,8 +152,8 @@ def main():
         season_scope = season_scope_map.get(season_scope_label, "Regular Season")
         diagnostic_mode = st.toggle(
             "Modo diagnóstico NBA",
-            value=False,
-            help="Testa os endpoints individualmente sem carregar o confronto completo.",
+            value=True,
+            help="Testa os endpoints individualmente sem carregar agenda ou confronto completo.",
         )
         st.divider()
         st.caption("Este app busca os dados ao abrir a página.")
@@ -163,32 +163,33 @@ def main():
 
     season = get_season_string(selected_date)
 
-    try:
-        games = get_games_for_date(selected_date)
-    except Exception as exc:
-        st.error("A NBA demorou ou falhou ao responder na consulta dos jogos. Tente novamente em alguns segundos ou use o botão de atualização.")
-        st.exception(exc)
-        return
-
-    st.caption(f"Temporada detectada: {season} • Recorte estatístico: {season_scope_label}")
-
-    if games.empty:
-        st.warning(f"Sem jogos para {selected_date.strftime('%d/%m/%Y')}.")
-        return
-
-    game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
-    selected_game = games.loc[games["label"] == game_label].iloc[0]
-
     if diagnostic_mode:
-        st.info(
-            "Modo diagnóstico ativo: o confronto completo não será carregado. "
-            "Os endpoints serão testados individualmente."
+        st.subheader("Diagnóstico isolado da NBA")
+        st.caption(
+            "Nenhuma agenda ou confronto é carregado neste modo. "
+            "Os testes abaixo chamam apenas um endpoint por vez."
         )
+
+        team_options = {
+            data["full_name"]: int(team_id)
+            for team_id, data in TEAM_LOOKUP.items()
+        }
+        diagnostic_team_name = st.selectbox(
+            "Time para o teste",
+            sorted(team_options.keys()),
+            index=sorted(team_options.keys()).index("Boston Celtics")
+            if "Boston Celtics" in team_options else 0,
+        )
+        diagnostic_season = st.text_input(
+            "Temporada para o teste",
+            value="2025-26",
+        )
+
         if st.button("Testar endpoints NBA", type="primary", use_container_width=True):
             with st.status("Executando diagnóstico...", expanded=True) as status:
                 results = run_nba_endpoint_diagnostic(
-                    int(selected_game["VISITOR_TEAM_ID"]),
-                    season,
+                    team_options[diagnostic_team_name],
+                    diagnostic_season.strip(),
                 )
                 for item in results:
                     status.write(
@@ -205,6 +206,22 @@ def main():
             else:
                 st.success("Os três endpoints responderam dentro do limite do teste.")
         return
+
+    try:
+        games = get_games_for_date(selected_date)
+    except Exception as exc:
+        st.error("A NBA demorou ou falhou ao responder na consulta dos jogos. Tente novamente em alguns segundos ou use o botão de atualização.")
+        st.exception(exc)
+        return
+
+    st.caption(f"Temporada detectada: {season} • Recorte estatístico: {season_scope_label}")
+
+    if games.empty:
+        st.warning(f"Sem jogos para {selected_date.strftime('%d/%m/%Y')}.")
+        return
+
+    game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
+    selected_game = games.loc[games["label"] == game_label].iloc[0]
 
     try:
         away_df, home_df = get_matchup_context(
