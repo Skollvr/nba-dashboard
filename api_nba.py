@@ -814,7 +814,10 @@ def get_team_defense_percentiles(
         else:
             weights = None
 
-        row = {"TEAM_ID": int(team_id)}
+        row = {
+            "TEAM_ID": int(team_id),
+            "TEAM_GP": gp_sum,
+        }
 
         for metric in metric_names:
             col = f"_DEF_{metric}"
