@@ -355,15 +355,15 @@ def render_player_focus_panel(
         use_market_line=use_market_line,
     )
 
-    if not visual_line_context.get("has_active_line", False):
+    has_active_line = bool(visual_line_context.get("has_active_line", False))
+
+    if not has_active_line:
         st.info(
             f"Sem linha ativa para {row['PLAYER']} em {visual_metric}. "
-            "A projeção continua disponível; preencha a linha manual individual para liberar Edge, "
-            "históricos OVER/UNDER e H2H contra a linha."
+            "As abas e análises gerais continuam disponíveis; apenas os blocos que dependem "
+            "de uma linha (Edge, OVER/UNDER e H2H contra a linha) ficam aguardando preenchimento."
         )
-        st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
-        return
-    
+
     render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
 
     overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
@@ -430,270 +430,282 @@ def render_player_focus_panel(
     with visual_tab:
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric, season_scope=season_scope)
 
-        st.divider()
+        if not has_active_line:
+            st.info(
+                f"Informe uma linha manual individual para {visual_metric} para habilitar "
+                "frequência OVER/UNDER e os gráficos comparados com a linha."
+            )
+        else:
+            st.divider()
 
-        st.markdown(f"### Frequência na Temporada — {visual_metric}")
-        st.caption("Veja os montinhos: concentrados à esquerda (piso), espalhados à direita (teto).")
+            st.markdown(f"### Frequência na Temporada — {visual_metric}")
+            st.caption("Veja os montinhos: concentrados à esquerda (piso), espalhados à direita (teto).")
 
-        log = get_player_log(int(row["PLAYER_ID"]), season, season_scope=season_scope)
+            log = get_player_log(int(row["PLAYER_ID"]), season, season_scope=season_scope)
 
-        if not log.empty:
-            log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
-            log["3PM"] = log.get("FG3M", 0)
-            log["3PA"] = log.get("FG3A", 0)
+            if not log.empty:
+                log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
+                log["3PM"] = log.get("FG3M", 0)
+                log["3PA"] = log.get("FG3A", 0)
 
-            visual_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
-            active_line = float(visual_ctx["line_value"])
+                visual_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
+                active_line = float(visual_ctx["line_value"])
 
-            log_col_map = {
-                "PRA": "PRA",
-                "PTS": "PTS",
-                "REB": "REB",
-                "AST": "AST",
-                "3PM": "3PM",
-                "FGA": "FGA",
-                "3PA": "3PA",
-            }
-            active_col = log_col_map.get(visual_metric, "PRA")
+                log_col_map = {
+                    "PRA": "PRA",
+                    "PTS": "PTS",
+                    "REB": "REB",
+                    "AST": "AST",
+                    "3PM": "3PM",
+                    "FGA": "FGA",
+                    "3PA": "3PA",
+                }
+                active_col = log_col_map.get(visual_metric, "PRA")
 
-            if active_col in log.columns:
-                hist_data = log[active_col].dropna()
+                if active_col in log.columns:
+                    hist_data = log[active_col].dropna()
 
-                if not hist_data.empty:
-                    fig = go.Figure()
-                    fig.add_trace(go.Histogram(
-                        x=hist_data,
-                        xbins=dict(start=-0.5, end=max(hist_data.max(), active_line) + 5, size=1),
-                        marker_color="rgba(139,92,246, 0.65)",
-                        marker_line_color="rgba(139,92,246, 1)",
-                        marker_line_width=1.5,
-                        opacity=0.9,
-                        hovertemplate=f"Valor exato de {visual_metric}: %{{x}}<br>Jogos: %{{y}}<extra></extra>"
-                    ))
+                    if not hist_data.empty:
+                        fig = go.Figure()
+                        fig.add_trace(go.Histogram(
+                            x=hist_data,
+                            xbins=dict(start=-0.5, end=max(hist_data.max(), active_line) + 5, size=1),
+                            marker_color="rgba(139,92,246, 0.65)",
+                            marker_line_color="rgba(139,92,246, 1)",
+                            marker_line_width=1.5,
+                            opacity=0.9,
+                            hovertemplate=f"Valor exato de {visual_metric}: %{{x}}<br>Jogos: %{{y}}<extra></extra>"
+                        ))
 
-                    line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
-                    fig.add_vline(
-                        x=active_line,
-                        line_dash="dash",
-                        line_color=line_color,
-                        line_width=3,
-                        annotation_text=f"Linha ({visual_ctx['line_source']}): {active_line}",
-                        annotation_position="top right",
-                        annotation_font_color="#cbd5e1"
-                    )
-
-                    if not use_market_line and visual_metric != line_metric:
-                        st.warning(
-                            f"A linha vertical usa o valor manual da sidebar ({active_line}), "
-                            f"que foi digitado para {line_metric}."
+                        line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
+                        fig.add_vline(
+                            x=active_line,
+                            line_dash="dash",
+                            line_color=line_color,
+                            line_width=3,
+                            annotation_text=f"Linha ({visual_ctx['line_source']}): {active_line}",
+                            annotation_position="top right",
+                            annotation_font_color="#cbd5e1"
                         )
 
-                    fig.update_layout(
-                        template="plotly_dark",
-                        height=380,
-                        margin=dict(l=20, r=20, t=40, b=20),
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        plot_bgcolor="rgba(15,23,42,0.35)",
-                        bargap=0.08,
-                        showlegend=False,
-                        dragmode=False,
-                    )
-                    fig.update_xaxes(
-                        title=f"{visual_metric} por jogo",
-                        showgrid=True,
-                        gridcolor="rgba(148,163,184,0.1)"
-                    )
-                    fig.update_yaxes(
-                        title="Quantidade de jogos",
-                        showgrid=True,
-                        gridcolor="rgba(148,163,184,0.1)"
-                    )
+                        if not use_market_line and visual_metric != line_metric:
+                            st.warning(
+                                f"A linha vertical usa o valor manual da sidebar ({active_line}), "
+                                f"que foi digitado para {line_metric}."
+                            )
 
-                    st.plotly_chart(fig, use_container_width=True)
+                        fig.update_layout(
+                            template="plotly_dark",
+                            height=380,
+                            margin=dict(l=20, r=20, t=40, b=20),
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(15,23,42,0.35)",
+                            bargap=0.08,
+                            showlegend=False,
+                            dragmode=False,
+                        )
+                        fig.update_xaxes(
+                            title=f"{visual_metric} por jogo",
+                            showgrid=True,
+                            gridcolor="rgba(148,163,184,0.1)"
+                        )
+                        fig.update_yaxes(
+                            title="Quantidade de jogos",
+                            showgrid=True,
+                            gridcolor="rgba(148,163,184,0.1)"
+                        )
 
-                    over_count = int((hist_data > active_line).sum())
-                    under_count = int((hist_data < active_line).sum())
-                    push_count = int((hist_data == active_line).sum())
+                        st.plotly_chart(fig, use_container_width=True)
 
-                    push_html = (
-                        f'<span style="margin: 0 0.8rem; color: #334155;">|</span>'
-                        f'<span style="color: #cbd5e1;">PUSH = {push_count}</span>'
-                        if push_count > 0 else ""
-                    )
+                        over_count = int((hist_data > active_line).sum())
+                        under_count = int((hist_data < active_line).sum())
+                        push_count = int((hist_data == active_line).sum())
 
-                    st.markdown(
-                        f"""
-                        <div style="font-size: 0.95rem; margin-top: 0.35rem;">
-                            <span style="color: #10b981;">OVER NA TEMPORADA = {over_count}</span>
-                            <span style="margin: 0 0.8rem; color: #334155;">|</span>
-                            <span style="color: #ef4444;">UNDER NA TEMPORADA = {under_count}</span>
-                            {push_html}
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                        push_html = (
+                            f'<span style="margin: 0 0.8rem; color: #334155;">|</span>'
+                            f'<span style="color: #cbd5e1;">PUSH = {push_count}</span>'
+                            if push_count > 0 else ""
+                        )
 
-                st.divider()
+                        st.markdown(
+                            f"""
+                            <div style="font-size: 0.95rem; margin-top: 0.35rem;">
+                                <span style="color: #10b981;">OVER NA TEMPORADA = {over_count}</span>
+                                <span style="margin: 0 0.8rem; color: #334155;">|</span>
+                                <span style="color: #ef4444;">UNDER NA TEMPORADA = {under_count}</span>
+                                {push_html}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
-                st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
-                st.caption("Cada ponto é um jogo. A linha de tendência mostra se a produção sobe junto com os minutos.")
+                    st.divider()
 
-                scatter_df = log[["MIN", active_col, "GAME_DATE"]].copy().dropna()
-                scatter_df["MATCHUP"] = log["MATCHUP"] if "MATCHUP" in log.columns else ""
+                    st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
+                    st.caption("Cada ponto é um jogo. A linha de tendência mostra se a produção sobe junto com os minutos.")
 
-                if not scatter_df.empty:
-                    x = scatter_df["MIN"]
-                    y = scatter_df[active_col]
+                    scatter_df = log[["MIN", active_col, "GAME_DATE"]].copy().dropna()
+                    scatter_df["MATCHUP"] = log["MATCHUP"] if "MATCHUP" in log.columns else ""
 
-                    z = np.polyfit(x, y, 1)
-                    p = np.poly1d(z)
-                    trend_x = np.array([x.min(), x.max()])
-                    trend_y = p(trend_x)
+                    if not scatter_df.empty:
+                        x = scatter_df["MIN"]
+                        y = scatter_df[active_col]
 
-                    line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
+                        z = np.polyfit(x, y, 1)
+                        p = np.poly1d(z)
+                        trend_x = np.array([x.min(), x.max()])
+                        trend_y = p(trend_x)
 
-                    fig_scatter = go.Figure()
-                    fig_scatter.add_trace(go.Scatter(
-                        x=x,
-                        y=y,
-                        mode="markers",
-                        marker=dict(
-                            size=12,
-                            color=np.where(y >= active_line, "#10b981", "#ef4444"),
-                            line=dict(width=1, color="#f8fafc"),
-                            opacity=0.8,
-                        ),
-                        text=scatter_df.apply(
-                            lambda r: f"Data: {r['GAME_DATE'].strftime('%d/%m')}<br>"
-                                      f"Matchup: {r['MATCHUP']}<br>"
-                                      f"Minutos: {r['MIN']}<br>"
-                                      f"{visual_metric}: {r[active_col]}",
-                            axis=1
-                        ),
-                        hoverinfo="text",
-                        name="Jogos"
-                    ))
+                        line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
 
-                    fig_scatter.add_trace(go.Scatter(
-                        x=trend_x,
-                        y=trend_y,
-                        mode="lines",
-                        line=dict(color="rgba(255, 255, 255, 0.4)", width=2, dash="dot"),
-                        name="Tendência",
-                        hoverinfo="skip"
-                    ))
+                        fig_scatter = go.Figure()
+                        fig_scatter.add_trace(go.Scatter(
+                            x=x,
+                            y=y,
+                            mode="markers",
+                            marker=dict(
+                                size=12,
+                                color=np.where(y >= active_line, "#10b981", "#ef4444"),
+                                line=dict(width=1, color="#f8fafc"),
+                                opacity=0.8,
+                            ),
+                            text=scatter_df.apply(
+                                lambda r: f"Data: {r['GAME_DATE'].strftime('%d/%m')}<br>"
+                                          f"Matchup: {r['MATCHUP']}<br>"
+                                          f"Minutos: {r['MIN']}<br>"
+                                          f"{visual_metric}: {r[active_col]}",
+                                axis=1
+                            ),
+                            hoverinfo="text",
+                            name="Jogos"
+                        ))
 
-                    fig_scatter.add_hline(
-                        y=active_line,
-                        line_dash="dash",
-                        line_color=line_color,
-                        line_width=2,
-                        annotation_text="Linha",
-                        annotation_position="bottom right"
-                    )
+                        fig_scatter.add_trace(go.Scatter(
+                            x=trend_x,
+                            y=trend_y,
+                            mode="lines",
+                            line=dict(color="rgba(255, 255, 255, 0.4)", width=2, dash="dot"),
+                            name="Tendência",
+                            hoverinfo="skip"
+                        ))
 
-                    fig_scatter.update_layout(
-                        template="plotly_dark",
-                        height=400,
-                        margin=dict(l=20, r=20, t=20, b=20),
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        plot_bgcolor="rgba(15,23,42,0.35)",
-                        xaxis_title="Minutos Jogados",
-                        yaxis_title=f"Valor de {visual_metric}",
-                        showlegend=False,
-                        dragmode=False
-                    )
-                    fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
-                    fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                        fig_scatter.add_hline(
+                            y=active_line,
+                            line_dash="dash",
+                            line_color=line_color,
+                            line_width=2,
+                            annotation_text="Linha",
+                            annotation_position="bottom right"
+                        )
 
-                    st.plotly_chart(fig_scatter, use_container_width=True)
+                        fig_scatter.update_layout(
+                            template="plotly_dark",
+                            height=400,
+                            margin=dict(l=20, r=20, t=20, b=20),
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(15,23,42,0.35)",
+                            xaxis_title="Minutos Jogados",
+                            yaxis_title=f"Valor de {visual_metric}",
+                            showlegend=False,
+                            dragmode=False
+                        )
+                        fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                        fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
 
-                    correl = x.corr(y)
-                    if correl > 0.7:
-                        st.success(f"📈 Alta Correlação ({correl:.2f}): produção muito dependente dos minutos.")
-                    elif correl > 0.4:
-                        st.info(f"📊 Correlação Moderada ({correl:.2f}): minutos ajudam, mas não explicam tudo.")
-                    else:
-                        st.warning(f"📉 Baixa Correlação ({correl:.2f}): produção mais oscilante, pouco dependente dos minutos.")
+                        st.plotly_chart(fig_scatter, use_container_width=True)
+
+                        correl = x.corr(y)
+                        if correl > 0.7:
+                            st.success(f"📈 Alta Correlação ({correl:.2f}): produção muito dependente dos minutos.")
+                        elif correl > 0.4:
+                            st.info(f"📊 Correlação Moderada ({correl:.2f}): minutos ajudam, mas não explicam tudo.")
+                        else:
+                            st.warning(f"📉 Baixa Correlação ({correl:.2f}): produção mais oscilante, pouco dependente dos minutos.")
+                else:
+                    st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
             else:
-                st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
-        else:
-            st.info("Sem histórico suficiente para gerar os gráficos.")
-    
+                st.info("Sem histórico suficiente para gerar os gráficos.")
+        
     # --- ABA DE MERCADO DINÂMICA (FORMATO 22,5 CORRIGIDO) ---
     with market_tab:
-        st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
-        
-        v_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
-        active_line = float(v_ctx['line_value'])
-        
-        current_opp = opp_abbr
-        for abbr, info in NBA_TEAM_COLORS.items():
-            team_info_name = str(info.get('name', '')).upper()
-            if team_info_name in str(current_opp).upper():
-                current_opp = abbr
-                break
-        
-        log = get_player_log(int(row["PLAYER_ID"]), season)
-        
-        if not log.empty:
-            log['PRA'] = log['PTS'] + log['REB'] + log['AST']
-            log['3PM'] = log.get('FG3M', 0)
-            log['3PA'] = log.get('FG3A', 0)
-            
-            h2h_log = log[log['MATCHUP'].str.contains(current_opp, case=False, na=False)].copy()
-            
-            if not h2h_log.empty:
-                target_col = visual_metric
-                h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', target_col]].copy()
-                h2h_display['Data'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
-                h2h_display['Linha'] = active_line
-                
-                real_col_name = f'Real ({visual_metric})'
-                h2h_display = h2h_display.rename(columns={
-                    'MATCHUP': 'Confronto',
-                    'WL': 'Res',
-                    'MIN': 'Min',
-                    target_col: real_col_name
-                })
-                
-                final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', 'Linha', real_col_name]]
-                
-                def style_hit_miss(val):
-                    try:
-                        num = float(val)
-                        if num >= active_line:
-                            return 'background-color: rgba(34,197,94,0.15); color: #86efac; font-weight: bold; border-left: 4px solid #22c55e;'
-                        else:
-                            return 'background-color: rgba(239,68,68,0.15); color: #fca5a5; font-weight: bold; border-left: 4px solid #ef4444;'
-                    except:
-                        return ''
-
-                st.write(f"Comparando histórico com a linha atual: **{active_line:.1f}** ({v_ctx['line_source']})")
-                
-                # CORREÇÃO DA VÍRGULA E CASAS DECIMAIS:
-                # O format abaixo força 1 casa decimal e troca o ponto por vírgula
-                styled_df = final_table.style.format({
-                    'Linha': lambda x: f"{x:.1f}".replace('.', ','),
-                    real_col_name: lambda x: f"{x:.1f}".replace('.', ',')
-                }).map(style_hit_miss, subset=[real_col_name])
-                
-                st.dataframe(styled_df, use_container_width=True, hide_index=True)
-                
-                hits = (h2h_log[target_col] >= active_line).sum()
-                total = len(h2h_log)
-                pct = int((hits / total) * 100) if total > 0 else 0
-                
-                st.markdown(f"""
-                    <div style="padding: 15px; background: rgba(15,23,42,0.6); border-radius: 10px; border-left: 5px solid #38bdf8; margin-top: 10px;">
-                        🎯 <b>Taxa de Acerto vs {current_opp}:</b> {hits}/{total} ({pct}%) 
-                        <br><small style="opacity: 0.8;">Jogador cumpriu a linha de <b>{active_line:.1f} {visual_metric}</b> em {hits} dos últimos {total} jogos contra este time.</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
+        if not has_active_line:
+            st.info(
+                f"Informe uma linha manual individual para {visual_metric} para comparar "
+                "o histórico H2H contra essa linha."
+            )
         else:
-            st.error("Erro ao carregar log do jogador.")            
+            st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
+            
+            v_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
+            active_line = float(v_ctx['line_value'])
+            
+            current_opp = opp_abbr
+            for abbr, info in NBA_TEAM_COLORS.items():
+                team_info_name = str(info.get('name', '')).upper()
+                if team_info_name in str(current_opp).upper():
+                    current_opp = abbr
+                    break
+            
+            log = get_player_log(int(row["PLAYER_ID"]), season)
+            
+            if not log.empty:
+                log['PRA'] = log['PTS'] + log['REB'] + log['AST']
+                log['3PM'] = log.get('FG3M', 0)
+                log['3PA'] = log.get('FG3A', 0)
+                
+                h2h_log = log[log['MATCHUP'].str.contains(current_opp, case=False, na=False)].copy()
+                
+                if not h2h_log.empty:
+                    target_col = visual_metric
+                    h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', target_col]].copy()
+                    h2h_display['Data'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
+                    h2h_display['Linha'] = active_line
+                    
+                    real_col_name = f'Real ({visual_metric})'
+                    h2h_display = h2h_display.rename(columns={
+                        'MATCHUP': 'Confronto',
+                        'WL': 'Res',
+                        'MIN': 'Min',
+                        target_col: real_col_name
+                    })
+                    
+                    final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', 'Linha', real_col_name]]
+                    
+                    def style_hit_miss(val):
+                        try:
+                            num = float(val)
+                            if num >= active_line:
+                                return 'background-color: rgba(34,197,94,0.15); color: #86efac; font-weight: bold; border-left: 4px solid #22c55e;'
+                            else:
+                                return 'background-color: rgba(239,68,68,0.15); color: #fca5a5; font-weight: bold; border-left: 4px solid #ef4444;'
+                        except:
+                            return ''
+
+                    st.write(f"Comparando histórico com a linha atual: **{active_line:.1f}** ({v_ctx['line_source']})")
+                    
+                    # CORREÇÃO DA VÍRGULA E CASAS DECIMAIS:
+                    # O format abaixo força 1 casa decimal e troca o ponto por vírgula
+                    styled_df = final_table.style.format({
+                        'Linha': lambda x: f"{x:.1f}".replace('.', ','),
+                        real_col_name: lambda x: f"{x:.1f}".replace('.', ',')
+                    }).map(style_hit_miss, subset=[real_col_name])
+                    
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                    
+                    hits = (h2h_log[target_col] >= active_line).sum()
+                    total = len(h2h_log)
+                    pct = int((hits / total) * 100) if total > 0 else 0
+                    
+                    st.markdown(f"""
+                        <div style="padding: 15px; background: rgba(15,23,42,0.6); border-radius: 10px; border-left: 5px solid #38bdf8; margin-top: 10px;">
+                            🎯 <b>Taxa de Acerto vs {current_opp}:</b> {hits}/{total} ({pct}%) 
+                            <br><small style="opacity: 0.8;">Jogador cumpriu a linha de <b>{active_line:.1f} {visual_metric}</b> em {hits} dos últimos {total} jogos contra este time.</small>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
+            else:
+                st.error("Erro ao carregar log do jogador.")            
 def render_team_section_v2(
     team_name: str,
     team_df: pd.DataFrame,
