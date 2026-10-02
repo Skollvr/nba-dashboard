@@ -269,6 +269,38 @@ def main():
             "como amostra consolidada."
         )
 
+    lineup_test_df = pd.concat(
+        [df for df in [away_df, home_df] if df is not None and not df.empty],
+        ignore_index=True,
+    )
+    if not lineup_test_df.empty:
+        source_series = lineup_test_df.get(
+            "LINEUP_SOURCE",
+            pd.Series(["Modelo interno"] * len(lineup_test_df)),
+        ).fillna("Modelo interno").astype(str)
+        nba_lineup_count = int(source_series.eq("NBA Daily Lineups").sum())
+        external_min_count = int(
+            pd.to_numeric(
+                lineup_test_df.get(
+                    "PROJECTED_MINUTES_EXTERNAL",
+                    pd.Series([float("nan")] * len(lineup_test_df)),
+                ),
+                errors="coerce",
+            ).notna().sum()
+        )
+
+        if nba_lineup_count > 0:
+            st.info(
+                f"Teste de rotação: feed NBA reconhecido para {nba_lineup_count} jogador(es) • "
+                f"minutos externos disponíveis para {external_min_count}. "
+                "Os demais jogadores usam o modelo interno de minutos."
+            )
+        else:
+            st.caption(
+                "Teste de rotação: o feed diário da NBA ainda não trouxe uma lineup utilizável "
+                "para este jogo; status e minutos permanecem no fallback interno."
+            )
+
     # Linhas manuais são individuais por jogador. Isso evita comparar todo o
     # roster contra uma única linha global. Se BetMGM estiver ativo e houver
     # linha de mercado para o jogador, ela continua tendo prioridade.
