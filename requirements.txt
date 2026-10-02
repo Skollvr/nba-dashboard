@@ -7,3 +7,5 @@ pypdf
 pytz
 numpy>=1.26
 matplotlib>=3.9
+
+nicegui>=3.0
