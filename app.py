@@ -223,6 +223,7 @@ def main():
                 analysis_season,
                 use_market_line,
                 season_scope=season_scope,
+                roster_season=season,
                 progress_callback=load_status.write,
             )
             load_status.update(
