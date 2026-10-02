@@ -318,7 +318,7 @@ def calculate_projection(season_value: float, l10_value: float, l5_value: float,
     )
     return max(0.0, projection)
 
-def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_line: bool = False) -> dict:
+def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_market_line: bool = False) -> dict:
     projection_col = get_metric_projection_column(metric)
     projection_v1_col = f"PROJ_{metric}_V1"
     recent_list_col = get_metric_recent_list_column(metric)
@@ -326,36 +326,85 @@ def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_
     # Prefer the context-aware V1 projection when available. It incorporates
     # projected minutes, recent rate, matchup and injury status.
     projection_raw = row.get(projection_v1_col, row.get(projection_col, 0.0))
-    projection = float(pd.to_numeric(projection_raw, errors="coerce") or 0.0)
+    projection_num = pd.to_numeric(projection_raw, errors="coerce")
+    projection = float(projection_num) if pd.notna(projection_num) else 0.0
+
     market_info = get_market_line_for_metric(row, metric)
     market_line = pd.to_numeric(market_info.get("line"), errors="coerce")
     use_market = bool(use_market_line and pd.notna(market_line))
-    active_line = float(market_line) if use_market else float(line_value)
+
+    manual_col = f"MANUAL_LINE_{metric}"
+    manual_line = pd.to_numeric(row.get(manual_col), errors="coerce")
+    fallback_line = pd.to_numeric(line_value, errors="coerce")
+
+    has_manual_line = bool(pd.notna(manual_line) and float(manual_line) > 0)
+    has_fallback_line = bool(pd.notna(fallback_line) and float(fallback_line) > 0)
+
+    if use_market:
+        active_line = float(market_line)
+        source_name = "BetMGM"
+        icon = "🎯"
+    elif has_manual_line:
+        active_line = float(manual_line)
+        source_name = "Manual"
+        icon = "✏️"
+    elif has_fallback_line:
+        # Compatibilidade com telas antigas que ainda possam enviar uma linha global.
+        active_line = float(fallback_line)
+        source_name = "Manual"
+        icon = "✏️"
+    else:
+        return {
+            "projection": projection,
+            "edge": 0.0,
+            "label": "Sem linha",
+            "line_value": None,
+            "line_source": "Sem linha",
+            "has_market_line": False,
+            "has_active_line": False,
+            "over_dec": None,
+            "under_dec": None,
+            "updated_at": "",
+            "hit_l10": "-",
+            "hit_l10_html": "-",
+            "hit_sequence": "",
+            "icon": "",
+            "tooltip": "Nenhuma linha informada para este jogador.",
+            "hit_l5": "-",
+        }
 
     edge = projection - active_line
     recent_values = row.get(recent_list_col, [])
-    if not isinstance(recent_values, list): recent_values = []
+    if not isinstance(recent_values, list):
+        recent_values = []
 
     hit_l10 = sum(float(v) >= active_line for v in recent_values)
     hit_l5 = sum(float(v) >= active_line for v in recent_values[:5])
+    hit_sequence = "".join(
+        ["✅" if float(v) >= active_line else "❌" for v in reversed(recent_values)]
+    )
 
-    hit_sequence = "".join(["✅" if float(v) >= active_line else "❌" for v in reversed(recent_values)])
-
-    source_name = "BetMGM" if use_market else "Manual"
-    icon = "🎯" if use_market else "✏️"
     tooltip = f"Calculado com linha {source_name} ({active_line})"
-    
     hit_l10_str = format_ratio_text(hit_l10, len(recent_values))
     hit_l10_html = f'<span title="{tooltip}" style="cursor:help;">{hit_l10_str} {icon}</span>'
 
     return {
-        "projection": projection, "edge": edge, "label": classify_line_edge(edge),
-        "line_value": active_line, "line_source": source_name, "has_market_line": use_market,
+        "projection": projection,
+        "edge": edge,
+        "label": classify_line_edge(edge),
+        "line_value": active_line,
+        "line_source": source_name,
+        "has_market_line": use_market,
+        "has_active_line": True,
         "over_dec": market_info.get("over_dec") if use_market else None,
         "under_dec": market_info.get("under_dec") if use_market else None,
         "updated_at": market_info.get("updated_at") if use_market else "",
-        "hit_l10": hit_l10_str, "hit_l10_html": hit_l10_html, "hit_sequence": hit_sequence,
-        "icon": icon, "tooltip": tooltip, "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
+        "hit_l10": hit_l10_str,
+        "hit_l10_html": hit_l10_html,
+        "hit_sequence": hit_sequence,
+        "icon": icon,
+        "tooltip": tooltip,
+        "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
     }
 
 @st.cache_data(ttl=21600, show_spinner=False)
