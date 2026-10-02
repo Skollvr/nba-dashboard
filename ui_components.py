@@ -1671,6 +1671,10 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     matchup_label = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
     matchup_score = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0) or 0.0)
     defense_label = str(row.get(f"DEF_LABEL_{metric}_V2", "Neutro"))
+    team_def_label = str(row.get(f"TEAM_DEF_LABEL_{metric}", "Neutro"))
+    team_def_pct = float(row.get(f"TEAM_DEF_PCT_{metric}", 0.5) or 0.5)
+    team_def_rank = int(float(row.get(f"TEAM_DEF_RANK_{metric}", 0) or 0))
+    team_count = int(float(row.get("TEAM_DEF_TEAM_COUNT", 30) or 30))
     h2h_label = str(row.get(f"H2H_LABEL_{metric}_V2", "Sem amostra"))
     h2h_gp = int(float(row.get("H2H_GP", 0.0) or 0.0))
     h2h_avg = float(row.get(f"H2H_{metric}", 0.0) or 0.0)
@@ -1678,7 +1682,16 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     position_group = str(row.get("POSITION_GROUP", "-"))
     opponent = str(row.get("OPP_TEAM_NAME", "Oponente"))
 
-    matchup_parts = [f"Defesa vs {position_group}: {defense_label}"]
+    rank_text = (
+        f"{team_def_rank}/{team_count}"
+        if team_def_rank > 0 and team_count > 0
+        else f"P{int(round(team_def_pct * 100))}"
+    )
+
+    matchup_parts = [
+        f"Defesa geral: {team_def_label} ({rank_text})",
+        f"vs {position_group}: {defense_label}",
+    ]
     if h2h_gp > 0:
         matchup_parts.append(
             f"H2H {h2h_avg:.1f} em {h2h_gp}j ({h2h_label})"
@@ -2047,17 +2060,28 @@ def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
     matchup_score = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0) or 0.0)
     matchup_class = get_matchup_chip_class(matchup_label)
 
-    defense_label = str(row.get(f"DEF_LABEL_{metric}_V2", "Neutro"))
-    defense_score = float(row.get(f"DEF_SCORE_{metric}_V2", 0.0) or 0.0)
+    team_def_label = str(row.get(f"TEAM_DEF_LABEL_{metric}", "Neutro"))
+    team_def_pct = float(row.get(f"TEAM_DEF_PCT_{metric}", 0.5) or 0.5)
+    team_def_rank = int(float(row.get(f"TEAM_DEF_RANK_{metric}", 0) or 0))
+    team_count = int(float(row.get("TEAM_DEF_TEAM_COUNT", 30) or 30))
+
+    position_label = str(row.get(f"DEF_LABEL_{metric}_V2", "Neutro"))
+    position_score = float(row.get(f"POSITION_SCORE_{metric}_V3", 0.0) or 0.0)
+
     h2h_label = str(row.get(f"H2H_LABEL_{metric}_V2", "Sem amostra"))
-    h2h_score = float(row.get(f"H2H_SCORE_{metric}_V2", 0.0) or 0.0)
+    h2h_score = float(row.get(f"H2H_SCORE_{metric}_V3", 0.0) or 0.0)
     h2h_gp = int(float(row.get("H2H_GP", 0.0) or 0.0))
     h2h_avg = float(row.get(f"H2H_{metric}", 0.0) or 0.0)
+
     matchup_effect_pct = float(
         row.get(f"MATCHUP_EFFECT_PCT_{metric}_V2", 0.0) or 0.0
     ) * 100.0
 
-    matchup_ctx = get_metric_matchup_context(row, metric)
+    rank_text = (
+        f"{team_def_rank}º de {team_count}"
+        if team_def_rank > 0 and team_count > 0
+        else f"percentil {int(round(team_def_pct * 100))}"
+    )
 
     h2h_value = (
         f"{format_number(h2h_avg)} ({h2h_gp}j)"
@@ -2076,19 +2100,19 @@ def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
 
         <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
             <div class="detail-mini">
-                <div class="detail-mini-label">Defesa vs {row.get('POSITION_GROUP', '-')}</div>
-                <div class="detail-mini-value">{defense_label}</div>
-                <div class="detail-mini-label">score {format_signed_number(defense_score, 2)}</div>
+                <div class="detail-mini-label">Defesa geral NBA</div>
+                <div class="detail-mini-value">{team_def_label}</div>
+                <div class="detail-mini-label">{rank_text} • P{int(round(team_def_pct * 100))}</div>
+            </div>
+            <div class="detail-mini">
+                <div class="detail-mini-label">Recorte vs {row.get('POSITION_GROUP', '-')}</div>
+                <div class="detail-mini-value">{position_label}</div>
+                <div class="detail-mini-label">score {format_signed_number(position_score, 2)}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Histórico H2H</div>
                 <div class="detail-mini-value">{h2h_value}</div>
                 <div class="detail-mini-label">{h2h_label} • score {format_signed_number(h2h_score, 2)}</div>
-            </div>
-            <div class="detail-mini">
-                <div class="detail-mini-label">Índice posicional</div>
-                <div class="detail-mini-value">{format_number(matchup_ctx['allowed'])}</div>
-                <div class="detail-mini-label">liga {format_number(matchup_ctx['baseline'])}</div>
             </div>
             <div class="detail-mini detail-mini-highlight">
                 <div class="detail-mini-label">Efeito na projeção</div>
@@ -2098,8 +2122,8 @@ def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
         </div>
 
         <div class="hero-note">
-            O matchup final combina a defesa posicional do adversário com o histórico individual
-            recente contra esse time. H2H com pouca amostra recebe peso reduzido.
+            Modelo de teste: 55% defesa relativa entre os times da NBA, 15% recorte por posição
+            e até 30% H2H. O H2H recebe menos peso quando há poucos confrontos.
         </div>
     </div>
     """
@@ -2147,14 +2171,28 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
             )
 
     with c3:
-        st.markdown("**MATCHUP V1**")
+        team_def_label = str(row.get(f"TEAM_DEF_LABEL_{line_metric}", "Neutro"))
+        team_def_pct = float(row.get(f"TEAM_DEF_PCT_{line_metric}", 0.5) or 0.5)
+        st.markdown("**MATCHUP FINAL**")
         st.markdown(f"### {matchup_label_v1}")
-        st.caption(f"Score {format_signed_number(matchup_score_v1, 2)}")
+        st.caption(
+            f"Def geral {team_def_label} • P{int(round(team_def_pct * 100))} • "
+            f"Score {format_signed_number(matchup_score_v1, 2)}"
+        )
 
     with c4:
-        st.markdown("**OSCILAÇÃO**")
-        st.markdown(f"### {row.get('OSC_CLASS', '-')}")
-        st.caption(f"{row.get('FORM_SIGNAL', '→ Estável')}")
+        metric_osc = str(
+            row.get(f"OSC_{line_metric}_CLASS", row.get("OSC_CLASS", "-"))
+        )
+        metric_form = str(
+            row.get(
+                f"FORM_{line_metric}_SIGNAL",
+                row.get("FORM_SIGNAL", "→ Estável"),
+            )
+        )
+        st.markdown("**OSCILAÇÃO / FORMA**")
+        st.markdown(f"### {metric_osc}")
+        st.caption(metric_form)
 
 def render_player_cards_grid(
     filtered_df: pd.DataFrame,
