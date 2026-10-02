@@ -41,18 +41,13 @@ def get_previous_season_string(season: str) -> str:
 
 def get_analysis_season(selected_date: date, today: date) -> str:
     """
-    Usa a temporada anterior como base no começo de uma nova temporada,
-    quando a amostra corrente ainda é pequena. O corte de 15/11 representa
-    aproximadamente as primeiras semanas / cerca de 10 jogos por time.
+    O modelo usa somente dados da própria temporada do jogo.
+
+    Não misturamos a temporada anterior no início do ano. Até que os dois times
+    tenham pelo menos 10 jogos na temporada atual, as projeções permanecem
+    disponíveis para desenvolvimento e teste, mas a amostra é marcada como inicial.
     """
-    game_season = get_season_string(selected_date)
-    start_year = int(game_season.split("-", 1)[0])
-    early_season_cutoff = date(start_year, 11, 15)
-
-    if today < early_season_cutoff and selected_date >= date(start_year, 10, 1):
-        return get_previous_season_string(game_season)
-
-    return game_season
+    return get_season_string(selected_date)
 
 
 def main():
@@ -157,13 +152,10 @@ def main():
     analysis_season = get_analysis_season(selected_date, today)
     selected_date_key = selected_date.isoformat()
 
-    if analysis_season != season:
-        st.caption(
-            f"Temporada do jogo: {season} • Base estatística: {analysis_season} "
-            f"(início de temporada) • Recorte: {season_scope_label}"
-        )
-    else:
-        st.caption(f"Temporada detectada: {season} • Recorte estatístico: {season_scope_label}")
+    st.caption(
+        f"Temporada detectada: {season} • Base estatística: somente {analysis_season} "
+        f"• Recorte: {season_scope_label}"
+    )
 
     if search_games:
         st.session_state.pop("loaded_matchup_key", None)
@@ -240,6 +232,41 @@ def main():
         return
 
     render_matchup_header(selected_game)
+
+    def _team_gp(df: pd.DataFrame) -> int:
+        if df is None or df.empty:
+            return 0
+
+        if "TEAM_GP_CURRENT" in df.columns:
+            gp = pd.to_numeric(df["TEAM_GP_CURRENT"], errors="coerce").dropna()
+            if not gp.empty:
+                return int(round(float(gp.iloc[0])))
+
+        if "SEASON_GP" in df.columns:
+            gp = pd.to_numeric(df["SEASON_GP"], errors="coerce").dropna()
+            if not gp.empty:
+                return int(round(float(gp.max())))
+
+        return 0
+
+    min_model_games = 10
+    away_gp = _team_gp(away_df)
+    home_gp = _team_gp(home_df)
+
+    if away_gp >= min_model_games and home_gp >= min_model_games:
+        st.success(
+            f"Amostra mínima atingida: {selected_game['away_team_name']} {away_gp} jogos • "
+            f"{selected_game['home_team_name']} {home_gp} jogos. "
+            "O modelo está usando somente dados da temporada atual."
+        )
+    else:
+        st.warning(
+            f"Amostra inicial da temporada — referência mínima: {min_model_games} jogos por time. "
+            f"{selected_game['away_team_name']}: {away_gp}/{min_model_games} • "
+            f"{selected_game['home_team_name']}: {home_gp}/{min_model_games}. "
+            "As projeções ficam disponíveis para desenvolvimento e teste, mas não devem ser tratadas "
+            "como amostra consolidada."
+        )
 
     # Linhas manuais são individuais por jogador. Isso evita comparar todo o
     # roster contra uma única linha global. Se BetMGM estiver ativo e houver
