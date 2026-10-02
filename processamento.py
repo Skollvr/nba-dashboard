@@ -156,8 +156,10 @@ def classify_line_edge(edge: float) -> str:
     return "Justa"
 
 def get_matchup_chip_class(label: str) -> str:
-    if label == "Favorável": return "matchup-good"
-    if label == "Difícil": return "matchup-bad"
+    if label in {"Favorável", "Muito favorável"}:
+        return "matchup-good"
+    if label in {"Difícil", "Muito difícil"}:
+        return "matchup-bad"
     return "matchup-neutral"
 
 def classify_trend(delta_pra: float) -> str:
