@@ -222,3 +222,12 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
         injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
     
     return injury_df
+
+
+def clear_injury_cache() -> None:
+    """Limpa somente os caches do injury report."""
+    for cached_fn in [fetch_latest_injury_report_pdf_url, fetch_latest_injury_report_df]:
+        try:
+            cached_fn.clear()
+        except Exception:
+            pass
