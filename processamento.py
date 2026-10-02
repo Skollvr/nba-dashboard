@@ -367,10 +367,14 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
             "updated_at": "",
             "hit_l10": "-",
             "hit_l10_html": "-",
+            "under_l10": "-",
+            "under_l10_html": "-",
             "hit_sequence": "",
+            "under_sequence": "",
             "icon": "",
             "tooltip": "Nenhuma linha informada para este jogador.",
             "hit_l5": "-",
+            "under_l5": "-",
         }
 
     edge = projection - active_line
@@ -380,13 +384,21 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
 
     hit_l10 = sum(float(v) >= active_line for v in recent_values)
     hit_l5 = sum(float(v) >= active_line for v in recent_values[:5])
+    under_l10 = sum(float(v) < active_line for v in recent_values)
+    under_l5 = sum(float(v) < active_line for v in recent_values[:5])
+
     hit_sequence = "".join(
         ["✅" if float(v) >= active_line else "❌" for v in reversed(recent_values)]
+    )
+    under_sequence = "".join(
+        ["✅" if float(v) < active_line else "❌" for v in reversed(recent_values)]
     )
 
     tooltip = f"Calculado com linha {source_name} ({active_line})"
     hit_l10_str = format_ratio_text(hit_l10, len(recent_values))
     hit_l10_html = f'<span title="{tooltip}" style="cursor:help;">{hit_l10_str} {icon}</span>'
+    under_l10_str = format_ratio_text(under_l10, len(recent_values))
+    under_l10_html = f'<span title="{tooltip}" style="cursor:help;">{under_l10_str} {icon}</span>'
 
     return {
         "projection": projection,
@@ -401,10 +413,14 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
         "updated_at": market_info.get("updated_at") if use_market else "",
         "hit_l10": hit_l10_str,
         "hit_l10_html": hit_l10_html,
+        "under_l10": under_l10_str,
+        "under_l10_html": under_l10_html,
         "hit_sequence": hit_sequence,
+        "under_sequence": under_sequence,
         "icon": icon,
         "tooltip": tooltip,
         "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
+        "under_l5": format_ratio_text(under_l5, min(len(recent_values), 5)),
     }
 
 @st.cache_data(ttl=21600, show_spinner=False)
