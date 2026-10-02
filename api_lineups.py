@@ -258,3 +258,12 @@ def normalize_daily_lineups(payload: dict[str, Any]) -> pd.DataFrame:
 def get_daily_lineups(target_date: date) -> pd.DataFrame:
     """Busca e normaliza o feed; erros ficam para o chamador tratar como fallback."""
     return normalize_daily_lineups(fetch_daily_lineups_raw(target_date))
+
+
+def clear_lineup_cache() -> None:
+    """Limpa apenas o feed diário de lineups."""
+    for cached_fn in [fetch_daily_lineups_raw, get_daily_lineups]:
+        try:
+            cached_fn.clear()
+        except Exception:
+            pass
