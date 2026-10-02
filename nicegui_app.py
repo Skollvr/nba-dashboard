@@ -183,9 +183,12 @@ def main() -> None:
 
 
 if __name__ in {'__main__', '__mp_main__'}:
+    # Monta a interface antes de iniciar o servidor. Este modo é mais simples
+    # e compatível para o nosso primeiro teste local no Windows.
+    main()
+
     remote_access = os.getenv('NICEGUI_ON_AIR', '0').strip().lower() in {'1', 'true', 'yes', 'on'}
     ui.run(
-        root=main,
         title='NBA Props Dashboard',
         favicon='🏀',
         dark=True,
@@ -194,4 +197,5 @@ if __name__ in {'__main__', '__mp_main__'}:
         host='0.0.0.0',
         port=8080,
         reload=False,
+        uvicorn_logging_level='info',
     )
