@@ -359,9 +359,9 @@ def render_player_focus_panel(
 
     if not has_active_line:
         st.info(
-            f"Sem linha ativa para {row['PLAYER']} em {visual_metric}. "
-            "As abas e análises gerais continuam disponíveis; apenas os blocos que dependem "
-            "de uma linha (Edge, OVER/UNDER e H2H contra a linha) ficam aguardando preenchimento."
+            f"Dados insuficientes para a análise completa de linha de {row['PLAYER']} em {visual_metric}. "
+            "Não há linha manual ou de mercado informada. As médias, projeções, matchup e demais análises "
+            "continuam disponíveis normalmente."
         )
 
     render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
@@ -431,9 +431,18 @@ def render_player_focus_panel(
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric, season_scope=season_scope)
 
         if not has_active_line:
+            st.divider()
+            st.markdown(f"### Frequência na Temporada — {visual_metric}")
             st.info(
-                f"Informe uma linha manual individual para {visual_metric} para habilitar "
-                "frequência OVER/UNDER e os gráficos comparados com a linha."
+                "Dados insuficientes para comparar OVER/UNDER: "
+                "é necessária uma linha manual individual ou uma linha de mercado."
+            )
+
+            st.divider()
+            st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
+            st.info(
+                "Dados insuficientes para destacar jogos acima/abaixo da linha. "
+                "Informe uma linha para completar esta visualização."
             )
         else:
             st.divider()
@@ -628,13 +637,14 @@ def render_player_focus_panel(
         
     # --- ABA DE MERCADO DINÂMICA (FORMATO 22,5 CORRIGIDO) ---
     with market_tab:
+        st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
+
         if not has_active_line:
             st.info(
-                f"Informe uma linha manual individual para {visual_metric} para comparar "
-                "o histórico H2H contra essa linha."
+                "Dados insuficientes para comparar o histórico H2H contra uma linha. "
+                "Informe uma linha manual individual ou use uma linha de mercado."
             )
         else:
-            st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
             
             v_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
             active_line = float(v_ctx['line_value'])
@@ -1921,12 +1931,12 @@ def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_va
             <div class="detail-box-top">
                 <div class="detail-box-title">Linha — {line_metric}</div>
                 <div class="delta-pill-row">
-                    <span class="delta-pill delta-flat">Sem linha informada</span>
+                    <span class="delta-pill delta-flat">Dados insuficientes</span>
                 </div>
             </div>
             <div class="hero-note">
                 Projeção atual: <strong>{format_number(line_context.get('projection', 0.0))}</strong>.
-                Informe uma linha manual individual para calcular Edge, Hit L5 e Hit L10.
+                Não há linha manual ou de mercado disponível para calcular Edge, Hit L5 e Hit L10.
             </div>
         </div>
         """
@@ -2042,9 +2052,12 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
                 f"L10 {line_context['hit_l10']}"
             )
         else:
-            st.markdown(f"**Sem linha {line_metric}**")
-            st.markdown("### —")
-            st.caption(f"Proj {format_number(line_context['projection'])}")
+            st.markdown(f"**{line_metric} — linha**")
+            st.markdown("### Dados insuficientes")
+            st.caption(
+                f"Proj {format_number(line_context['projection'])} • "
+                "informe uma linha para calcular Edge e Hit"
+            )
 
     with c3:
         st.markdown("**MATCHUP V1**")
