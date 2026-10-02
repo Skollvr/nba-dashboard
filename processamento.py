@@ -395,14 +395,11 @@ def classify_defense_percentile(percentile: float) -> str:
 def build_context_adj_v1(row: pd.Series) -> float:
     score = 0.0
 
-    role = str(row.get("ROLE", ""))
     inj_status = str(row.get("INJ_STATUS", "Available"))
     form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
 
-    if role == "Titular provável":
-        score += 0.10
-    elif role == "Reserva":
-        score -= 0.05
+    # A classificação de lineup é descritiva e não adiciona/remova produção
+    # automaticamente. O efeito de rotação entra pelos minutos projetados.
 
     if "↗" in form_signal:
         score += 0.05
