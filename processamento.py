@@ -1434,14 +1434,15 @@ def build_team_table(
     team_df["PLAYER_KEY"] = team_df["PLAYER"].apply(normalize_text)
 
     team_df["ROLE"] = "Rotação"
-    starter_ids = team_df.sort_values(
-        by=["SEASON_MIN", "SEASON_GP", "PLAYER"],
-        ascending=[False, False, True],
-    ).head(5)["PLAYER_ID"].tolist()
-    team_df.loc[
-        team_df["PLAYER_ID"].isin(starter_ids),
-        "ROLE",
-    ] = "Estimativa por minutos"
+    if float(pd.to_numeric(team_df["SEASON_MIN"], errors="coerce").max() or 0.0) > 0:
+        starter_ids = team_df.sort_values(
+            by=["SEASON_MIN", "SEASON_GP", "PLAYER"],
+            ascending=[False, False, True],
+        ).head(5)["PLAYER_ID"].tolist()
+        team_df.loc[
+            team_df["PLAYER_ID"].isin(starter_ids),
+            "ROLE",
+        ] = "Estimativa por minutos"
     team_df["LINEUP_STATUS"] = team_df["ROLE"]
     team_df["LINEUP_SOURCE"] = "Modelo interno"
     team_df["PROJECTED_MINUTES_EXTERNAL"] = np.nan
