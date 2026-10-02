@@ -44,11 +44,14 @@ def american_to_decimal(american_odds) -> Optional[float]:
     return None
 
 def get_odds_api_key() -> str:
-    secrets_obj = getattr(st, "secrets", None)
-    if secrets_obj:
+    try:
+        secrets_obj = st.secrets
         for key_name in ["SPORTSGAMEODDS_API_KEY", "sportsgameodds_api_key"]:
             if key_name in secrets_obj:
                 return str(secrets_obj[key_name]).strip()
+    except Exception:
+        pass
+
     return os.getenv("SPORTSGAMEODDS_API_KEY", "").strip()
 
 # ==========================================
