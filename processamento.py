@@ -53,6 +53,68 @@ def classify_form_signal(slope: float) -> str:
     if slope <= -1.0: return "↘ Em queda"
     return "→ Estável"
 
+
+def classify_relative_oscillation(std_value: float, mean_value: float) -> str:
+    """Classifica oscilação proporcional à escala do fundamento."""
+    mean_abs = abs(float(mean_value))
+    if mean_abs <= 0.05:
+        return "-"
+
+    cv = abs(float(std_value)) / mean_abs
+    if cv <= 0.22:
+        return "Baixa"
+    if cv <= 0.40:
+        return "Média"
+    return "Alta"
+
+
+def classify_metric_recent_form(metric: str, recent_values: list[float]) -> str:
+    """
+    Compara os 5 jogos mais recentes com o bloco anterior, respeitando a
+    escala de cada fundamento.
+    """
+    if len(recent_values) < 6:
+        return "→ Estável"
+
+    recent5 = np.array(recent_values[:5], dtype=float)
+    previous = np.array(recent_values[5:10], dtype=float)
+
+    if previous.size == 0:
+        return "→ Estável"
+
+    recent_mean = float(recent5.mean())
+    previous_mean = float(previous.mean())
+    diff = recent_mean - previous_mean
+
+    absolute_floor = {
+        "PTS": 1.5,
+        "REB": 0.6,
+        "AST": 0.5,
+        "PRA": 2.0,
+        "3PM": 0.3,
+        "FGA": 1.0,
+        "3PA": 0.8,
+    }.get(metric, 1.0)
+
+    threshold = max(absolute_floor, abs(previous_mean) * 0.08)
+
+    if diff >= threshold:
+        return "↗ Em alta"
+    if diff <= -threshold:
+        return "↘ Em queda"
+    return "→ Estável"
+
+
+def get_previous_season_string(season: str) -> str:
+    """Converte 2025-26 em 2024-25."""
+    try:
+        start_year = int(str(season).split("-")[0])
+    except Exception:
+        return season
+
+    prev_start = start_year - 1
+    return f"{prev_start}-{str(start_year)[-2:]}"
+
 def classify_matchup_tier_by_metric(metric: str, diff_value: float) -> str:
     thresholds = {
         "PTS": 1.5,
@@ -603,6 +665,7 @@ def build_form_context(
     team_df: pd.DataFrame,
     player_logs: pd.DataFrame,
     opponent_abbr: str = "",
+    h2h_history_logs: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
     Enriquece o roster com forma recente, oscilação por fundamento, splits e H2H.
@@ -697,6 +760,14 @@ def build_form_context(
     logs = player_logs.copy()
     logs["PLAYER_ID"] = pd.to_numeric(logs.get("PLAYER_ID"), errors="coerce")
 
+    if h2h_history_logs is None or h2h_history_logs.empty:
+        h2h_logs_all = logs
+    else:
+        h2h_logs_all = h2h_history_logs.copy()
+        h2h_logs_all["PLAYER_ID"] = pd.to_numeric(
+            h2h_logs_all.get("PLAYER_ID"), errors="coerce"
+        )
+
     threshold_map = team_df.set_index("PLAYER_ID")[
         list(season_col.values())
     ].to_dict("index")
@@ -725,9 +796,14 @@ def build_form_context(
         away_logs = one[one["MATCHUP"].str.contains("@", regex=False, na=False)]
 
         if opponent_abbr:
-            h2h_logs = one[
-                one["MATCHUP"].str.contains(opponent_abbr, case=False, regex=False, na=False)
+            player_h2h_pool = h2h_logs_all[
+                h2h_logs_all["PLAYER_ID"] == player_id_num
             ].copy()
+            h2h_logs = player_h2h_pool[
+                player_h2h_pool["MATCHUP"].str.contains(
+                    opponent_abbr, case=False, regex=False, na=False
+                )
+            ].sort_values("GAME_DATE", ascending=False).head(6).copy()
         else:
             h2h_logs = pd.DataFrame(columns=one.columns)
 
@@ -751,26 +827,33 @@ def build_form_context(
                 hit_rate = 0.0
                 hit_text = "-"
 
+            recent_list = recent_values.round(1).tolist()
             osc = float(recent_values.std(ddof=0)) if len(recent_values) > 1 else 0.0
-            ordered = one.sort_values("GAME_DATE").tail(10)
-            ordered_values = pd.to_numeric(
-                ordered.get(source_col, pd.Series(dtype=float)), errors="coerce"
-            ).dropna()
-            slope = (
-                float(np.polyfit(range(len(ordered_values)), ordered_values, 1)[0])
-                if len(ordered_values) >= 3
-                else 0.0
-            )
+            recent_mean = float(recent_values.mean()) if len(recent_values) else 0.0
 
             row[f"OSC_{metric}_L10"] = osc
-            row[f"OSC_{metric}_CLASS"] = classify_oscillation(osc)
-            row[f"FORM_{metric}_SIGNAL"] = classify_form_signal(slope)
-            row[f"RECENT_{metric}_L10"] = recent_values.round(1).tolist()
+            row[f"OSC_{metric}_CLASS"] = classify_relative_oscillation(
+                osc,
+                recent_mean,
+            )
+            row[f"FORM_{metric}_SIGNAL"] = classify_metric_recent_form(
+                metric,
+                recent_list,
+            )
+            row[f"RECENT_{metric}_L10"] = recent_list
 
             h2h_values = pd.to_numeric(
                 h2h_logs.get(source_col, pd.Series(dtype=float)), errors="coerce"
             ).dropna()
-            row[f"H2H_{metric}"] = float(h2h_values.mean()) if len(h2h_values) else 0.0
+
+            if len(h2h_values):
+                # Jogos mais recentes recebem mais peso sem apagar o histórico.
+                weights = np.power(0.85, np.arange(len(h2h_values), dtype=float))
+                row[f"H2H_{metric}"] = float(
+                    np.average(h2h_values.to_numpy(dtype=float), weights=weights)
+                )
+            else:
+                row[f"H2H_{metric}"] = 0.0
 
             home_values = pd.to_numeric(
                 home_logs.get(source_col, pd.Series(dtype=float)), errors="coerce"
@@ -857,10 +940,29 @@ def enrich_team_with_context(
         )
 
     opponent_abbr = TEAM_ABBR_LOOKUP.get(int(opponent_team_id), "")
+
+    previous_season = get_previous_season_string(season)
+    previous_logs = get_league_player_logs(
+        previous_season,
+        season_scope=season_scope,
+    )
+
+    h2h_frames = [
+        frame
+        for frame in [league_logs, previous_logs]
+        if frame is not None and not frame.empty
+    ]
+    h2h_history_logs = (
+        pd.concat(h2h_frames, ignore_index=True)
+        if h2h_frames
+        else league_logs
+    )
+
     enriched = build_form_context(
         team_df,
         league_logs,
         opponent_abbr=opponent_abbr,
+        h2h_history_logs=h2h_history_logs,
     )
 
     matchup_rows = [
