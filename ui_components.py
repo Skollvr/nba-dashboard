@@ -1247,6 +1247,7 @@ def render_game_rankings(
         return
 
     projection_col = get_metric_projection_column(line_metric)
+    contextual_projection_col = f"PROJ_{line_metric}_V1"
 
     def parse_ratio_text(text: str) -> float:
         try:
@@ -1258,7 +1259,15 @@ def render_game_rankings(
 
     rank_df = combined.copy()
 
-    rank_df["RANK_PROJ"] = pd.to_numeric(rank_df[projection_col], errors="coerce").fillna(0.0)
+    projection_source_col = (
+        contextual_projection_col
+        if contextual_projection_col in rank_df.columns
+        else projection_col
+    )
+    rank_df["RANK_PROJ"] = pd.to_numeric(
+        rank_df[projection_source_col],
+        errors="coerce",
+    ).fillna(0.0)
 
     rank_df["LINE_CONTEXT"] = rank_df.apply(
         lambda row: get_line_context(
