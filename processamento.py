@@ -11,7 +11,8 @@ from config import (
 # 2. API da NBA
 from api_nba import (
     get_team_roster, get_league_player_stats, get_team_player_logs,
-    get_position_allowed_profile, get_league_position_baseline
+    get_league_player_logs, get_position_allowed_profile,
+    get_league_position_baseline
 )
 
 # 3. API de Odds
@@ -576,104 +577,236 @@ def get_position_opponent_profile_v2(
 # ---------------------------------------------------------
 # 4. CONSTRUÇÃO DE DADOS DOS JOGADORES (PANDAS MÁGICO)
 # ---------------------------------------------------------
-def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.DataFrame:
-    if team_df.empty: return team_df
+def build_form_context(
+    team_df: pd.DataFrame,
+    player_logs: pd.DataFrame,
+    opponent_abbr: str = "",
+) -> pd.DataFrame:
+    """
+    Enriquece o roster com forma recente, oscilação por fundamento, splits e H2H.
+
+    player_logs deve preferencialmente conter logs da liga inteira. Assim, um jogador
+    transferido continua carregando seus jogos da temporada anterior mesmo que eles
+    tenham sido disputados por outra franquia.
+    """
+    if team_df.empty:
+        return team_df
+
+    metric_source = {
+        "PRA": "PRA",
+        "PTS": "PTS",
+        "REB": "REB",
+        "AST": "AST",
+        "3PM": "FG3M",
+        "FGA": "FGA",
+        "3PA": "FG3A",
+    }
+    season_col = {
+        "PRA": "SEASON_PRA",
+        "PTS": "SEASON_PTS",
+        "REB": "SEASON_REB",
+        "AST": "SEASON_AST",
+        "3PM": "SEASON_3PM",
+        "FGA": "SEASON_FGA",
+        "3PA": "SEASON_3PA",
+    }
 
     scalar_defaults = {
-        "HIT_RATE_L10": 0.0, "HIT_RATE_L10_TEXT": "-", "PTS_HIT_RATE_L10": 0.0, "PTS_HIT_RATE_L10_TEXT": "-",
-        "REB_HIT_RATE_L10": 0.0, "REB_HIT_RATE_L10_TEXT": "-", "AST_HIT_RATE_L10": 0.0, "AST_HIT_RATE_L10_TEXT": "-",
-        "THREE_PM_HIT_RATE_L10": 0.0, "THREE_PM_HIT_RATE_L10_TEXT": "-", "FGA_HIT_RATE_L10": 0.0, "FGA_HIT_RATE_L10_TEXT": "-",
-        "THREE_PA_HIT_RATE_L10": 0.0, "THREE_PA_HIT_RATE_L10_TEXT": "-", "OSC_L10": 0.0, "OSC_CLASS": "-", "FORM_SIGNAL": "→ Estável",
-        "HOME_PRA": 0.0, "AWAY_PRA": 0.0, "HOME_PTS": 0.0, "AWAY_PTS": 0.0, "HOME_REB": 0.0, "AWAY_REB": 0.0, "HOME_AST": 0.0, "AWAY_AST": 0.0,
-        "HOME_3PM": 0.0, "AWAY_3PM": 0.0, "HOME_FGA": 0.0, "AWAY_FGA": 0.0, "HOME_3PA": 0.0, "AWAY_3PA": 0.0,
+        "HIT_RATE_L10": 0.0,
+        "HIT_RATE_L10_TEXT": "-",
+        "PTS_HIT_RATE_L10": 0.0,
+        "PTS_HIT_RATE_L10_TEXT": "-",
+        "REB_HIT_RATE_L10": 0.0,
+        "REB_HIT_RATE_L10_TEXT": "-",
+        "AST_HIT_RATE_L10": 0.0,
+        "AST_HIT_RATE_L10_TEXT": "-",
+        "THREE_PM_HIT_RATE_L10": 0.0,
+        "THREE_PM_HIT_RATE_L10_TEXT": "-",
+        "FGA_HIT_RATE_L10": 0.0,
+        "FGA_HIT_RATE_L10_TEXT": "-",
+        "THREE_PA_HIT_RATE_L10": 0.0,
+        "THREE_PA_HIT_RATE_L10_TEXT": "-",
+        "OSC_L10": 0.0,
+        "OSC_CLASS": "-",
+        "FORM_SIGNAL": "→ Estável",
+        "HOME_PRA": 0.0,
+        "AWAY_PRA": 0.0,
+        "HOME_PTS": 0.0,
+        "AWAY_PTS": 0.0,
+        "HOME_REB": 0.0,
+        "AWAY_REB": 0.0,
+        "HOME_AST": 0.0,
+        "AWAY_AST": 0.0,
+        "HOME_3PM": 0.0,
+        "AWAY_3PM": 0.0,
+        "HOME_FGA": 0.0,
+        "AWAY_FGA": 0.0,
+        "HOME_3PA": 0.0,
+        "AWAY_3PA": 0.0,
         "L10_MIN": 0.0,
         "L5_MIN": 0.0,
-    }
-    list_defaults = {
-        "RECENT_PRA_L10": [], "RECENT_PTS_L10": [], "RECENT_REB_L10": [], "RECENT_AST_L10": [],
-        "RECENT_3PM_L10": [], "RECENT_FGA_L10": [], "RECENT_3PA_L10": [],
+        "H2H_GP": 0.0,
     }
 
-    if team_logs.empty:
+    for metric in metric_source:
+        scalar_defaults[f"OSC_{metric}_L10"] = 0.0
+        scalar_defaults[f"OSC_{metric}_CLASS"] = "-"
+        scalar_defaults[f"FORM_{metric}_SIGNAL"] = "→ Estável"
+        scalar_defaults[f"H2H_{metric}"] = 0.0
+
+    list_defaults = {
+        "RECENT_PRA_L10": [],
+        "RECENT_PTS_L10": [],
+        "RECENT_REB_L10": [],
+        "RECENT_AST_L10": [],
+        "RECENT_3PM_L10": [],
+        "RECENT_FGA_L10": [],
+        "RECENT_3PA_L10": [],
+    }
+
+    if player_logs is None or player_logs.empty:
         enriched = team_df.copy()
-        for col, default in scalar_defaults.items(): enriched[col] = default
-        for col, default in list_defaults.items(): enriched[col] = [default.copy() for _ in range(len(enriched))]
+        for col, default in scalar_defaults.items():
+            enriched[col] = default
+        for col, default in list_defaults.items():
+            enriched[col] = [default.copy() for _ in range(len(enriched))]
         return enriched
 
-    threshold_map = team_df.set_index("PLAYER_ID")[["SEASON_PRA", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]].to_dict("index")
-    metrics = []
+    logs = player_logs.copy()
+    logs["PLAYER_ID"] = pd.to_numeric(logs.get("PLAYER_ID"), errors="coerce")
 
-    for player_id, player_logs in team_logs.groupby("PLAYER_ID"):
-        recent10 = player_logs.sort_values("GAME_DATE", ascending=False).head(10).copy()
-        sample_size = len(recent10)
-        thresholds = threshold_map.get(player_id, {})
-        
-        if sample_size == 0:
-            metrics.append({"PLAYER_ID": player_id, **scalar_defaults, **list_defaults})
+    threshold_map = team_df.set_index("PLAYER_ID")[
+        list(season_col.values())
+    ].to_dict("index")
+
+    metrics_rows = []
+
+    for player_id in team_df["PLAYER_ID"].tolist():
+        player_id_num = pd.to_numeric(player_id, errors="coerce")
+        if pd.isna(player_id_num):
             continue
 
-        pra_t = float(thresholds.get("SEASON_PRA", 0.0)); pts_t = float(thresholds.get("SEASON_PTS", 0.0))
-        reb_t = float(thresholds.get("SEASON_REB", 0.0)); ast_t = float(thresholds.get("SEASON_AST", 0.0))
-        t3pm_t = float(thresholds.get("SEASON_3PM", 0.0)); fga_t = float(thresholds.get("SEASON_FGA", 0.0))
-        t3pa_t = float(thresholds.get("SEASON_3PA", 0.0))
+        one = logs[logs["PLAYER_ID"] == player_id_num].copy()
+        if one.empty:
+            metrics_rows.append(
+                {"PLAYER_ID": player_id, **scalar_defaults, **list_defaults}
+            )
+            continue
 
-        hit_count_pra = int((recent10["PRA"] >= pra_t).sum()) if pra_t > 0 else 0
-        hit_count_pts = int((recent10["PTS"] >= pts_t).sum()) if pts_t > 0 else 0
-        hit_count_reb = int((recent10["REB"] >= reb_t).sum()) if reb_t > 0 else 0
-        hit_count_ast = int((recent10["AST"] >= ast_t).sum()) if ast_t > 0 else 0
-        hit_count_3pm = int((recent10["FG3M"] >= t3pm_t).sum()) if t3pm_t > 0 else 0
-        hit_count_fga = int((recent10["FGA"] >= fga_t).sum()) if fga_t > 0 else 0
-        hit_count_3pa = int((recent10["FG3A"] >= t3pa_t).sum()) if t3pa_t > 0 else 0
-
-        osc_value = float(recent10["PRA"].std(ddof=0)) if sample_size > 1 else 0.0
-        ordered = recent10.sort_values("GAME_DATE")
-        slope = float(np.polyfit(range(len(ordered)), ordered["PRA"], 1)[0]) if len(ordered) >= 3 else 0.0
-
-        home_logs = player_logs[player_logs["MATCHUP"].str.contains("vs.", regex=False, na=False)]
-        away_logs = player_logs[player_logs["MATCHUP"].str.contains("@", regex=False, na=False)]
-
+        one = one.sort_values("GAME_DATE", ascending=False)
+        recent10 = one.head(10).copy()
         recent5 = recent10.head(5).copy()
+        sample_size = len(recent10)
+        thresholds = threshold_map.get(player_id, {})
 
-        l10_min = float(recent10["MIN"].mean()) if "MIN" in recent10.columns and not recent10.empty else 0.0
-        l5_min = float(recent5["MIN"].mean()) if "MIN" in recent5.columns and not recent5.empty else 0.0
-        
-        metrics.append({
+        home_logs = one[one["MATCHUP"].str.contains("vs.", regex=False, na=False)]
+        away_logs = one[one["MATCHUP"].str.contains("@", regex=False, na=False)]
+
+        if opponent_abbr:
+            h2h_logs = one[
+                one["MATCHUP"].str.contains(opponent_abbr, case=False, regex=False, na=False)
+            ].copy()
+        else:
+            h2h_logs = pd.DataFrame(columns=one.columns)
+
+        row = {
             "PLAYER_ID": player_id,
-            "HIT_RATE_L10": float(hit_count_pra / sample_size), "HIT_RATE_L10_TEXT": format_ratio_text(hit_count_pra, sample_size),
-            "PTS_HIT_RATE_L10": float(hit_count_pts / sample_size), "PTS_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_pts, sample_size),
-            "REB_HIT_RATE_L10": float(hit_count_reb / sample_size), "REB_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_reb, sample_size),
-            "AST_HIT_RATE_L10": float(hit_count_ast / sample_size), "AST_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_ast, sample_size),
-            "THREE_PM_HIT_RATE_L10": float(hit_count_3pm / sample_size), "THREE_PM_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_3pm, sample_size),
-            "FGA_HIT_RATE_L10": float(hit_count_fga / sample_size), "FGA_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_fga, sample_size),
-            "THREE_PA_HIT_RATE_L10": float(hit_count_3pa / sample_size), "THREE_PA_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_3pa, sample_size),
-            "OSC_L10": osc_value, "OSC_CLASS": classify_oscillation(osc_value), "FORM_SIGNAL": classify_form_signal(slope),
-            "RECENT_PRA_L10": recent10["PRA"].round(1).tolist(), "RECENT_PTS_L10": recent10["PTS"].round(1).tolist(),
-            "RECENT_REB_L10": recent10["REB"].round(1).tolist(), "RECENT_AST_L10": recent10["AST"].round(1).tolist(),
-            "RECENT_3PM_L10": recent10["FG3M"].round(1).tolist(), "RECENT_FGA_L10": recent10["FGA"].round(1).tolist(),
-            "RECENT_3PA_L10": recent10["FG3A"].round(1).tolist(),
-            "HOME_PRA": float(home_logs["PRA"].mean()) if not home_logs.empty else 0.0, "AWAY_PRA": float(away_logs["PRA"].mean()) if not away_logs.empty else 0.0,
-            "HOME_PTS": float(home_logs["PTS"].mean()) if not home_logs.empty else 0.0, "AWAY_PTS": float(away_logs["PTS"].mean()) if not away_logs.empty else 0.0,
-            "HOME_REB": float(home_logs["REB"].mean()) if not home_logs.empty else 0.0, "AWAY_REB": float(away_logs["REB"].mean()) if not away_logs.empty else 0.0,
-            "HOME_AST": float(home_logs["AST"].mean()) if not home_logs.empty else 0.0, "AWAY_AST": float(away_logs["AST"].mean()) if not away_logs.empty else 0.0,
-            "HOME_3PM": float(home_logs["FG3M"].mean()) if not home_logs.empty else 0.0, "AWAY_3PM": float(away_logs["FG3M"].mean()) if not away_logs.empty else 0.0,
-            "HOME_FGA": float(home_logs["FGA"].mean()) if not home_logs.empty else 0.0, "AWAY_FGA": float(away_logs["FGA"].mean()) if not away_logs.empty else 0.0,
-            "HOME_3PA": float(home_logs["FG3A"].mean()) if not home_logs.empty else 0.0, "AWAY_3PA": float(away_logs["FG3A"].mean()) if not away_logs.empty else 0.0,
-            "L10_MIN": l10_min,
-            "L5_MIN": l5_min,
-        })
+            "L10_MIN": float(recent10["MIN"].mean()) if "MIN" in recent10.columns and not recent10.empty else 0.0,
+            "L5_MIN": float(recent5["MIN"].mean()) if "MIN" in recent5.columns and not recent5.empty else 0.0,
+            "H2H_GP": float(len(h2h_logs)),
+        }
 
-    metrics_df = pd.DataFrame(metrics)
+        for metric, source_col in metric_source.items():
+            recent_values = pd.to_numeric(recent10.get(source_col, pd.Series(dtype=float)), errors="coerce").dropna()
+            recent5_values = pd.to_numeric(recent5.get(source_col, pd.Series(dtype=float)), errors="coerce").dropna()
+            season_threshold = float(thresholds.get(season_col[metric], 0.0) or 0.0)
+
+            if len(recent_values) > 0 and season_threshold > 0:
+                hit_count = int((recent_values >= season_threshold).sum())
+                hit_rate = float(hit_count / len(recent_values))
+                hit_text = format_ratio_text(hit_count, len(recent_values))
+            else:
+                hit_rate = 0.0
+                hit_text = "-"
+
+            osc = float(recent_values.std(ddof=0)) if len(recent_values) > 1 else 0.0
+            ordered = one.sort_values("GAME_DATE").tail(10)
+            ordered_values = pd.to_numeric(
+                ordered.get(source_col, pd.Series(dtype=float)), errors="coerce"
+            ).dropna()
+            slope = (
+                float(np.polyfit(range(len(ordered_values)), ordered_values, 1)[0])
+                if len(ordered_values) >= 3
+                else 0.0
+            )
+
+            row[f"OSC_{metric}_L10"] = osc
+            row[f"OSC_{metric}_CLASS"] = classify_oscillation(osc)
+            row[f"FORM_{metric}_SIGNAL"] = classify_form_signal(slope)
+            row[f"RECENT_{metric}_L10"] = recent_values.round(1).tolist()
+
+            h2h_values = pd.to_numeric(
+                h2h_logs.get(source_col, pd.Series(dtype=float)), errors="coerce"
+            ).dropna()
+            row[f"H2H_{metric}"] = float(h2h_values.mean()) if len(h2h_values) else 0.0
+
+            home_values = pd.to_numeric(
+                home_logs.get(source_col, pd.Series(dtype=float)), errors="coerce"
+            ).dropna()
+            away_values = pd.to_numeric(
+                away_logs.get(source_col, pd.Series(dtype=float)), errors="coerce"
+            ).dropna()
+            row[f"HOME_{metric}"] = float(home_values.mean()) if len(home_values) else 0.0
+            row[f"AWAY_{metric}"] = float(away_values.mean()) if len(away_values) else 0.0
+
+            if metric == "PRA":
+                row["HIT_RATE_L10"] = hit_rate
+                row["HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "PTS":
+                row["PTS_HIT_RATE_L10"] = hit_rate
+                row["PTS_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "REB":
+                row["REB_HIT_RATE_L10"] = hit_rate
+                row["REB_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "AST":
+                row["AST_HIT_RATE_L10"] = hit_rate
+                row["AST_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "3PM":
+                row["THREE_PM_HIT_RATE_L10"] = hit_rate
+                row["THREE_PM_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "FGA":
+                row["FGA_HIT_RATE_L10"] = hit_rate
+                row["FGA_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "3PA":
+                row["THREE_PA_HIT_RATE_L10"] = hit_rate
+                row["THREE_PA_HIT_RATE_L10_TEXT"] = hit_text
+
+        # Mantém compatibilidade com componentes antigos, mas agora o valor
+        # genérico representa PRA e os cards novos usam o fundamento específico.
+        row["OSC_L10"] = row.get("OSC_PRA_L10", 0.0)
+        row["OSC_CLASS"] = row.get("OSC_PRA_CLASS", "-")
+        row["FORM_SIGNAL"] = row.get("FORM_PRA_SIGNAL", "→ Estável")
+
+        metrics_rows.append(row)
+
+    metrics_df = pd.DataFrame(metrics_rows)
     enriched = team_df.merge(metrics_df, on="PLAYER_ID", how="left")
 
     for col, default in scalar_defaults.items():
-        if isinstance(default, float): enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(default)
-        else: enriched[col] = enriched[col].fillna(default)
+        if col not in enriched.columns:
+            enriched[col] = default
+        if isinstance(default, float):
+            enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(default)
+        else:
+            enriched[col] = enriched[col].fillna(default)
 
     for col in list_defaults:
-        if col not in enriched.columns: enriched[col] = [[] for _ in range(len(enriched))]
+        if col not in enriched.columns:
+            enriched[col] = [[] for _ in range(len(enriched))]
         enriched[col] = enriched[col].apply(lambda x: x if isinstance(x, list) else [])
 
     return enriched
+
 
 def enrich_team_with_context(
     team_df: pd.DataFrame,
@@ -686,12 +819,27 @@ def enrich_team_with_context(
     
     if team_df.empty: return team_df
 
-    team_logs = get_team_player_logs(
-    team_id,
-    season,
-    season_scope=season_scope,
-)
-    enriched = build_form_context(team_df, team_logs)
+    # Preferimos logs da liga inteira para preservar L5/L10 e H2H de
+    # jogadores que trocaram de time. Se a consulta falhar, recuamos para
+    # os logs do time atual.
+    league_logs = get_league_player_logs(
+        season,
+        season_scope=season_scope,
+    )
+
+    if league_logs is None or league_logs.empty:
+        league_logs = get_team_player_logs(
+            team_id,
+            season,
+            season_scope=season_scope,
+        )
+
+    opponent_abbr = TEAM_ABBR_LOOKUP.get(int(opponent_team_id), "")
+    enriched = build_form_context(
+        team_df,
+        league_logs,
+        opponent_abbr=opponent_abbr,
+    )
 
     matchup_rows = [
     get_position_opponent_profile_v2(
