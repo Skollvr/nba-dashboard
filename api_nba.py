@@ -260,7 +260,7 @@ def _nba_team_from_espn(competitor: dict) -> tuple[int, str, str]:
     return team_id, team_name, abbr
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=43200, show_spinner=False)
 def fetch_espn_games_for_date(target_date) -> dict:
     """Busca apenas a agenda do dia no scoreboard público da ESPN."""
     params = {"dates": target_date.strftime("%Y%m%d")}
@@ -447,6 +447,22 @@ def get_team_roster(team_id: int, season: str) -> pd.DataFrame:
     roster["PLAYER_ID"] = pd.to_numeric(roster["PLAYER_ID"], errors="coerce")
     roster["TEAM_ID"] = team_id
     return roster
+
+
+
+def clear_schedule_cache() -> None:
+    """Limpa somente caches leves/voláteis da agenda."""
+    for cached_fn in [
+        fetch_nba_scoreboard_v2_once,
+        fetch_nba_cdn_schedule,
+        fetch_espn_games_for_date,
+        get_games_for_date,
+    ]:
+        try:
+            cached_fn.clear()
+        except Exception:
+            pass
+
 
 # ==========================================
 # 3. BUSCA DE ESTATÍSTICAS E LOGS DE JOGADORES
@@ -723,7 +739,7 @@ def get_league_player_logs(
 # ==========================================
 # 4. BUSCA DE MATCHUP DE DEFESA
 # ==========================================
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=43200, show_spinner=False)
 def get_team_defense_percentiles(
     season: str,
     season_scope: str = "Regular Season",
@@ -858,7 +874,7 @@ def get_team_defense_percentiles(
     return result
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=43200, show_spinner=False)
 def get_position_allowed_profile(
     season: str,
     opponent_team_id: int,
@@ -907,7 +923,7 @@ def get_position_allowed_profile(
 
     return pd.concat(all_frames, ignore_index=True)
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=43200, show_spinner=False)
 def get_league_position_baseline(
     season: str,
     position_group: str,
