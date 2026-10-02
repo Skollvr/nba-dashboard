@@ -1048,8 +1048,10 @@ def style_trend(val) -> str:
 def style_role(val) -> str:
     if "Titular" in str(val):
         return "background-color: rgba(139,92,246,0.12); color: #f3e8ff; font-weight: 700;"
-    if "Reserva" in str(val):
+    if "Rotação" in str(val):
         return "background-color: rgba(148,163,184,0.08); color: #cbd5e1; font-weight: 600;"
+    if "Estimativa por minutos" in str(val):
+        return "background-color: rgba(245,158,11,0.10); color: #fde68a; font-weight: 700;"
     return ""
 
 
