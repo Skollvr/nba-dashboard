@@ -260,7 +260,7 @@ def _nba_team_from_espn(competitor: dict) -> tuple[int, str, str]:
     return team_id, team_name, abbr
 
 
-@st.cache_data(ttl=43200, show_spinner=False)
+@st.cache_data(ttl=21600, show_spinner=False)
 def fetch_espn_games_for_date(target_date) -> dict:
     """Busca apenas a agenda do dia no scoreboard público da ESPN."""
     params = {"dates": target_date.strftime("%Y%m%d")}
