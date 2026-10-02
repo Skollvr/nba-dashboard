@@ -347,6 +347,22 @@ def render_player_focus_panel(
         row.get("OSC_CLASS", "-"),
         focus_matchup_label_v1,
     )
+
+    visual_line_context = get_line_context(
+        row,
+        visual_metric,
+        line_value,
+        use_market_line=use_market_line,
+    )
+
+    if not visual_line_context.get("has_active_line", False):
+        st.info(
+            f"Sem linha ativa para {row['PLAYER']} em {visual_metric}. "
+            "A projeção continua disponível; preencha a linha manual individual para liberar Edge, "
+            "históricos OVER/UNDER e H2H contra a linha."
+        )
+        st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
+        return
     
     render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
 
@@ -1230,11 +1246,29 @@ def render_game_rankings(
         axis=1,
     )
 
-    rank_df["RANK_LINE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("line_value", 0.0)))
-    rank_df["RANK_EDGE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("edge", 0.0)))
-    rank_df["RANK_HIT_TEXT"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10", "-"))
-    rank_df["RANK_HIT_HTML"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10_html", "-"))
-    rank_df["RANK_LINE_HTML"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: f'<span title="{ctx.get("tooltip", "")}" style="cursor:help;">{format_number(ctx.get("line_value", 0.0))} {ctx.get("icon", "")}</span>')
+    rank_df["RANK_HAS_LINE"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: bool(ctx.get("has_active_line", False))
+    )
+    rank_df["RANK_LINE"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: pd.to_numeric(ctx.get("line_value"), errors="coerce")
+    )
+    rank_df["RANK_EDGE"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: float(ctx.get("edge", 0.0))
+    )
+    rank_df["RANK_HIT_TEXT"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: ctx.get("hit_l10", "-")
+    )
+    rank_df["RANK_HIT_HTML"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: ctx.get("hit_l10_html", "-")
+    )
+    rank_df["RANK_LINE_HTML"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: (
+            f'<span title="{ctx.get("tooltip", "")}" style="cursor:help;">'
+            f'{format_number(ctx.get("line_value"))} {ctx.get("icon", "")}</span>'
+            if ctx.get("has_active_line", False)
+            else "-"
+        )
+    )
     rank_df["RANK_HIT_RATE"] = rank_df["RANK_HIT_TEXT"].apply(parse_ratio_text)
 
     if "LINE_CONTEXT" in rank_df.columns:
@@ -1245,12 +1279,14 @@ def render_game_rankings(
         ascending=[False, False],
     ).head(5)
 
-    edge_df = rank_df.sort_values(
+    line_rank_df = rank_df[rank_df["RANK_HAS_LINE"]].copy()
+
+    edge_df = line_rank_df.sort_values(
         ["RANK_EDGE", "RANK_HIT_RATE"],
         ascending=[False, False],
     ).head(5)
 
-    consistency_df = rank_df.sort_values(
+    consistency_df = line_rank_df.sort_values(
         ["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"],
         ascending=[False, True, False],
     ).head(5)
@@ -1264,10 +1300,16 @@ def render_game_rankings(
         st.markdown(render_compact_ranking_html(proj_df, mode="projection"), unsafe_allow_html=True)
 
     with tab_edge:
-        st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
+        if edge_df.empty:
+            st.info("Informe uma linha manual individual (ou use uma linha de mercado) para calcular Edge.")
+        else:
+            st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
 
     with tab_cons:
-        st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
+        if consistency_df.empty:
+            st.info("Informe uma linha manual individual (ou use uma linha de mercado) para calcular Consistência.")
+        else:
+            st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
 
 def render_player_chart(
     player_name: str,
@@ -1563,6 +1605,21 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
     matchup_score_v1 = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0))
     opp_allowed = float(row.get(get_metric_allowed_column(metric), 0.0))
+
+    if not ctx.get("has_active_line", False):
+        context_line = (
+            f"{row.get('OPP_TEAM_NAME', 'Oponente')} cede "
+            f"{format_number(opp_allowed)} para {row.get('POSITION_GROUP', '-')}"
+            f" • proj {format_number(ctx.get('projection', 0.0))}"
+            f" • score {format_signed_number(matchup_score_v1, 2)}"
+        )
+        return (
+            "⚪ Sem linha",
+            f"Projeção {metric}: {format_number(ctx.get('projection', 0.0))}",
+            "adicione uma linha manual para calcular Edge, hit e direção",
+            context_line,
+        )
+
     hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
 
     confidence_label, score, direction = _confidence_label_and_score(
@@ -1644,7 +1701,12 @@ def render_player_headline_html(
 
     matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{chosen_metric}_V1", "Neutro"))
     matchup_class = get_matchup_chip_class(matchup_label_v1)
-    source_label = "🎯 BetMGM" if chosen_ctx.get("line_source") == "BetMGM" else "✏️ Linha manual"
+    if chosen_ctx.get("line_source") == "BetMGM":
+        source_label = "🎯 BetMGM"
+    elif chosen_ctx.get("has_active_line", False):
+        source_label = "✏️ Linha manual"
+    else:
+        source_label = "Sem linha"
 
     return f"""
     <div class="player-headline-card">
@@ -1703,13 +1765,21 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
         st.caption(f"Score {format_signed_number(matchup_score_v1, 2)}")
 
     with c5:
-        st.markdown(f"**{line_context['line_source']} {line_metric}**")
-        st.markdown(f"### {format_signed_number(line_context['edge'])}")
-        st.caption(
-            f"Proj {format_number(proj_std)} • "
-            f"V1 {format_number(proj_v1)} • "
-            f"L10 {line_context['hit_l10']}"
-        )
+        if line_context.get("has_active_line", False):
+            st.markdown(f"**{line_context['line_source']} {line_metric}**")
+            st.markdown(f"### {format_signed_number(line_context['edge'])}")
+            st.caption(
+                f"Proj {format_number(proj_std)} • "
+                f"V1 {format_number(proj_v1)} • "
+                f"L10 {line_context['hit_l10']}"
+            )
+        else:
+            st.markdown(f"**Sem linha {line_metric}**")
+            st.markdown("### —")
+            st.caption(
+                f"Proj {format_number(proj_std)} • "
+                f"V1 {format_number(proj_v1)}"
+            )
 
 def render_projection_detail_box_html(row: pd.Series) -> str:
     return f"""
@@ -1806,6 +1876,23 @@ def render_split_detail_box_html(row: pd.Series, line_metric: str) -> str:
 
 def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> str:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
+
+    if not line_context.get("has_active_line", False):
+        return f"""
+        <div class="detail-box">
+            <div class="detail-box-top">
+                <div class="detail-box-title">Linha — {line_metric}</div>
+                <div class="delta-pill-row">
+                    <span class="delta-pill delta-flat">Sem linha informada</span>
+                </div>
+            </div>
+            <div class="hero-note">
+                Projeção atual: <strong>{format_number(line_context.get('projection', 0.0))}</strong>.
+                Informe uma linha manual individual para calcular Edge, Hit L5 e Hit L10.
+            </div>
+        </div>
+        """
+
     line_chip_class = "delta-flat"
     if line_context["edge"] > 0.75:
         line_chip_class = "delta-up"
@@ -1908,13 +1995,18 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
         )
 
     with c2:
-        st.markdown(f"**{line_context['line_source']} {line_metric}**")
-        st.markdown(f"### {format_signed_number(line_context['edge'])}")
-        st.caption(
-            f"Proj {format_number(line_context['projection'])} vs "
-            f"{format_number(line_context['line_value'])} • "
-            f"L10 {line_context['hit_l10']}"
-        )
+        if line_context.get("has_active_line", False):
+            st.markdown(f"**{line_context['line_source']} {line_metric}**")
+            st.markdown(f"### {format_signed_number(line_context['edge'])}")
+            st.caption(
+                f"Proj {format_number(line_context['projection'])} vs "
+                f"{format_number(line_context['line_value'])} • "
+                f"L10 {line_context['hit_l10']}"
+            )
+        else:
+            st.markdown(f"**Sem linha {line_metric}**")
+            st.markdown("### —")
+            st.caption(f"Proj {format_number(line_context['projection'])}")
 
     with c3:
         st.markdown("**MATCHUP V1**")
