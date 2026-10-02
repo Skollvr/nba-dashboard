@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from datetime import date, datetime, timedelta
 from config import (
     TEAM_LOOKUP, SORT_OPTIONS, ROLE_OPTIONS, CHART_OPTIONS, 
@@ -126,7 +127,7 @@ def main():
         min_minutes = st.slider("Min Minutos", 0, 40, 15)
         role_filter = st.pills("Jogadores", ROLE_OPTIONS, default="Todos")
         line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PRA")
-        line_value = st.number_input("Linha Manual", value=25.5, step=0.5)
+        line_value = None
         api_key_available = bool(get_odds_api_key())
         use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
         season_scope_label = st.pills(
@@ -239,6 +240,86 @@ def main():
         return
 
     render_matchup_header(selected_game)
+
+    # Linhas manuais são individuais por jogador. Isso evita comparar todo o
+    # roster contra uma única linha global. Se BetMGM estiver ativo e houver
+    # linha de mercado para o jogador, ela continua tendo prioridade.
+    manual_col = f"MANUAL_LINE_{line_metric}"
+    line_rows = []
+
+    for team_df, team_name in [
+        (away_df, selected_game["away_team_name"]),
+        (home_df, selected_game["home_team_name"]),
+    ]:
+        if team_df is None or team_df.empty:
+            continue
+
+        for _, player_row in team_df.iterrows():
+            player_id = pd.to_numeric(player_row.get("PLAYER_ID"), errors="coerce")
+            if pd.isna(player_id):
+                continue
+
+            line_rows.append(
+                {
+                    "_PLAYER_ID": int(player_id),
+                    "Jogador": str(player_row.get("PLAYER", "")),
+                    "Time": str(team_name),
+                    "Linha": float("nan"),
+                }
+            )
+
+    if line_rows:
+        manual_lines_df = pd.DataFrame(line_rows)
+
+        with st.expander(f"Linhas manuais individuais — {line_metric}", expanded=False):
+            st.caption(
+                "Preencha somente os jogadores que deseja analisar. "
+                "Jogadores sem linha continuam com projeções, mas ficam fora dos rankings de Edge/Consistência. "
+                "Se houver linha BetMGM ativa para o jogador, ela tem prioridade."
+            )
+
+            edited_lines = st.data_editor(
+                manual_lines_df,
+                hide_index=True,
+                use_container_width=True,
+                disabled=["Jogador", "Time"],
+                column_config={
+                    "_PLAYER_ID": None,
+                    "Jogador": st.column_config.TextColumn("Jogador"),
+                    "Time": st.column_config.TextColumn("Time"),
+                    "Linha": st.column_config.NumberColumn(
+                        f"Linha {line_metric}",
+                        min_value=0.5,
+                        step=0.5,
+                        format="%.1f",
+                    ),
+                },
+                key=f"manual_lines::{selected_date_key}::{selected_game['GAME_ID']}::{line_metric}",
+            )
+
+        valid_lines = edited_lines.copy()
+        valid_lines["Linha"] = pd.to_numeric(valid_lines["Linha"], errors="coerce")
+        valid_lines = valid_lines[
+            valid_lines["Linha"].notna() & (valid_lines["Linha"] > 0)
+        ]
+
+        manual_line_map = dict(
+            zip(
+                valid_lines["_PLAYER_ID"].astype(int),
+                valid_lines["Linha"].astype(float),
+            )
+        )
+
+        away_df = away_df.copy()
+        home_df = home_df.copy()
+
+        away_df[manual_col] = pd.to_numeric(
+            away_df["PLAYER_ID"], errors="coerce"
+        ).map(manual_line_map)
+        home_df[manual_col] = pd.to_numeric(
+            home_df["PLAYER_ID"], errors="coerce"
+        ).map(manual_line_map)
+
     render_summary_cards(away_df, home_df, min_games, min_minutes, role_filter)
     render_game_rankings(away_df, home_df, min_games, min_minutes, role_filter, line_metric, line_value, use_market_line)
 
