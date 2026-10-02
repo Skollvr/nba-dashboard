@@ -1,4 +1,5 @@
 import streamlit as st
+import time
 from datetime import date, datetime, timedelta
 from config import (
     TEAM_LOOKUP, SORT_OPTIONS, ROLE_OPTIONS, CHART_OPTIONS, 
@@ -20,6 +21,83 @@ from ui_components import (
 
 def get_brasilia_today() -> date:
     return datetime.now(APP_TIMEZONE).date()
+
+
+def run_nba_endpoint_diagnostic(team_id: int, season: str) -> list[dict]:
+    """
+    Executa chamadas isoladas, sem retry, para medir a resposta do stats.nba.com.
+    Imports ficam locais para não alterar o startup normal do app.
+    """
+    from nba_api.stats.endpoints import (
+        commonteamroster,
+        leaguedashplayerstats,
+        playergamelogs,
+    )
+
+    tests = [
+        (
+            "CommonTeamRoster",
+            lambda: commonteamroster.CommonTeamRoster(
+                team_id=team_id,
+                season=season,
+                timeout=8,
+            ).get_data_frames()[0],
+        ),
+        (
+            "LeagueDashPlayerStats",
+            lambda: leaguedashplayerstats.LeagueDashPlayerStats(
+                season=season,
+                season_type_all_star="Regular Season",
+                per_mode_detailed="PerGame",
+                measure_type_detailed_defense="Base",
+                last_n_games=0,
+                month=0,
+                opponent_team_id=0,
+                pace_adjust="N",
+                plus_minus="N",
+                rank="N",
+                period=0,
+                team_id_nullable="",
+                timeout=8,
+            ).get_data_frames()[0],
+        ),
+        (
+            "PlayerGameLogs",
+            lambda: playergamelogs.PlayerGameLogs(
+                team_id_nullable=team_id,
+                season_nullable=season,
+                season_type_nullable="Regular Season",
+                timeout=8,
+            ).get_data_frames()[0],
+        ),
+    ]
+
+    results = []
+
+    for name, fetch_fn in tests:
+        started = time.perf_counter()
+        try:
+            df = fetch_fn()
+            elapsed = time.perf_counter() - started
+            results.append({
+                "Endpoint": name,
+                "Status": "OK",
+                "Tempo (s)": round(elapsed, 2),
+                "Linhas": int(len(df)),
+                "Erro": "",
+            })
+        except Exception as exc:
+            elapsed = time.perf_counter() - started
+            results.append({
+                "Endpoint": name,
+                "Status": "ERRO",
+                "Tempo (s)": round(elapsed, 2),
+                "Linhas": 0,
+                "Erro": f"{type(exc).__name__}: {exc}",
+            })
+
+    return results
+
 
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
@@ -71,7 +149,12 @@ def main():
             "Tudo": "All",
         }
 
-        season_scope = season_scope_map.get(season_scope_label, "Regular Season")        
+        season_scope = season_scope_map.get(season_scope_label, "Regular Season")
+        diagnostic_mode = st.toggle(
+            "Modo diagnóstico NBA",
+            value=False,
+            help="Testa os endpoints individualmente sem carregar o confronto completo.",
+        )
         st.divider()
         st.caption("Este app busca os dados ao abrir a página.")
         if st.button("Forçar atualização"):
@@ -95,6 +178,33 @@ def main():
 
     game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
     selected_game = games.loc[games["label"] == game_label].iloc[0]
+
+    if diagnostic_mode:
+        st.info(
+            "Modo diagnóstico ativo: o confronto completo não será carregado. "
+            "Os endpoints serão testados individualmente."
+        )
+        if st.button("Testar endpoints NBA", type="primary", use_container_width=True):
+            with st.status("Executando diagnóstico...", expanded=True) as status:
+                results = run_nba_endpoint_diagnostic(
+                    int(selected_game["VISITOR_TEAM_ID"]),
+                    season,
+                )
+                for item in results:
+                    status.write(
+                        f"{item['Endpoint']}: {item['Status']} • "
+                        f"{item['Tempo (s)']} s • {item['Linhas']} linhas"
+                    )
+                status.update(label="Diagnóstico concluído.", state="complete")
+
+            st.dataframe(results, use_container_width=True, hide_index=True)
+
+            failed = [item for item in results if item["Status"] != "OK"]
+            if failed:
+                st.warning("Um ou mais endpoints falharam. Copie a tabela/erros para compararmos.")
+            else:
+                st.success("Os três endpoints responderam dentro do limite do teste.")
+        return
 
     try:
         away_df, home_df = get_matchup_context(
