@@ -6,8 +6,9 @@ from config import (
     LINE_METRIC_OPTIONS, APP_TIMEZONE
 )
 from api_nba import get_games_for_date
-from api_odds import get_odds_api_key
-from pdf_reader import get_season_string
+from api_lineups import clear_lineup_cache
+from api_odds import get_odds_api_key, clear_odds_cache
+from pdf_reader import get_season_string, clear_injury_cache
 from processamento import get_matchup_context
 
 # Importando as funções do ui_components.py
@@ -140,8 +141,19 @@ def main():
 
         season_scope = season_scope_map.get(season_scope_label, "Regular Season")        
         st.divider()
-        st.caption("A agenda só é consultada quando você clicar em Buscar jogos.")
-        if st.button("Forçar atualização"):
+        st.caption(
+            "A agenda só é consultada quando você clicar em Buscar jogos. "
+            "Use a atualização pré-jogo para renovar apenas dados voláteis."
+        )
+
+        if st.button("🔄 Atualizar dados pré-jogo", use_container_width=True):
+            clear_lineup_cache()
+            clear_injury_cache()
+            clear_odds_cache()
+            st.session_state.pop("loaded_matchup_key", None)
+            st.rerun()
+
+        if st.button("🧹 Recarregar tudo", use_container_width=True):
             st.cache_data.clear()
             st.session_state.pop("agenda_games", None)
             st.session_state.pop("agenda_date_key", None)
