@@ -2028,40 +2028,68 @@ def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_va
     </div>
     """
 def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
+    matchup_label = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
+    matchup_score = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0) or 0.0)
+    matchup_class = get_matchup_chip_class(matchup_label)
+
+    defense_label = str(row.get(f"DEF_LABEL_{metric}_V2", "Neutro"))
+    defense_score = float(row.get(f"DEF_SCORE_{metric}_V2", 0.0) or 0.0)
+    h2h_label = str(row.get(f"H2H_LABEL_{metric}_V2", "Sem amostra"))
+    h2h_score = float(row.get(f"H2H_SCORE_{metric}_V2", 0.0) or 0.0)
+    h2h_gp = int(float(row.get("H2H_GP", 0.0) or 0.0))
+    h2h_avg = float(row.get(f"H2H_{metric}", 0.0) or 0.0)
+    matchup_effect_pct = float(
+        row.get(f"MATCHUP_EFFECT_PCT_{metric}_V2", 0.0) or 0.0
+    ) * 100.0
+
     matchup_ctx = get_metric_matchup_context(row, metric)
-    matchup_class = get_matchup_chip_class(matchup_ctx["label"])
+
+    h2h_value = (
+        f"{format_number(h2h_avg)} ({h2h_gp}j)"
+        if h2h_gp > 0
+        else "Sem amostra"
+    )
 
     return f"""
     <div class="detail-box">
         <div class="detail-box-top">
-            <div class="detail-box-title">Contexto do adversário — {metric}</div>
+            <div class="detail-box-title">Leitura do matchup — {metric}</div>
             <div class="delta-pill-row">
-                <span class="matchup-chip {matchup_class}">{matchup_ctx['label']}</span>
+                <span class="matchup-chip {matchup_class}">Final: {matchup_label}</span>
             </div>
         </div>
+
         <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
             <div class="detail-mini">
-                <div class="detail-mini-label">PTS ced.</div>
-                <div class="detail-mini-value">{format_number(row['OPP_PTS_ALLOWED'])}</div>
+                <div class="detail-mini-label">Defesa vs {row.get('POSITION_GROUP', '-')}</div>
+                <div class="detail-mini-value">{defense_label}</div>
+                <div class="detail-mini-label">score {format_signed_number(defense_score, 2)}</div>
             </div>
             <div class="detail-mini">
-                <div class="detail-mini-label">REB ced.</div>
-                <div class="detail-mini-value">{format_number(row['OPP_REB_ALLOWED'])}</div>
+                <div class="detail-mini-label">Histórico H2H</div>
+                <div class="detail-mini-value">{h2h_value}</div>
+                <div class="detail-mini-label">{h2h_label} • score {format_signed_number(h2h_score, 2)}</div>
             </div>
             <div class="detail-mini">
-                <div class="detail-mini-label">AST ced.</div>
-                <div class="detail-mini-value">{format_number(row['OPP_AST_ALLOWED'])}</div>
+                <div class="detail-mini-label">Índice posicional</div>
+                <div class="detail-mini-value">{format_number(matchup_ctx['allowed'])}</div>
+                <div class="detail-mini-label">liga {format_number(matchup_ctx['baseline'])}</div>
             </div>
             <div class="detail-mini detail-mini-highlight">
-                <div class="detail-mini-label">{metric} foco</div>
-                <div class="detail-mini-value">{format_number(matchup_ctx['allowed'])}</div>
+                <div class="detail-mini-label">Efeito na projeção</div>
+                <div class="detail-mini-value">{matchup_effect_pct:+.1f}%</div>
+                <div class="detail-mini-label">score final {format_signed_number(matchup_score, 2)}</div>
             </div>
         </div>
+
         <div class="hero-note">
-            {row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']} • liga {format_number(matchup_ctx['baseline'])} • diferença {format_signed_number(matchup_ctx['diff'])}
+            O matchup final combina a defesa posicional do adversário com o histórico individual
+            recente contra esse time. H2H com pouca amostra recebe peso reduzido.
         </div>
     </div>
     """
+
+
 def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
 
@@ -2075,9 +2103,13 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        st.markdown(f"**PROJ {line_metric}**")
-        st.markdown(f"### {format_number(row.get(proj_col, 0.0))}")
+        contextual_proj = float(
+            row.get(f"PROJ_{line_metric}_V1", row.get(proj_col, 0.0)) or 0.0
+        )
+        st.markdown(f"**PROJEÇÃO {line_metric}**")
+        st.markdown(f"### {format_number(contextual_proj)}")
         st.caption(
+            f"Base {format_number(row.get(proj_col, 0.0))} • "
             f"Temp {format_number(row.get(season_col, 0.0))} • "
             f"L10 {format_number(row.get(l10_col, 0.0))}"
         )
