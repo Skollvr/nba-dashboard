@@ -35,6 +35,10 @@ def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 2, dela
 # ==========================================
 # 2. BUSCA DE JOGOS E TIMES
 # ==========================================
+NBA_CDN_SCHEDULE_URL = (
+    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json"
+)
+
 ESPN_NBA_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 )
@@ -104,6 +108,110 @@ def fetch_nba_scoreboard_v2_once(target_date) -> pd.DataFrame:
         timeout=8,
     )
     return _games_from_nba_scoreboard_v2(response.game_header.get_data_frame())
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_nba_cdn_schedule() -> dict:
+    """Busca a agenda oficial da temporada atual no CDN público da NBA."""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin": "https://www.nba.com",
+        "Referer": "https://www.nba.com/",
+    }
+
+    response = requests.get(
+        NBA_CDN_SCHEDULE_URL,
+        headers=headers,
+        timeout=(3, 8),
+    )
+    response.raise_for_status()
+    payload = response.json()
+
+    if not isinstance(payload, dict) or "leagueSchedule" not in payload:
+        raise RuntimeError("A agenda oficial da NBA retornou um formato inesperado.")
+
+    return payload
+
+
+def _games_from_nba_cdn_payload(payload: dict, target_date) -> pd.DataFrame:
+    """Filtra no calendário oficial da NBA apenas os jogos da data escolhida."""
+    league_schedule = payload.get("leagueSchedule", {}) or {}
+    game_dates = league_schedule.get("gameDates", []) or []
+    rows = []
+
+    for date_block in game_dates:
+        raw_date = date_block.get("gameDate")
+        parsed_date = pd.to_datetime(raw_date, errors="coerce")
+
+        if pd.isna(parsed_date) or parsed_date.date() != target_date:
+            continue
+
+        for game in date_block.get("games", []) or []:
+            home = game.get("homeTeam", {}) or {}
+            away = game.get("awayTeam", {}) or {}
+
+            try:
+                home_team_id = int(home.get("teamId", 0) or 0)
+                away_team_id = int(away.get("teamId", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+
+            if not home_team_id or not away_team_id:
+                continue
+
+            home_abbr = str(
+                home.get("teamTricode")
+                or TEAM_LOOKUP.get(home_team_id, {}).get("abbreviation", "")
+            ).upper()
+            away_abbr = str(
+                away.get("teamTricode")
+                or TEAM_LOOKUP.get(away_team_id, {}).get("abbreviation", "")
+            ).upper()
+
+            home_team_name = TEAM_LOOKUP.get(home_team_id, {}).get(
+                "full_name",
+                " ".join(
+                    part for part in [
+                        str(home.get("teamCity", "") or "").strip(),
+                        str(home.get("teamName", "") or "").strip(),
+                    ]
+                    if part
+                ) or home_abbr,
+            )
+            away_team_name = TEAM_LOOKUP.get(away_team_id, {}).get(
+                "full_name",
+                " ".join(
+                    part for part in [
+                        str(away.get("teamCity", "") or "").strip(),
+                        str(away.get("teamName", "") or "").strip(),
+                    ]
+                    if part
+                ) or away_abbr,
+            )
+
+            game_status_text = str(game.get("gameStatusText") or "Agendado")
+
+            rows.append({
+                "GAME_ID": str(game.get("gameId", "")),
+                "HOME_TEAM_ID": home_team_id,
+                "VISITOR_TEAM_ID": away_team_id,
+                "GAME_STATUS_TEXT": game_status_text,
+                "HOME_TEAM_ABBR": home_abbr,
+                "VISITOR_TEAM_ABBR": away_abbr,
+                "home_team_name": home_team_name,
+                "away_team_name": away_team_name,
+                "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
+            })
+
+        break
+
+    return pd.DataFrame(rows, columns=_empty_games_df().columns)
 
 
 def _nba_team_from_espn(competitor: dict) -> tuple[int, str, str]:
@@ -225,16 +333,30 @@ def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date) -> pd.DataFrame:
     """
-    Busca os jogos da data selecionada combinando NBA e ESPN.
+    Busca os jogos da data selecionada usando três fontes.
 
-    O ScoreboardV2 pode ocasionalmente devolver uma agenda parcial para datas
-    futuras. Por isso, consultamos também a ESPN e fazemos a união dos jogos,
-    removendo duplicados pelo par visitante/casa.
+    Ordem de prioridade:
+    1. calendário oficial da temporada no CDN da NBA;
+    2. ScoreboardV2 da NBA;
+    3. ESPN como fallback complementar.
+
+    As fontes são combinadas e os jogos duplicados são removidos pelo par
+    visitante/casa. Assim, uma agenda parcial de uma fonte não apaga jogos
+    encontrados por outra.
     """
+    cdn_games = _empty_games_df()
     nba_games = _empty_games_df()
     espn_games = _empty_games_df()
+
+    cdn_error = None
     nba_error = None
     espn_error = None
+
+    try:
+        cdn_payload = fetch_nba_cdn_schedule()
+        cdn_games = _games_from_nba_cdn_payload(cdn_payload, target_date)
+    except Exception as exc:
+        cdn_error = exc
 
     try:
         nba_games = fetch_nba_scoreboard_v2_once(target_date)
@@ -247,7 +369,11 @@ def get_games_for_date(target_date) -> pd.DataFrame:
     except Exception as exc:
         espn_error = exc
 
-    frames = [df for df in [nba_games, espn_games] if df is not None and not df.empty]
+    frames = [
+        df
+        for df in [cdn_games, nba_games, espn_games]
+        if df is not None and not df.empty
+    ]
 
     if frames:
         combined = pd.concat(frames, ignore_index=True)
@@ -257,9 +383,9 @@ def get_games_for_date(target_date) -> pd.DataFrame:
         ).reset_index(drop=True)
         return combined
 
-    if nba_error is not None and espn_error is not None:
+    if cdn_error is not None and nba_error is not None and espn_error is not None:
         raise RuntimeError(
-            "Não foi possível consultar a agenda: NBA e ESPN falharam."
+            "Não foi possível consultar a agenda: NBA CDN, ScoreboardV2 e ESPN falharam."
         ) from espn_error
 
     return _empty_games_df()
