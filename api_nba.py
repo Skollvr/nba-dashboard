@@ -35,9 +35,12 @@ def run_api_call_with_retry(fetch_fn, endpoint_name: str, retries: int = 2, dela
 # ==========================================
 # 2. BUSCA DE JOGOS E TIMES
 # ==========================================
-NBA_CDN_SCHEDULE_URL = (
-    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json"
-)
+NBA_CDN_SCHEDULE_URLS = [
+    # Arquivo usado atualmente pela página de calendário do NBA.com.
+    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json",
+    # Fallback: em alguns períodos a NBA também publica o mesmo schema sem sufixo.
+    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json",
+]
 
 ESPN_NBA_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
@@ -123,20 +126,35 @@ def fetch_nba_cdn_schedule() -> dict:
         "Accept-Language": "en-US,en;q=0.9",
         "Origin": "https://www.nba.com",
         "Referer": "https://www.nba.com/",
+        "Connection": "keep-alive",
     }
 
-    response = requests.get(
-        NBA_CDN_SCHEDULE_URL,
-        headers=headers,
-        timeout=(3, 8),
+    errors = []
+
+    for url in NBA_CDN_SCHEDULE_URLS:
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=(3, 8),
+            )
+            response.raise_for_status()
+            payload = response.json()
+
+            league_schedule = payload.get("leagueSchedule", {}) if isinstance(payload, dict) else {}
+            game_dates = league_schedule.get("gameDates", []) or []
+
+            if game_dates:
+                return payload
+
+            errors.append(f"{url}: agenda vazia")
+        except Exception as exc:
+            errors.append(f"{url}: {type(exc).__name__}")
+
+    raise RuntimeError(
+        "A agenda oficial da NBA não respondeu em nenhum dos endpoints CDN conhecidos. "
+        + " | ".join(errors)
     )
-    response.raise_for_status()
-    payload = response.json()
-
-    if not isinstance(payload, dict) or "leagueSchedule" not in payload:
-        raise RuntimeError("A agenda oficial da NBA retornou um formato inesperado.")
-
-    return payload
 
 
 def _games_from_nba_cdn_payload(payload: dict, target_date) -> pd.DataFrame:
@@ -145,11 +163,22 @@ def _games_from_nba_cdn_payload(payload: dict, target_date) -> pd.DataFrame:
     game_dates = league_schedule.get("gameDates", []) or []
     rows = []
 
-    for date_block in game_dates:
-        raw_date = date_block.get("gameDate")
-        parsed_date = pd.to_datetime(raw_date, errors="coerce")
+    target_date_iso = target_date.strftime("%Y-%m-%d")
+    target_date_us = target_date.strftime("%m/%d/%Y")
 
-        if pd.isna(parsed_date) or parsed_date.date() != target_date:
+    for date_block in game_dates:
+        raw_date = str(date_block.get("gameDate") or "").strip()
+        raw_date_prefix = raw_date[:10]
+
+        # A NBA já usou tanto YYYY-MM-DD quanto MM/DD/YYYY nesse campo.
+        # Evitamos depender apenas da inferência de formato do pandas.
+        date_matches = raw_date_prefix in {target_date_iso, target_date_us}
+
+        if not date_matches:
+            parsed_date = pd.to_datetime(raw_date, errors="coerce")
+            date_matches = not pd.isna(parsed_date) and parsed_date.date() == target_date
+
+        if not date_matches:
             continue
 
         for game in date_block.get("games", []) or []:
