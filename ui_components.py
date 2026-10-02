@@ -1181,17 +1181,19 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
             stat3_label, stat3_value = "Match", row["MATCHUP_LABEL"]
             stat3_class = "ranking-good" if row["MATCHUP_LABEL"] == "Favorável" else ("ranking-bad" if row["MATCHUP_LABEL"] == "Difícil" else "")
         elif mode == "edge":
-            stat1_label, stat1_value = "Edge", format_signed_number(row["RANK_EDGE"])
+            stat1_label = str(row.get("RANK_DIRECTION", "Edge"))
+            stat1_value = format_signed_number(row["RANK_EDGE"])
             stat2_label, stat2_value = "Linha", row["RANK_LINE_HTML"]
             stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
         else:
-            stat1_label, stat1_value = "Hit", row["RANK_HIT_HTML"]
+            stat1_label = f"Hit {row.get('RANK_DIRECTION', '')}".strip()
+            stat1_value = row.get("RANK_DIR_HIT_HTML", "-")
             stat2_label, stat2_value = "Osc", row["OSC_CLASS"]
             stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
 
-        stat1_class = "ranking-good" if mode == "edge" and row["RANK_EDGE"] > 0.75 else ("ranking-bad" if mode == "edge" and row["RANK_EDGE"] < -0.75 else "")
+        stat1_class = "ranking-good" if mode == "edge" and abs(float(row["RANK_EDGE"])) > 0.75 else ""
         stat2_class = "ranking-good" if mode == "consistency" and row["OSC_CLASS"] == "Baixa" else ("ranking-bad" if mode == "consistency" and row["OSC_CLASS"] == "Alta" else "")
 
         row_html = (
@@ -1255,11 +1257,30 @@ def render_game_rankings(
     rank_df["RANK_EDGE"] = rank_df["LINE_CONTEXT"].apply(
         lambda ctx: float(ctx.get("edge", 0.0))
     )
+    rank_df["RANK_DIRECTION"] = rank_df["RANK_EDGE"].apply(
+        lambda edge: "OVER" if float(edge) >= 0 else "UNDER"
+    )
     rank_df["RANK_HIT_TEXT"] = rank_df["LINE_CONTEXT"].apply(
         lambda ctx: ctx.get("hit_l10", "-")
     )
     rank_df["RANK_HIT_HTML"] = rank_df["LINE_CONTEXT"].apply(
         lambda ctx: ctx.get("hit_l10_html", "-")
+    )
+    rank_df["RANK_DIR_HIT_TEXT"] = rank_df.apply(
+        lambda row: (
+            row["LINE_CONTEXT"].get("hit_l10", "-")
+            if row["RANK_DIRECTION"] == "OVER"
+            else row["LINE_CONTEXT"].get("under_l10", "-")
+        ),
+        axis=1,
+    )
+    rank_df["RANK_DIR_HIT_HTML"] = rank_df.apply(
+        lambda row: (
+            row["LINE_CONTEXT"].get("hit_l10_html", "-")
+            if row["RANK_DIRECTION"] == "OVER"
+            else row["LINE_CONTEXT"].get("under_l10_html", "-")
+        ),
+        axis=1,
     )
     rank_df["RANK_LINE_HTML"] = rank_df["LINE_CONTEXT"].apply(
         lambda ctx: (
@@ -1270,6 +1291,8 @@ def render_game_rankings(
         )
     )
     rank_df["RANK_HIT_RATE"] = rank_df["RANK_HIT_TEXT"].apply(parse_ratio_text)
+    rank_df["RANK_DIR_HIT_RATE"] = rank_df["RANK_DIR_HIT_TEXT"].apply(parse_ratio_text)
+    rank_df["RANK_EDGE_ABS"] = rank_df["RANK_EDGE"].abs()
 
     if "LINE_CONTEXT" in rank_df.columns:
         rank_df = rank_df.drop(columns=["LINE_CONTEXT"])
@@ -1282,17 +1305,20 @@ def render_game_rankings(
     line_rank_df = rank_df[rank_df["RANK_HAS_LINE"]].copy()
 
     edge_df = line_rank_df.sort_values(
-        ["RANK_EDGE", "RANK_HIT_RATE"],
+        ["RANK_EDGE_ABS", "RANK_DIR_HIT_RATE"],
         ascending=[False, False],
     ).head(5)
 
     consistency_df = line_rank_df.sort_values(
-        ["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"],
+        ["RANK_DIR_HIT_RATE", "OSC_L10", "RANK_EDGE_ABS"],
         ascending=[False, True, False],
     ).head(5)
 
     st.subheader(f"Ranking do confronto — {line_metric}")
-    st.caption("Bloco compacto para leitura rápida, usando BetMGM quando houver linha disponível.")
+    st.caption(
+        "Edge ordenado pela força absoluta da diferença. "
+        "Consistência considera a direção do sinal: OVER acima da linha e UNDER abaixo da linha."
+    )
 
     tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
 
