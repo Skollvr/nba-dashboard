@@ -1275,6 +1275,336 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
     return f'<div class="ranking-shell">{"".join(rows_html)}</div>'
 
 
+def _tip_ratio_parts(text: str) -> tuple[int, int, float]:
+    try:
+        hit, sample = str(text).split("/")
+        hit_n = int(float(hit))
+        sample_n = int(float(sample))
+        if sample_n <= 0:
+            return 0, 0, 0.0
+        return hit_n, sample_n, hit_n / sample_n
+    except Exception:
+        return 0, 0, 0.0
+
+
+def _tip_signal_alignment(label: str, direction: str) -> int:
+    """
+    +1 = o contexto ajuda a direção da tip
+     0 = neutro
+    -1 = o contexto contraria a direção
+    """
+    label = str(label or "Neutro")
+    favorable = label in {"Favorável", "Muito favorável"}
+    difficult = label in {"Difícil", "Muito difícil"}
+
+    if direction == "OVER":
+        if favorable:
+            return 1
+        if difficult:
+            return -1
+    else:
+        if difficult:
+            return 1
+        if favorable:
+            return -1
+    return 0
+
+
+def _tip_form_alignment(form_signal: str, direction: str) -> int:
+    form_signal = str(form_signal or "")
+    if direction == "OVER":
+        if "↗" in form_signal:
+            return 1
+        if "↘" in form_signal:
+            return -1
+    else:
+        if "↘" in form_signal:
+            return 1
+        if "↗" in form_signal:
+            return -1
+    return 0
+
+
+def _build_tip_candidate(
+    row: pd.Series,
+    metric: str,
+    ctx: dict,
+    min_minutes: int,
+) -> dict | None:
+    if not ctx.get("has_active_line", False):
+        return None
+
+    line = pd.to_numeric(ctx.get("line_value"), errors="coerce")
+    projection = pd.to_numeric(ctx.get("projection"), errors="coerce")
+    if pd.isna(line) or pd.isna(projection) or float(line) <= 0 or float(projection) <= 0:
+        return None
+
+    inj_status = str(row.get("INJ_STATUS", "Available") or "Available")
+    if inj_status in {"Out", "Doubtful"}:
+        return None
+
+    edge = float(projection) - float(line)
+    direction = "OVER" if edge >= 0 else "UNDER"
+    hit_text = (
+        ctx.get("hit_l10", "-")
+        if direction == "OVER"
+        else ctx.get("under_l10", "-")
+    )
+    hit_count, sample_count, hit_ratio = _tip_ratio_parts(hit_text)
+    if sample_count < 5:
+        return None
+
+    edge_abs = abs(edge)
+    relative_edge = edge_abs / max(float(line), 0.5)
+
+    osc_value = pd.to_numeric(row.get(f"OSC_{metric}_L10", 0.0), errors="coerce")
+    osc_value = float(osc_value) if pd.notna(osc_value) else 0.0
+    osc_floor = {
+        "PTS": 2.0,
+        "REB": 1.0,
+        "AST": 0.8,
+        "PRA": 2.5,
+        "3PM": 0.45,
+        "FGA": 1.5,
+        "3PA": 1.0,
+    }.get(metric, 1.0)
+    edge_vs_osc = edge_abs / max(osc_value, osc_floor)
+
+    osc_class = str(row.get(f"OSC_{metric}_CLASS", row.get("OSC_CLASS", "-")))
+    matchup_label = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
+    form_signal = str(
+        row.get(f"FORM_{metric}_SIGNAL", row.get("FORM_SIGNAL", "→ Estável"))
+    )
+    matchup_alignment = _tip_signal_alignment(matchup_label, direction)
+    form_alignment = _tip_form_alignment(form_signal, direction)
+
+    proj_min = pd.to_numeric(row.get("PROJ_MIN_V1", 0.0), errors="coerce")
+    proj_min = float(proj_min) if pd.notna(proj_min) else 0.0
+    min_std = pd.to_numeric(row.get("MIN_STD_L10", 0.0), errors="coerce")
+    min_std = float(min_std) if pd.notna(min_std) else 0.0
+    minutes_source = str(row.get("MINUTES_SOURCE", "Modelo interno") or "Modelo interno")
+    lineup_status = str(row.get("ROLE", "Rotação") or "Rotação")
+
+    if proj_min < max(float(min_minutes), 12.0):
+        return None
+
+    # Score interno apenas para ordenar candidatos. Ele nunca é exibido como
+    # porcentagem/probabilidade ao usuário.
+    score = 0.0
+    score += min(relative_edge / 0.025, 4.0) * 1.15
+    score += min(edge_vs_osc, 2.0) * 1.25
+    score += hit_ratio * 4.0
+    score += matchup_alignment * 0.8
+    score += form_alignment * 0.6
+
+    if osc_class == "Baixa":
+        score += 0.7
+    elif osc_class == "Alta":
+        score -= 0.8
+
+    if min_std <= 3.5:
+        score += 0.5
+    elif min_std >= 6.5:
+        score -= 0.5
+
+    if lineup_status == "Titular confirmado":
+        score += 0.4
+    elif lineup_status == "Titular projetado":
+        score += 0.2
+
+    if inj_status == "Questionable":
+        score -= 1.5
+
+    conflict_count = int(matchup_alignment < 0) + int(form_alignment < 0) + int(osc_class == "Alta")
+
+    very_strong = (
+        sample_count >= 8
+        and hit_ratio >= 0.80
+        and relative_edge >= 0.06
+        and edge_vs_osc >= 0.45
+        and osc_class != "Alta"
+        and matchup_alignment >= 0
+        and form_alignment >= 0
+        and inj_status != "Questionable"
+        and (min_std <= 6.0 or minutes_source != "Modelo interno")
+        and score >= 9.0
+    )
+
+    strong = (
+        sample_count >= 6
+        and hit_ratio >= 0.70
+        and relative_edge >= 0.04
+        and edge_vs_osc >= 0.30
+        and conflict_count <= 1
+        and inj_status != "Questionable"
+        and score >= 7.0
+    )
+
+    medium = (
+        sample_count >= 5
+        and hit_ratio >= 0.60
+        and relative_edge >= 0.025
+        and edge_vs_osc >= 0.20
+        and score >= 5.0
+    )
+
+    if very_strong:
+        strength = "🔥 DESTAQUE MUITO FORTE"
+        tier = 3
+    elif strong:
+        strength = "🟢 DESTAQUE FORTE"
+        tier = 2
+    elif medium:
+        strength = "🟡 DESTAQUE MÉDIO"
+        tier = 1
+    else:
+        return None
+
+    return {
+        "PLAYER": str(row.get("PLAYER", "Jogador")),
+        "TEAM_NAME": str(row.get("TEAM_NAME", "")),
+        "METRIC": metric,
+        "DIRECTION": direction,
+        "LINE": float(line),
+        "PROJECTION": float(projection),
+        "EDGE": edge,
+        "HIT_TEXT": hit_text,
+        "HIT_COUNT": hit_count,
+        "SAMPLE_COUNT": sample_count,
+        "HIT_RATIO": hit_ratio,
+        "OSC_CLASS": osc_class,
+        "MATCHUP": matchup_label,
+        "FORM": form_signal,
+        "PROJ_MIN": proj_min,
+        "MINUTES_SOURCE": minutes_source,
+        "LINEUP_STATUS": lineup_status,
+        "LINE_SOURCE": str(ctx.get("line_source", "Linha")),
+        "STRENGTH": strength,
+        "TIER": tier,
+        "_SCORE": score,
+        "_REL_EDGE": relative_edge,
+        "_EDGE_VS_OSC": edge_vs_osc,
+    }
+
+
+def _render_tip_card(title: str, tip: dict | None) -> None:
+    with st.container(border=True):
+        st.markdown(f"#### {title}")
+
+        if tip is None:
+            st.info("Nenhuma outra linha atingiu os critérios mínimos desta faixa.")
+            return
+
+        st.markdown(f"### {tip['PLAYER']} — {tip['DIRECTION']} {format_number(tip['LINE'])} {tip['METRIC']}")
+        st.markdown(f"**{tip['STRENGTH']}**")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Projeção", format_number(tip["PROJECTION"]))
+        c2.metric("Edge", format_signed_number(tip["EDGE"]))
+        c3.metric(f"L10 {tip['DIRECTION']}", tip["HIT_TEXT"])
+        c4.metric("MIN proj.", format_number(tip["PROJ_MIN"]))
+
+        matchup_text = str(tip["MATCHUP"]).lower()
+        osc_text = str(tip["OSC_CLASS"]).lower()
+        st.caption(
+            f"{tip['TEAM_NAME']} • matchup {matchup_text} • oscilação {osc_text} • "
+            f"{tip['LINEUP_STATUS']} • minutos: {tip['MINUTES_SOURCE']} • "
+            f"linha: {tip['LINE_SOURCE']}"
+        )
+
+
+def render_best_game_tips(
+    away_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+    min_games: int,
+    min_minutes: int,
+    line_metric: str,
+    line_value: float | None,
+    use_market_line: bool,
+) -> None:
+    """
+    Mostra no máximo duas oportunidades do confronto.
+
+    Política:
+    - Muito Forte/Forte têm prioridade absoluta.
+    - Destaque Médio só aparece quando NÃO existe nenhuma tip Muito Forte/Forte.
+    - O score interno serve apenas para ordenar; não representa probabilidade.
+    """
+    combined = build_summary_cards_data(
+        away_df,
+        home_df,
+        min_games,
+        min_minutes,
+        "Todos",
+    )
+
+    st.subheader("Melhores linhas do confronto")
+    st.caption(
+        "Classificação baseada na convergência entre projeção, Edge relativo, "
+        "histórico direcional, oscilação, matchup, forma e estabilidade de minutos. "
+        "Os selos não representam probabilidade matemática de acerto."
+    )
+
+    if combined.empty:
+        st.info("Ainda não há jogadores com amostra suficiente para avaliar as melhores linhas.")
+        return
+
+    metrics = list(LINE_METRIC_OPTIONS) if use_market_line else [line_metric]
+    candidates = []
+
+    for _, row in combined.iterrows():
+        for metric in metrics:
+            ctx = get_line_context(
+                row,
+                metric,
+                line_value if metric == line_metric else None,
+                use_market_line=use_market_line,
+            )
+            candidate = _build_tip_candidate(
+                row,
+                metric,
+                ctx,
+                min_minutes=min_minutes,
+            )
+            if candidate is not None:
+                candidates.append(candidate)
+
+    if not candidates:
+        if use_market_line:
+            st.info(
+                "Nenhuma linha disponível atingiu os critérios mínimos para destaque neste confronto."
+            )
+        else:
+            st.info(
+                f"Preencha linhas individuais de {line_metric} para que o app compare as melhores oportunidades."
+            )
+        return
+
+    high_pool = [c for c in candidates if c["TIER"] >= 2]
+    medium_pool = [c for c in candidates if c["TIER"] == 1]
+
+    pool = high_pool if high_pool else medium_pool
+    pool = sorted(
+        pool,
+        key=lambda item: (
+            item["TIER"],
+            item["_SCORE"],
+            item["HIT_RATIO"],
+            item["_REL_EDGE"],
+        ),
+        reverse=True,
+    )
+
+    selected = pool[:2]
+
+    cols = st.columns(2)
+    titles = ["🔥 MELHOR LINHA DO CONFRONTO", "SEGUNDA MELHOR LINHA DO CONFRONTO"]
+    for idx_col, col in enumerate(cols):
+        with col:
+            tip = selected[idx_col] if idx_col < len(selected) else None
+            _render_tip_card(titles[idx_col], tip)
+
+
 def render_game_rankings(
     away_df: pd.DataFrame,
     home_df: pd.DataFrame,
