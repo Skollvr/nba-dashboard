@@ -17,6 +17,7 @@ from ui_components import (
     render_matchup_header,
     render_summary_cards,
     render_game_rankings,
+    render_best_game_tips,
     render_team_section_v2
 )
 
@@ -391,6 +392,16 @@ def main():
         home_df[manual_col] = pd.to_numeric(
             home_df["PLAYER_ID"], errors="coerce"
         ).map(manual_line_map)
+
+    render_best_game_tips(
+        away_df,
+        home_df,
+        min_games,
+        min_minutes,
+        line_metric,
+        line_value,
+        use_market_line,
+    )
 
     render_summary_cards(away_df, home_df, min_games, min_minutes, role_filter)
     render_game_rankings(away_df, home_df, min_games, min_minutes, role_filter, line_metric, line_value, use_market_line)
