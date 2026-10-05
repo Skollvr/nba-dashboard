@@ -1799,10 +1799,23 @@ def merge_injury_report(
         team_ids = pd.to_numeric(work_ir["TEAM_ID_IR"], errors="coerce")
         work_ir = work_ir[(team_ids == int(team_id)) | team_ids.isna()].copy()
 
-    # A successful ESPN league injury feed is a list of injured players.
-    # Players from this roster absent from the list are therefore treated as Available.
+    query_ok = (
+        bool(work_ir.get("QUERY_OK", pd.Series(dtype=bool)).fillna(False).astype(bool).any())
+        if not work_ir.empty
+        else False
+    )
+    if not query_ok:
+        return enriched
+
+    # A successful ESPN team injury query is a list of injured players.
+    # Players from this roster absent from that list are therefore Available.
     enriched["INJ_STATUS"] = "Available"
     enriched["INJ_MATCHUP_FOUND"] = True
+
+    if "PLAYER_KEY_IR" in work_ir.columns:
+        work_ir = work_ir[
+            work_ir["PLAYER_KEY_IR"].fillna("").astype(str).str.strip() != ""
+        ].copy()
 
     by_id: dict[int, pd.Series] = {}
     if "PLAYER_ID_IR" in work_ir.columns:
