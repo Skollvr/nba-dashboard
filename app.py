@@ -104,7 +104,7 @@ def main():
 
         st.subheader("Jogos")
         selected_date = st.date_input(
-            "Data dos jogos",
+            "Data dos jogos (Brasília)",
             key="selected_game_date",
             format="DD/MM/YYYY",
         )
@@ -133,7 +133,7 @@ def main():
                 args=(1,),
             )
 
-        st.caption(f"Agenda selecionada: {selected_date.strftime('%d/%m/%Y')}")
+        st.caption(f"Agenda em horário de Brasília: {selected_date.strftime('%d/%m/%Y')}")
         search_games = st.button(
             "Buscar jogos",
             type="primary",
