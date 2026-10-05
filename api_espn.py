@@ -24,6 +24,10 @@ ESPN_TEAMS_URL = f"{ESPN_BASE}/teams"
 ESPN_ROSTER_URL = f"{ESPN_BASE}/teams/{{team_id}}/roster"
 ESPN_SCHEDULE_URL = f"{ESPN_BASE}/teams/{{team_id}}/schedule"
 ESPN_SUMMARY_URL = f"{ESPN_BASE}/summary"
+ESPN_PLAYER_GAMELOG_URL = (
+    "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba/"
+    "athletes/{player_id}/gamelog"
+)
 
 ESPN_HEADERS = {
     "User-Agent": (
@@ -522,3 +526,167 @@ def aggregate_espn_player_stats(
         )
 
     return pd.DataFrame(rows, columns=columns)
+
+
+def _compact_stat_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _first_stat(stat_map: dict[str, Any], *aliases: str) -> Any:
+    normalized = {_compact_stat_key(k): v for k, v in stat_map.items()}
+    for alias in aliases:
+        key = _compact_stat_key(alias)
+        if key in normalized:
+            return normalized[key]
+    return None
+
+
+@st.cache_data(ttl=54000, show_spinner=False)
+def get_espn_player_log(
+    player_id: int,
+    season: str,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    """Player game log from ESPN in the same columns used by ui_components."""
+    season_year = _season_end_year(season)
+    payload = _request_json(
+        ESPN_PLAYER_GAMELOG_URL.format(player_id=int(player_id)),
+        params={"season": season_year},
+    )
+
+    wanted_type = _scope_to_espn_type(season_scope)
+    rows: list[dict[str, Any]] = []
+
+    season_types = payload.get("seasonTypes") or []
+    if not season_types and payload.get("events"):
+        season_types = [
+            {
+                "id": None,
+                "name": None,
+                "categories": [
+                    {
+                        "name": None,
+                        "events": payload.get("events") or [],
+                    }
+                ],
+            }
+        ]
+
+    for season_type in season_types:
+        raw_type = season_type.get("id") or season_type.get("type")
+        try:
+            type_id = int(raw_type) if raw_type is not None else None
+        except (TypeError, ValueError):
+            type_id = None
+
+        if wanted_type is not None and type_id is not None and type_id != wanted_type:
+            continue
+
+        for category in season_type.get("categories") or []:
+            names = category.get("names") or category.get("labels") or []
+            for event in category.get("events") or []:
+                stats = event.get("stats") or []
+                stat_map = {
+                    str(name): value
+                    for name, value in zip(names, stats)
+                }
+
+                minutes = _to_float(_first_stat(stat_map, "min", "minutes"))
+                pts = _to_float(_first_stat(stat_map, "pts", "points"))
+                reb = _to_float(
+                    _first_stat(
+                        stat_map,
+                        "reb",
+                        "rebounds",
+                        "totalRebounds",
+                    )
+                )
+                ast = _to_float(_first_stat(stat_map, "ast", "assists"))
+                _, fga = _made_attempted(
+                    _first_stat(
+                        stat_map,
+                        "fg",
+                        "fieldGoalsMade-fieldGoalsAttempted",
+                    )
+                )
+                fg3m, fg3a = _made_attempted(
+                    _first_stat(
+                        stat_map,
+                        "3pt",
+                        "3p",
+                        "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
+                    )
+                )
+
+                # Some ESPN gamelog variants expose made/attempted as separate fields.
+                if fga is None:
+                    fga = _to_float(
+                        _first_stat(stat_map, "fieldGoalsAttempted", "fga")
+                    )
+                if fg3m is None:
+                    fg3m = _to_float(
+                        _first_stat(stat_map, "threePointFieldGoalsMade", "3pm")
+                    )
+                if fg3a is None:
+                    fg3a = _to_float(
+                        _first_stat(stat_map, "threePointFieldGoalsAttempted", "3pa")
+                    )
+
+                # Skip rows with no basketball participation stats.
+                if minutes is None and all(
+                    value is None
+                    for value in [pts, reb, ast, fga, fg3a]
+                ):
+                    continue
+
+                opponent = event.get("opponent") or {}
+                opp_abbr = str(opponent.get("abbreviation") or "").upper()
+                home_away = str(event.get("homeAway") or "").lower()
+                matchup = (
+                    f"@ {opp_abbr}"
+                    if home_away == "away"
+                    else f"vs. {opp_abbr}"
+                )
+
+                game_result = str(event.get("gameResult") or "")
+                wl = game_result[:1].upper() if game_result[:1].upper() in {"W", "L"} else ""
+
+                rows.append(
+                    {
+                        "PLAYER_ID": int(player_id),
+                        "GAME_ID": str(
+                            event.get("eventId")
+                            or event.get("id")
+                            or (event.get("event") or {}).get("id")
+                            or ""
+                        ),
+                        "GAME_DATE": pd.to_datetime(
+                            event.get("date"),
+                            errors="coerce",
+                        ),
+                        "MATCHUP": matchup,
+                        "WL": wl,
+                        "MIN": minutes or 0.0,
+                        "PTS": pts or 0.0,
+                        "REB": reb or 0.0,
+                        "AST": ast or 0.0,
+                        "FG3M": fg3m or 0.0,
+                        "FGA": fga or 0.0,
+                        "FG3A": fg3a or 0.0,
+                        "SEASON_SCOPE": season_scope,
+                        "DATA_SOURCE": "ESPN",
+                    }
+                )
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+    for col in ["PLAYER_ID", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    for col in ["MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
+        df[col] = df[col].fillna(0.0)
+
+    df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
+    df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
+    return df.sort_values("GAME_DATE", ascending=False).reset_index(drop=True)
