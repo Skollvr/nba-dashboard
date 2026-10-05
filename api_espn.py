@@ -45,6 +45,23 @@ OFFICIAL_TEAM_ID_BY_ABBR = {
     if data.get("abbreviation")
 }
 
+# ESPN uses different abbreviations for a small set of NBA teams. Keep these
+# aliases in the provider adapter so every ESPN-backed feature resolves to the
+# same official NBA team IDs used throughout the dashboard.
+ESPN_TO_NBA_ABBR = {
+    "NY": "NYK",
+    "SA": "SAS",
+    "NO": "NOP",
+    "GS": "GSW",
+    "WSH": "WAS",
+    "UTAH": "UTA",
+}
+
+for espn_abbr, nba_abbr in ESPN_TO_NBA_ABBR.items():
+    official_id = OFFICIAL_TEAM_ID_BY_ABBR.get(nba_abbr)
+    if official_id:
+        OFFICIAL_TEAM_ID_BY_ABBR[espn_abbr] = official_id
+
 
 def _request_json(
     url: str,
