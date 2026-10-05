@@ -96,7 +96,7 @@ def get_espn_roster_player_logs(
         work["POSITION"] = str(item.get("POSITION") or "")
         if cutoff is not None:
             dates = pd.to_datetime(work["GAME_DATE"], errors="coerce")
-            work = work[dates <= cutoff].copy()
+            work = work[dates.dt.date <= cutoff.date()].copy()
         return work
 
     items = roster.to_dict("records")
@@ -190,6 +190,13 @@ def get_espn_injuries_standard() -> pd.DataFrame:
             or ""
         ).upper()
         official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(team_abbr)
+        if not official_team_id:
+            espn_id = str(team.get("id") or team_entry.get("id") or "")
+            directory = get_espn_team_directory()
+            if directory is not None and not directory.empty and espn_id:
+                hit = directory[directory["ESPN_TEAM_ID"].astype(str) == espn_id]
+                if not hit.empty:
+                    official_team_id = int(hit.iloc[0]["TEAM_ID"])
 
         for injury in team_entry.get("injuries") or []:
             athlete = injury.get("athlete") or {}
@@ -203,14 +210,19 @@ def get_espn_injuries_standard() -> pd.DataFrame:
             name = athlete.get("displayName") or athlete.get("fullName") or ""
             pid = pd.to_numeric(athlete.get("id"), errors="coerce")
             status = _normalize_injury_status(injury.get("status"), fantasy_status)
+            injury_type = injury.get("type") or {}
+            injury_type_text = (
+                injury_type.get("description") or injury_type.get("name") or ""
+                if isinstance(injury_type, dict)
+                else str(injury_type or "")
+            )
             reason = (
                 injury.get("shortComment")
                 or injury.get("longComment")
                 or details.get("detail")
                 or details.get("type")
-                or (injury.get("type") or {}).get("description")
-                if isinstance(injury.get("type"), dict)
-                else ""
+                or injury_type_text
+                or ""
             )
             rows.append({
                 "PLAYER_ID_IR": int(pid) if pd.notna(pid) else None,
@@ -353,7 +365,7 @@ def build_espn_defense_context(
         dates = pd.to_datetime(work["GAME_DATE"], errors="coerce")
         mask = work["COMPLETED"].fillna(False)
         if cutoff is not None:
-            mask &= dates <= cutoff
+            mask &= dates.dt.date <= cutoff.date()
         completed = work[mask].copy().sort_values("GAME_DATE", ascending=False)
         team_gp[tid] = int(len(completed))
         sample = completed.head(int(window_games)) if window_games else completed
