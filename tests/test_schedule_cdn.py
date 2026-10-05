@@ -8,7 +8,9 @@ from api_nba import (
     _games_from_espn_payload,
     _games_from_espn_team_schedule_frames,
     _merge_espn_scoreboard_payloads,
+    _nba_team_from_espn,
 )
+from config import TEAM_LOOKUP
 
 
 class EspnScheduleParsingTests(unittest.TestCase):
@@ -173,6 +175,68 @@ class EspnScheduleParsingTests(unittest.TestCase):
         self.assertEqual(
             result["GAME_TIME_BRT"].tolist(),
             ["16:00 BRT", "20:00 BRT", "22:30 BRT"],
+        )
+
+    def test_espn_team_aliases_map_to_official_nba_ids(self):
+        aliases = {
+            "NY": "NYK",
+            "SA": "SAS",
+            "NO": "NOP",
+            "GS": "GSW",
+            "WSH": "WAS",
+            "UTAH": "UTA",
+        }
+        official_by_abbr = {
+            str(team.get("abbreviation") or "").upper(): int(team_id)
+            for team_id, team in TEAM_LOOKUP.items()
+        }
+
+        for espn_abbr, nba_abbr in aliases.items():
+            team_id, _, returned_abbr = _nba_team_from_espn({
+                "team": {
+                    "abbreviation": espn_abbr,
+                    "displayName": nba_abbr,
+                }
+            })
+            self.assertEqual(team_id, official_by_abbr[nba_abbr])
+            self.assertEqual(returned_abbr, espn_abbr)
+
+    def test_opening_night_payload_keeps_ny_and_sa_alias_games(self):
+        payload = {
+            "events": [
+                {
+                    "id": "bos-det",
+                    "date": "2026-10-20T19:00:00Z",
+                    "competitions": [{"competitors": [
+                        {"homeAway": "away", "team": {"abbreviation": "BOS", "displayName": "Boston Celtics"}},
+                        {"homeAway": "home", "team": {"abbreviation": "DET", "displayName": "Detroit Pistons"}},
+                    ]}],
+                },
+                {
+                    "id": "phi-ny",
+                    "date": "2026-10-20T23:00:00Z",
+                    "competitions": [{"competitors": [
+                        {"homeAway": "away", "team": {"abbreviation": "PHI", "displayName": "Philadelphia 76ers"}},
+                        {"homeAway": "home", "team": {"abbreviation": "NY", "displayName": "New York Knicks"}},
+                    ]}],
+                },
+                {
+                    "id": "okc-sa",
+                    "date": "2026-10-21T01:30:00Z",
+                    "competitions": [{"competitors": [
+                        {"homeAway": "away", "team": {"abbreviation": "OKC", "displayName": "Oklahoma City Thunder"}},
+                        {"homeAway": "home", "team": {"abbreviation": "SA", "displayName": "San Antonio Spurs"}},
+                    ]}],
+                },
+            ]
+        }
+
+        result = _games_from_espn_payload(payload)
+
+        self.assertEqual(len(result), 3)
+        self.assertEqual(
+            set(result["GAME_ID"].tolist()),
+            {"bos-det", "phi-ny", "okc-sa"},
         )
 
 
