@@ -595,38 +595,39 @@ def get_player_log(
 
     # Local fallback: preserve the previous NBA Stats implementation when ESPN
     # is unavailable and stats.nba.com happens to be reachable.
-season_types = get_season_types_for_scope(season_scope)
-        all_logs = []
+    season_types = get_season_types_for_scope(season_scope)
+    all_logs = []
 
-        for stype in season_types:
-            try:
-                response = run_api_call_with_retry(
-                    lambda st=stype: playergamelog.PlayerGameLog(
-                        player_id=player_id,
-                        season=season,
-                        season_type_all_star=st,
-                        timeout=15,
-                    ),
-                    endpoint_name=f"PlayerGameLog_{stype}",
-                )
+    for stype in season_types:
+        try:
+            response = run_api_call_with_retry(
+                lambda st=stype: playergamelog.PlayerGameLog(
+                    player_id=player_id,
+                    season=season,
+                    season_type_all_star=st,
+                    timeout=15,
+                ),
+                endpoint_name=f"PlayerGameLog_{stype}",
+            )
 
-                frames = response.get_data_frames()
+            frames = response.get_data_frames()
 
-                if frames and not frames[0].empty:
-                    temp_df = frames[0].copy()
-                    temp_df["SEASON_SCOPE"] = stype
-                    all_logs.append(temp_df)
+            if frames and not frames[0].empty:
+                temp_df = frames[0].copy()
+                temp_df["SEASON_SCOPE"] = stype
+                all_logs.append(temp_df)
 
-            except Exception:
-                continue
+        except Exception:
+            continue
 
-        if not all_logs:
-            return pd.DataFrame()
+    if not all_logs:
+        return pd.DataFrame()
 
-        df = pd.concat(all_logs, ignore_index=True)
-        df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
+    df = pd.concat(all_logs, ignore_index=True)
+    df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
 
-        return df.sort_values("GAME_DATE", ascending=False)
+    return df.sort_values("GAME_DATE", ascending=False)
+
 
 @st.cache_data(ttl=54000, show_spinner=False)
 def get_team_player_logs(
