@@ -1705,7 +1705,9 @@ def get_matchup_context(
 
     report("Consultando lesões ESPN...")
     try:
-        injury_df = get_espn_injuries_standard()
+        injury_df = get_espn_injuries_standard(
+            (int(away_team_id), int(home_team_id))
+        )
     except Exception:
         injury_df = pd.DataFrame()
 
