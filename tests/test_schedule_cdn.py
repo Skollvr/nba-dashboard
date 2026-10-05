@@ -1,7 +1,11 @@
 import unittest
 from datetime import date
 
-from api_nba import _filter_espn_events_for_date, _games_from_espn_payload
+from api_nba import (
+    _filter_espn_events_for_date,
+    _games_from_espn_payload,
+    _merge_espn_scoreboard_payloads,
+)
 
 
 class EspnScheduleParsingTests(unittest.TestCase):
@@ -79,6 +83,34 @@ class EspnScheduleParsingTests(unittest.TestCase):
         self.assertEqual(
             [event["id"] for event in oct21["events"]],
             ["late-west", "atl-orl"],
+        )
+
+    def test_adjacent_daily_payloads_are_merged_before_brasilia_filter(self):
+        payload_20 = {
+            "events": [
+                {"id": "game-a", "date": "2026-10-20T23:00:00Z"},
+            ]
+        }
+        payload_21 = {
+            "events": [
+                {"id": "game-a", "date": "2026-10-20T23:00:00Z"},
+                {"id": "game-b", "date": "2026-10-21T01:00:00Z"},
+                {"id": "game-c", "date": "2026-10-21T02:30:00Z"},
+                {"id": "game-d", "date": "2026-10-21T03:30:00Z"},
+            ]
+        }
+
+        merged = _merge_espn_scoreboard_payloads([payload_20, payload_21])
+        oct20 = _filter_espn_events_for_date(merged, date(2026, 10, 20))
+        oct21 = _filter_espn_events_for_date(merged, date(2026, 10, 21))
+
+        self.assertEqual(
+            [event["id"] for event in oct20["events"]],
+            ["game-a", "game-b", "game-c"],
+        )
+        self.assertEqual(
+            [event["id"] for event in oct21["events"]],
+            ["game-d"],
         )
 
 
