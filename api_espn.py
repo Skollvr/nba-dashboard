@@ -541,142 +541,286 @@ def _first_stat(stat_map: dict[str, Any], *aliases: str) -> Any:
     return None
 
 
-@st.cache_data(ttl=54000, show_spinner=False)
-def get_espn_player_log(
-    player_id: int,
-    season: str,
-    season_scope: str = "Regular Season",
-) -> pd.DataFrame:
-    """Player game log from ESPN in the same columns used by ui_components."""
-    season_year = _season_end_year(season)
-    payload = _request_json(
-        ESPN_PLAYER_GAMELOG_URL.format(player_id=int(player_id)),
-        params={"season": season_year},
-    )
+def _gamelog_type_id(season_type: dict[str, Any]) -> int | None:
+    raw_type = season_type.get("id") or season_type.get("type")
+    try:
+        if raw_type is not None:
+            return int(raw_type)
+    except (TypeError, ValueError):
+        pass
 
-    wanted_type = _scope_to_espn_type(season_scope)
-    rows: list[dict[str, Any]] = []
+    name = str(
+        season_type.get("name")
+        or season_type.get("displayName")
+        or season_type.get("label")
+        or ""
+    ).strip().lower()
+    if "regular" in name:
+        return 2
+    if "playoff" in name or "postseason" in name or "post season" in name:
+        return 3
+    if "preseason" in name or "pre-season" in name:
+        return 1
+    return None
 
-    season_types = payload.get("seasonTypes") or []
-    if not season_types and payload.get("events"):
-        season_types = [
-            {
-                "id": None,
-                "name": None,
-                "categories": [
-                    {
-                        "name": None,
-                        "events": payload.get("events") or [],
-                    }
-                ],
-            }
-        ]
 
-    for season_type in season_types:
-        raw_type = season_type.get("id") or season_type.get("type")
-        try:
-            type_id = int(raw_type) if raw_type is not None else None
-        except (TypeError, ValueError):
-            type_id = None
+def _event_stat_names(
+    payload: dict[str, Any],
+    event: dict[str, Any],
+    stats: list[Any],
+) -> list[str]:
+    """Return stat labels aligned to ESPN's per-game stats vector."""
+    candidates = [
+        event.get("_stat_names"),
+        event.get("labels"),
+        event.get("names"),
+        payload.get("labels"),
+        payload.get("names"),
+        payload.get("displayNames"),
+    ]
 
+    for candidate in candidates:
+        if isinstance(candidate, list) and len(candidate) == len(stats):
+            return [str(value) for value in candidate]
+
+    # Some current ESPN payloads include DATE/OPP/RESULT in labels/names while
+    # the stats vector contains only the basketball columns. In that case the
+    # stat columns are the trailing entries.
+    for candidate in candidates:
+        if isinstance(candidate, list) and len(candidate) > len(stats):
+            return [str(value) for value in candidate[-len(stats):]]
+
+    return [f"stat_{idx}" for idx in range(len(stats))]
+
+
+def _iter_gamelog_events(
+    payload: dict[str, Any],
+    wanted_type: int | None,
+) -> list[dict[str, Any]]:
+    """Normalize both ESPN athlete-gamelog shapes into event dictionaries."""
+    raw_events = payload.get("events") or {}
+    event_meta: dict[str, dict[str, Any]] = {}
+    flat_events: list[dict[str, Any]] = []
+
+    if isinstance(raw_events, dict):
+        for key, value in raw_events.items():
+            if not isinstance(value, dict):
+                continue
+            event = dict(value)
+            event_id = (
+                event.get("eventId")
+                or event.get("id")
+                or (event.get("event") or {}).get("id")
+                or key
+            )
+            event["_event_id"] = str(event_id or "")
+            event_meta[str(event_id or key)] = event
+            if isinstance(event.get("stats"), list):
+                flat_events.append(event)
+    elif isinstance(raw_events, list):
+        for value in raw_events:
+            if not isinstance(value, dict):
+                continue
+            event = dict(value)
+            event_id = (
+                event.get("eventId")
+                or event.get("id")
+                or (event.get("event") or {}).get("id")
+                or ""
+            )
+            event["_event_id"] = str(event_id or "")
+            if event["_event_id"]:
+                event_meta[event["_event_id"]] = event
+            if isinstance(event.get("stats"), list):
+                flat_events.append(event)
+
+    # Older/alternate ESPN payloads keep metadata in top-level events and the
+    # stats vectors under seasonTypes[].categories[].events[].
+    scoped_events: list[dict[str, Any]] = []
+    for season_type in payload.get("seasonTypes") or []:
+        if not isinstance(season_type, dict):
+            continue
+        type_id = _gamelog_type_id(season_type)
         if wanted_type is not None and type_id is not None and type_id != wanted_type:
             continue
 
         for category in season_type.get("categories") or []:
-            names = category.get("names") or category.get("labels") or []
-            for event in category.get("events") or []:
-                stats = event.get("stats") or []
-                stat_map = {
-                    str(name): value
-                    for name, value in zip(names, stats)
-                }
+            if not isinstance(category, dict):
+                continue
+            if str(category.get("type") or "").strip().lower() == "total":
+                continue
 
-                minutes = _to_float(_first_stat(stat_map, "min", "minutes"))
-                pts = _to_float(_first_stat(stat_map, "pts", "points"))
-                reb = _to_float(
-                    _first_stat(
-                        stat_map,
-                        "reb",
-                        "rebounds",
-                        "totalRebounds",
-                    )
-                )
-                ast = _to_float(_first_stat(stat_map, "ast", "assists"))
-                _, fga = _made_attempted(
-                    _first_stat(
-                        stat_map,
-                        "fg",
-                        "fieldGoalsMade-fieldGoalsAttempted",
-                    )
-                )
-                fg3m, fg3a = _made_attempted(
-                    _first_stat(
-                        stat_map,
-                        "3pt",
-                        "3p",
-                        "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
-                    )
-                )
-
-                # Some ESPN gamelog variants expose made/attempted as separate fields.
-                if fga is None:
-                    fga = _to_float(
-                        _first_stat(stat_map, "fieldGoalsAttempted", "fga")
-                    )
-                if fg3m is None:
-                    fg3m = _to_float(
-                        _first_stat(stat_map, "threePointFieldGoalsMade", "3pm")
-                    )
-                if fg3a is None:
-                    fg3a = _to_float(
-                        _first_stat(stat_map, "threePointFieldGoalsAttempted", "3pa")
-                    )
-
-                # Skip rows with no basketball participation stats.
-                if minutes is None and all(
-                    value is None
-                    for value in [pts, reb, ast, fga, fg3a]
-                ):
+            category_names = (
+                category.get("labels")
+                or category.get("names")
+                or payload.get("labels")
+                or payload.get("names")
+                or []
+            )
+            for stat_event in category.get("events") or []:
+                if not isinstance(stat_event, dict):
+                    continue
+                stats = stat_event.get("stats") or stat_event.get("values")
+                if not isinstance(stats, list):
                     continue
 
-                opponent = event.get("opponent") or {}
-                opp_abbr = str(opponent.get("abbreviation") or "").upper()
-                home_away = str(event.get("homeAway") or "").lower()
-                matchup = (
-                    f"@ {opp_abbr}"
-                    if home_away == "away"
-                    else f"vs. {opp_abbr}"
+                event_id = str(
+                    stat_event.get("eventId")
+                    or stat_event.get("id")
+                    or (stat_event.get("event") or {}).get("id")
+                    or ""
                 )
+                merged = dict(event_meta.get(event_id, {}))
+                merged.update(stat_event)
+                merged["_event_id"] = event_id
+                if isinstance(category_names, list):
+                    merged["_stat_names"] = category_names
+                scoped_events.append(merged)
 
-                game_result = str(event.get("gameResult") or "")
-                wl = game_result[:1].upper() if game_result[:1].upper() in {"W", "L"} else ""
+    if scoped_events:
+        deduped: dict[str, dict[str, Any]] = {}
+        anonymous: list[dict[str, Any]] = []
+        for event in scoped_events:
+            event_id = str(event.get("_event_id") or "")
+            if event_id:
+                deduped[event_id] = event
+            else:
+                anonymous.append(event)
+        return list(deduped.values()) + anonymous
 
-                rows.append(
-                    {
-                        "PLAYER_ID": int(player_id),
-                        "GAME_ID": str(
-                            event.get("eventId")
-                            or event.get("id")
-                            or (event.get("event") or {}).get("id")
-                            or ""
-                        ),
-                        "GAME_DATE": pd.to_datetime(
-                            event.get("date"),
-                            errors="coerce",
-                        ),
-                        "MATCHUP": matchup,
-                        "WL": wl,
-                        "MIN": minutes or 0.0,
-                        "PTS": pts or 0.0,
-                        "REB": reb or 0.0,
-                        "AST": ast or 0.0,
-                        "FG3M": fg3m or 0.0,
-                        "FGA": fga or 0.0,
-                        "FG3A": fg3a or 0.0,
-                        "SEASON_SCOPE": season_scope,
-                        "DATA_SOURCE": "ESPN",
-                    }
+    return flat_events
+
+
+def _parse_espn_player_gamelog_payload(
+    payload: dict[str, Any],
+    player_id: int,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    wanted_type = _scope_to_espn_type(season_scope)
+    rows: list[dict[str, Any]] = []
+
+    for event in _iter_gamelog_events(payload, wanted_type):
+        stats = event.get("stats") or event.get("values") or []
+        if not isinstance(stats, list):
+            continue
+
+        names = _event_stat_names(payload, event, stats)
+        stat_map = {
+            str(name): value
+            for name, value in zip(names, stats)
+        }
+
+        minutes = _to_float(_first_stat(stat_map, "min", "minutes"))
+        pts = _to_float(_first_stat(stat_map, "pts", "points"))
+        reb = _to_float(
+            _first_stat(
+                stat_map,
+                "reb",
+                "rebounds",
+                "totalRebounds",
+            )
+        )
+        ast = _to_float(_first_stat(stat_map, "ast", "assists"))
+        _, fga = _made_attempted(
+            _first_stat(
+                stat_map,
+                "fg",
+                "fieldGoalsMade-fieldGoalsAttempted",
+                "fieldGoalsMade",
+            )
+        )
+        fg3m, fg3a = _made_attempted(
+            _first_stat(
+                stat_map,
+                "3pt",
+                "3p",
+                "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
+                "threePointsMade",
+            )
+        )
+
+        if fga is None:
+            fga = _to_float(
+                _first_stat(stat_map, "fieldGoalsAttempted", "fga")
+            )
+        if fg3m is None:
+            fg3m = _to_float(
+                _first_stat(
+                    stat_map,
+                    "threePointFieldGoalsMade",
+                    "threePointsMade",
+                    "3pm",
                 )
+            )
+        if fg3a is None:
+            fg3a = _to_float(
+                _first_stat(stat_map, "threePointFieldGoalsAttempted", "3pa")
+            )
+
+        # ESPN can include DNP/header rows with metadata but no participation.
+        if minutes is None and all(
+            value is None
+            for value in [pts, reb, ast, fga, fg3a]
+        ):
+            continue
+
+        opponent = event.get("opponent") or {}
+        opp_abbr = (
+            str(opponent.get("abbreviation") or "").upper()
+            if isinstance(opponent, dict)
+            else ""
+        )
+
+        home_away = str(event.get("homeAway") or "").strip().lower()
+        if not home_away:
+            at_vs = str(event.get("atVs") or event.get("at_vs") or "").strip().lower()
+            if at_vs in {"@", "at", "away"}:
+                home_away = "away"
+            elif at_vs in {"vs", "vs.", "home"}:
+                home_away = "home"
+
+        matchup = (
+            f"@ {opp_abbr}"
+            if home_away == "away"
+            else f"vs. {opp_abbr}"
+        )
+
+        game_result = str(
+            event.get("gameResult")
+            or event.get("result")
+            or ""
+        )
+        wl = game_result[:1].upper() if game_result[:1].upper() in {"W", "L"} else ""
+
+        event_id = str(
+            event.get("_event_id")
+            or event.get("eventId")
+            or event.get("id")
+            or (event.get("event") or {}).get("id")
+            or ""
+        )
+
+        rows.append(
+            {
+                "PLAYER_ID": int(player_id),
+                "GAME_ID": event_id,
+                "GAME_DATE": pd.to_datetime(
+                    event.get("date") or event.get("gameDate"),
+                    errors="coerce",
+                ),
+                "MATCHUP": matchup,
+                "WL": wl,
+                "MIN": minutes or 0.0,
+                "PTS": pts or 0.0,
+                "REB": reb or 0.0,
+                "AST": ast or 0.0,
+                "FG3M": fg3m or 0.0,
+                "FGA": fga or 0.0,
+                "FG3A": fg3a or 0.0,
+                "SEASON_SCOPE": season_scope,
+                "DATA_SOURCE": "ESPN",
+            }
+        )
 
     if not rows:
         return pd.DataFrame()
@@ -689,4 +833,33 @@ def get_espn_player_log(
 
     df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
-    return df.sort_values("GAME_DATE", ascending=False).reset_index(drop=True)
+    return (
+        df.drop_duplicates(subset=["GAME_ID"], keep="first")
+        .sort_values("GAME_DATE", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+@st.cache_data(ttl=54000, show_spinner=False)
+def get_espn_player_log(
+    player_id: int,
+    season: str,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    """Player game log from ESPN in the same columns used by ui_components."""
+    season_year = _season_end_year(season)
+    wanted_type = _scope_to_espn_type(season_scope)
+
+    params: dict[str, Any] = {"season": season_year}
+    if wanted_type is not None:
+        params["seasontype"] = wanted_type
+
+    payload = _request_json(
+        ESPN_PLAYER_GAMELOG_URL.format(player_id=int(player_id)),
+        params=params,
+    )
+    return _parse_espn_player_gamelog_payload(
+        payload,
+        int(player_id),
+        season_scope=season_scope,
+    )
