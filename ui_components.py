@@ -810,17 +810,17 @@ def render_team_section_v2(
 
     if show_injury:
         with st.spinner("Atualizando lesões e rotação ESPN..."):
+            team_id = next(
+                (tid for tid, t in TEAM_LOOKUP.items() if t.get("full_name") == team_name),
+                0,
+            )
+
             try:
                 injury_df = get_espn_injuries_standard(
                     (int(team_id),)
                 )
             except Exception:
                 injury_df = pd.DataFrame()
-
-            team_id = next(
-                (tid for tid, t in TEAM_LOOKUP.items() if t.get("full_name") == team_name),
-                0,
-            )
 
             enriched_team_df = merge_injury_report(
                 team_df=team_df,
