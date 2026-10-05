@@ -1,4 +1,5 @@
 import time
+from datetime import timedelta
 import pandas as pd
 import requests
 import streamlit as st
@@ -307,19 +308,40 @@ def _filter_espn_events_for_date(payload: dict, target_date) -> dict:
     return filtered_payload
 
 
+def _merge_espn_scoreboard_payloads(payloads: list[dict]) -> dict:
+    """Merge ESPN daily scoreboard payloads and deduplicate events by id."""
+    merged_events = []
+    seen_ids = set()
+
+    for payload in payloads:
+        events = payload.get("events", []) if isinstance(payload, dict) else []
+        if not isinstance(events, list):
+            continue
+
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+
+            event_id = str(event.get("id") or "").strip()
+            if event_id:
+                if event_id in seen_ids:
+                    continue
+                seen_ids.add(event_id)
+
+            merged_events.append(event)
+
+    return {"events": merged_events}
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_espn_games_for_date(target_date) -> dict:
     """
-    Busca a agenda ESPN pelo mês e filtra pelo dia local de Brasilia.
+    Busca dias ESPN adjacentes e depois filtra pelo calendário de Brasília.
 
-    O timestamp da ESPN vem em UTC. A consulta mensal evita perder jogos que,
-    por causa do fuso, pertencem a outro dia no Brasil; limit alto evita truncamento.
+    A ESPN pode agrupar jogos noturnos no dia seguinte em UTC. Consultar o dia
+    anterior, o dia escolhido e o dia seguinte evita perder jogos na virada de
+    data sem depender do comportamento pouco confiável de consultas mensais.
     """
-    params = {
-        "dates": target_date.strftime("%Y%m"),
-        "limit": 1000,
-        "tz": "America/Sao_Paulo",
-    }
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -329,21 +351,41 @@ def fetch_espn_games_for_date(target_date) -> dict:
         "Accept": "application/json, text/plain, */*",
     }
 
-    try:
-        response = requests.get(
-            ESPN_NBA_SCOREBOARD_URL,
-            params=params,
-            headers=headers,
-            timeout=(3, 8),
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as exc:
-        raise RuntimeError(
-            "A agenda alternativa não respondeu rapidamente."
-        ) from exc
+    payloads = []
+    errors = []
 
-    return _filter_espn_events_for_date(payload, target_date)
+    for day_offset in (-1, 0, 1):
+        query_date = target_date + timedelta(days=day_offset)
+        params = {
+            "dates": query_date.strftime("%Y%m%d"),
+            "limit": 100,
+            "tz": "America/Sao_Paulo",
+        }
+
+        try:
+            response = requests.get(
+                ESPN_NBA_SCOREBOARD_URL,
+                params=params,
+                headers=headers,
+                timeout=(3, 8),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict):
+                payloads.append(payload)
+        except Exception as exc:
+            errors.append(
+                f"{query_date.isoformat()}: {type(exc).__name__}"
+            )
+
+    if not payloads:
+        raise RuntimeError(
+            "A agenda alternativa não respondeu rapidamente. "
+            + " | ".join(errors)
+        )
+
+    merged_payload = _merge_espn_scoreboard_payloads(payloads)
+    return _filter_espn_events_for_date(merged_payload, target_date)
 
 
 def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
