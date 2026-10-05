@@ -18,8 +18,15 @@ from api_nba import (
 )
 from api_espn import (
     aggregate_espn_player_stats,
-    get_espn_team_player_logs,
     get_espn_team_roster,
+)
+from espn_context import (
+    get_espn_injuries_standard,
+    get_espn_league_position_baseline,
+    get_espn_position_allowed_profile,
+    get_espn_roster_player_logs,
+    get_espn_team_defense_percentiles,
+    get_espn_team_rotation,
 )
 from api_lineups import get_daily_lineups
 
@@ -551,6 +558,7 @@ def get_position_opponent_profile_v2(
     opponent_team_id: int,
     position_group: str,
     season_scope: str = "Regular Season",
+    as_of_date: str | None = None,
 ) -> dict:
     fallback = {
         "POSITION_GROUP": str(position_group),
@@ -635,18 +643,20 @@ def get_position_opponent_profile_v2(
                 "GP": total_gp,
             }
 
-        opp_raw = get_position_allowed_profile(
+        opp_raw = get_espn_position_allowed_profile(
             season,
             opponent_team_id,
             position_group,
             season_scope=season_scope,
+            as_of_date=as_of_date,
         )
 
-        league_raw = get_league_position_baseline(
+        league_raw = get_espn_league_position_baseline(
             season,
             position_group,
             season_scope=season_scope,
-        )        
+            as_of_date=as_of_date,
+        )
 
         opp_profile = weighted_profile(opp_raw)
         league_profile = weighted_profile(league_raw)
@@ -963,19 +973,19 @@ def enrich_team_with_context(
     opponent_team_name: str,
     season: str,
     season_scope: str = "Regular Season",
+    as_of_date: str | None = None,
 ) -> pd.DataFrame:
     
     if team_df.empty: return team_df
 
-    # Phase 1 ESPN: use the team's standardized ESPN game logs.
-    # Cross-team transfer history will be restored with ESPN player gamelogs
-    # after the cloud integration is validated end-to-end.
+    # ESPN player gamelogs preserve the player's current-season history even
+    # when he changed teams, while still keeping the app cloud-compatible.
     try:
-        league_logs = get_espn_team_player_logs(
+        league_logs = get_espn_roster_player_logs(
             team_id,
             season,
             season_scope=season_scope,
-            max_games=None,
+            as_of_date=as_of_date,
         )
     except Exception:
         league_logs = pd.DataFrame()
@@ -991,9 +1001,17 @@ def enrich_team_with_context(
         h2h_history_logs=league_logs,
     )
 
-    # Phase 1 cloud migration: roster/form already come from ESPN.
-    # Positional matchup remains neutral until the ESPN defense adapter is added.
-    matchup_df = pd.DataFrame()
+    matchup_rows = [
+        get_position_opponent_profile_v2(
+            season,
+            opponent_team_id,
+            pos,
+            season_scope=season_scope,
+            as_of_date=as_of_date,
+        )
+        for pos in ["G", "F", "C"]
+    ]
+    matchup_df = pd.DataFrame(matchup_rows)
 
     if matchup_df.empty or "POSITION_GROUP" not in matchup_df.columns:
         enriched["OPP_TEAM_NAME"] = opponent_team_name
@@ -1046,11 +1064,12 @@ def enrich_team_with_context(
             else:
                 enriched[col] = enriched[col].fillna("Neutro")   
 
-    # Percentil defensivo relativo aos times da liga. Uma única consulta traz
-    # os 30 times e evita depender apenas de cortes absolutos arbitrários.
-    # Avoid blocked stats.nba.com calls in Streamlit Cloud during Phase 1.
-    # The ESPN-derived defensive percentile model is the next migration step.
-    team_defense = pd.DataFrame()
+    # Percentis defensivos reconstruídos dos boxscores ESPN.
+    team_defense = get_espn_team_defense_percentiles(
+        season,
+        season_scope=season_scope,
+        as_of_date=as_of_date,
+    )
 
     opponent_defense = pd.DataFrame()
     current_team_defense = pd.DataFrame()
@@ -1339,6 +1358,7 @@ def build_team_table(
     season: str,
     season_scope: str = "Regular Season",
     roster_season: str | None = None,
+    as_of_date: str | None = None,
 ) -> pd.DataFrame:
     """
     Phase 1 ESPN integration.
@@ -1355,11 +1375,11 @@ def build_team_table(
         roster = pd.DataFrame()
 
     try:
-        player_logs = get_espn_team_player_logs(
+        player_logs = get_espn_roster_player_logs(
             team_id,
             season,
             season_scope=season_scope,
-            max_games=None,
+            as_of_date=as_of_date,
         )
     except Exception:
         player_logs = pd.DataFrame()
@@ -1641,11 +1661,14 @@ def get_matchup_context(
                 pass
 
     report(f"Carregando elenco e médias de {away_team_name}...")
+    as_of_date = target_date.isoformat() if target_date is not None else None
+
     away_df = build_team_table(
         away_team_id,
         season,
         season_scope=season_scope,
         roster_season=roster_season,
+        as_of_date=as_of_date,
     )
 
     report(f"Carregando elenco e médias de {home_team_name}...")
@@ -1654,22 +1677,25 @@ def get_matchup_context(
         season,
         season_scope=season_scope,
         roster_season=roster_season,
+        as_of_date=as_of_date,
     )
 
-    report("Preparando rotação do dia...")
-    # NBA Daily Lineups is also hosted under stats.nba.com and is not reliable
-    # from Streamlit Cloud. Keep internal rotation until ESPN lineup/depth-chart
-    # handling is connected in a later phase.
-    lineups_df = pd.DataFrame()
-
-    away_df = merge_daily_lineups(away_df, lineups_df, away_team_id)
-    home_df = merge_daily_lineups(home_df, lineups_df, home_team_id)
-
-    report("Consultando Injury Report...")
-    # Injuries must be merged before projections are calculated so
-    # Questionable/Doubtful/Out can influence minutes/context and rankings.
+    report("Consultando depth chart e rotação ESPN...")
     try:
-        injury_df = fetch_latest_injury_report_df()
+        away_rotation = get_espn_team_rotation(away_team_id)
+    except Exception:
+        away_rotation = pd.DataFrame()
+    try:
+        home_rotation = get_espn_team_rotation(home_team_id)
+    except Exception:
+        home_rotation = pd.DataFrame()
+
+    away_df = merge_daily_lineups(away_df, away_rotation, away_team_id)
+    home_df = merge_daily_lineups(home_df, home_rotation, home_team_id)
+
+    report("Consultando lesões ESPN...")
+    try:
+        injury_df = get_espn_injuries_standard()
     except Exception:
         injury_df = pd.DataFrame()
 
@@ -1698,6 +1724,7 @@ def get_matchup_context(
         opponent_team_name=home_team_name,
         season=season,
         season_scope=season_scope,
+        as_of_date=as_of_date,
     )
 
     report(f"Carregando histórico e matchup de {home_team_name}...")
@@ -1734,8 +1761,16 @@ def get_matchup_context(
 
     return away_df, home_df
 
-def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_name: str, team_id: int, game_matchup: str = "") -> pd.DataFrame:
-    if team_df.empty: return team_df
+def merge_injury_report(
+    team_df: pd.DataFrame,
+    injury_df: pd.DataFrame,
+    team_name: str,
+    team_id: int,
+    game_matchup: str = "",
+) -> pd.DataFrame:
+    if team_df.empty:
+        return team_df
+
     enriched = team_df.copy()
     enriched["INJ_STATUS"] = "—"
     enriched["INJ_REASON"] = ""
@@ -1743,42 +1778,52 @@ def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_nam
     enriched["IS_UNAVAILABLE"] = False
     enriched["INJ_MATCHUP_FOUND"] = False
 
-    if injury_df.empty: return enriched
-
-    roster_keys = set(enriched["PLAYER_KEY"].fillna("").astype(str).tolist())
-    
-    def fuzzy_match(ir_key: str) -> str:
-        if ir_key in roster_keys: return ir_key
-        for suffix in [" iii", " ii", " iv", " v", " jr", " sr"]:
-            if ir_key.endswith(suffix):
-                clean = ir_key[:-len(suffix)].strip()
-                if clean in roster_keys: return clean
-        for rk in roster_keys:
-            if ir_key in rk or rk in ir_key: return rk
-        return ir_key
+    if injury_df is None or injury_df.empty:
+        return enriched
 
     work_ir = injury_df.copy()
-    work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str).apply(fuzzy_match)
-    work_match = work_ir[work_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+    if "TEAM_ID_IR" in work_ir.columns:
+        team_ids = pd.to_numeric(work_ir["TEAM_ID_IR"], errors="coerce")
+        work_ir = work_ir[(team_ids == int(team_id)) | team_ids.isna()].copy()
 
-    if work_match.empty: return enriched
-
-    work_match = work_match.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+    # A successful ESPN league injury feed is a list of injured players.
+    # Players from this roster absent from the list are therefore treated as Available.
     enriched["INJ_STATUS"] = "Available"
     enriched["INJ_MATCHUP_FOUND"] = True
 
-    merge_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"] if c in work_match.columns]
-    merged = enriched.merge(work_match[merge_cols], left_on="PLAYER_KEY", right_on="PLAYER_KEY_IR", how="left", suffixes=("", "_IR"))
+    by_id: dict[int, pd.Series] = {}
+    if "PLAYER_ID_IR" in work_ir.columns:
+        for _, item in work_ir.iterrows():
+            pid = pd.to_numeric(item.get("PLAYER_ID_IR"), errors="coerce")
+            if pd.notna(pid):
+                by_id[int(pid)] = item
 
-    if "INJ_STATUS_IR" in merged.columns: merged["INJ_STATUS"] = merged["INJ_STATUS_IR"].fillna(merged["INJ_STATUS"])
-    if "INJ_REASON_IR" in merged.columns: merged["INJ_REASON"] = merged["INJ_REASON_IR"].fillna(merged["INJ_REASON"])
-    if "INJ_REPORT_URL_IR" in merged.columns: merged["INJ_REPORT_URL"] = merged["INJ_REPORT_URL_IR"].fillna(merged["INJ_REPORT_URL"])
+    by_name = {
+        str(item.get("PLAYER_KEY_IR", "")): item
+        for _, item in work_ir.iterrows()
+        if str(item.get("PLAYER_KEY_IR", ""))
+    }
 
-    merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
-    drop_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR"] if c in merged.columns]
-    if drop_cols: merged = merged.drop(columns=drop_cols)
+    for idx_row, player in enriched.iterrows():
+        match = None
+        pid = pd.to_numeric(player.get("PLAYER_ID"), errors="coerce")
+        if pd.notna(pid):
+            match = by_id.get(int(pid))
+        if match is None:
+            key = normalize_text(player.get("PLAYER", ""))
+            match = by_name.get(key)
 
-    return merged
+        if match is None:
+            continue
+
+        status = str(match.get("INJ_STATUS", "Questionable") or "Questionable")
+        enriched.at[idx_row, "INJ_STATUS"] = status
+        enriched.at[idx_row, "INJ_REASON"] = str(match.get("INJ_REASON", "") or "")
+        enriched.at[idx_row, "INJ_REPORT_URL"] = str(match.get("INJ_REPORT_URL", "") or "")
+
+    enriched["IS_UNAVAILABLE"] = enriched["INJ_STATUS"].isin(INACTIVE_STATUSES)
+    return enriched
+
 
 @st.cache_data(ttl=36000, show_spinner=False)
 def get_matchup_injury_context(away_team_id: int, home_team_id: int, away_team_name: str, home_team_name: str, away_df: pd.DataFrame, home_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
