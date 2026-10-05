@@ -39,6 +39,7 @@ from api_espn import (
 
 ESPN_DEPTHCHART_URL = f"{ESPN_BASE}/teams/{{team_id}}/depthcharts"
 ESPN_INJURIES_URL = f"{ESPN_BASE}/injuries"
+ESPN_TEAM_INJURIES_URL = f"{ESPN_BASE}/teams/{{team_id}}/injuries"
 DEFENSE_WINDOW_GAMES = 20
 
 
@@ -177,65 +178,126 @@ def _normalize_injury_status(raw_status: Any, fantasy_status: Any = "") -> str:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_espn_injuries_standard() -> pd.DataFrame:
-    """League injury feed normalized to the columns consumed by processing."""
-    payload = _request_json(ESPN_INJURIES_URL)
+def get_espn_injuries_standard(
+    team_ids: tuple[int, ...] | None = None,
+) -> pd.DataFrame:
+    """Normalize ESPN injuries to the columns consumed by processing.
+
+    Matchup loads pass the two official NBA team ids, which uses the per-team
+    endpoint already validated in Streamlit Cloud. A no-argument call keeps a
+    league-feed fallback for diagnostics.
+    """
+    directory = get_espn_team_directory()
+    espn_to_official: dict[str, int] = {}
+    if directory is not None and not directory.empty:
+        espn_to_official = {
+            str(row["ESPN_TEAM_ID"]): int(row["TEAM_ID"])
+            for _, row in directory.iterrows()
+        }
+
+    entries: list[dict[str, Any]] = []
+
+    if team_ids:
+        for official_id in team_ids:
+            try:
+                espn_id = _espn_team_id_for_official(int(official_id))
+                payload = _request_json(
+                    ESPN_TEAM_INJURIES_URL.format(team_id=espn_id)
+                )
+            except Exception:
+                continue
+
+            for entry in payload.get("injuries") or []:
+                if not isinstance(entry, dict):
+                    continue
+                item = dict(entry)
+                item["_OFFICIAL_TEAM_ID"] = int(official_id)
+                entries.append(item)
+    else:
+        try:
+            payload = _request_json(ESPN_INJURIES_URL)
+        except Exception:
+            payload = {}
+
+        for raw in payload.get("injuries") or []:
+            if not isinstance(raw, dict):
+                continue
+
+            # ESPN can expose either one injury per row or a team group with a
+            # nested injuries list, depending on the endpoint/edge response.
+            nested = raw.get("injuries")
+            if isinstance(nested, list):
+                team = raw.get("team") or raw
+                espn_team_id = str(team.get("id") or "")
+                official_id = espn_to_official.get(espn_team_id)
+                for injury in nested:
+                    if not isinstance(injury, dict):
+                        continue
+                    item = dict(injury)
+                    item.setdefault("team", team)
+                    item["_OFFICIAL_TEAM_ID"] = official_id
+                    entries.append(item)
+            else:
+                entries.append(dict(raw))
+
     rows: list[dict[str, Any]] = []
-
-    for team_entry in payload.get("injuries") or []:
-        team = team_entry.get("team") or {}
-        team_abbr = str(
-            team.get("abbreviation")
-            or team_entry.get("abbreviation")
-            or ""
-        ).upper()
-        official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(team_abbr)
+    for injury in entries:
+        team = injury.get("team") or {}
+        official_team_id = injury.get("_OFFICIAL_TEAM_ID")
         if not official_team_id:
-            espn_id = str(team.get("id") or team_entry.get("id") or "")
-            directory = get_espn_team_directory()
-            if directory is not None and not directory.empty and espn_id:
-                hit = directory[directory["ESPN_TEAM_ID"].astype(str) == espn_id]
-                if not hit.empty:
-                    official_team_id = int(hit.iloc[0]["TEAM_ID"])
+            team_abbr = str(team.get("abbreviation") or "").upper()
+            official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(team_abbr)
+        if not official_team_id:
+            official_team_id = espn_to_official.get(str(team.get("id") or ""))
 
-        for injury in team_entry.get("injuries") or []:
-            athlete = injury.get("athlete") or {}
-            details = injury.get("details") or {}
-            fantasy = details.get("fantasyStatus") or {}
-            fantasy_status = (
-                fantasy.get("abbreviation")
-                if isinstance(fantasy, dict)
-                else fantasy
-            )
-            name = athlete.get("displayName") or athlete.get("fullName") or ""
-            pid = pd.to_numeric(athlete.get("id"), errors="coerce")
-            status = _normalize_injury_status(injury.get("status"), fantasy_status)
-            injury_type = injury.get("type") or {}
-            injury_type_text = (
-                injury_type.get("description") or injury_type.get("name") or ""
-                if isinstance(injury_type, dict)
-                else str(injury_type or "")
-            )
-            reason = (
-                injury.get("shortComment")
-                or injury.get("longComment")
-                or details.get("detail")
-                or details.get("type")
-                or injury_type_text
-                or ""
-            )
-            rows.append({
-                "PLAYER_ID_IR": int(pid) if pd.notna(pid) else None,
-                "PLAYER_KEY_IR": _name_key(name),
-                "PLAYER_NAME_IR": str(name),
-                "TEAM_ID_IR": int(official_team_id) if official_team_id else None,
-                "INJ_STATUS": status,
-                "INJ_REASON": str(reason or ""),
-                "INJ_REPORT_URL": "",
-                "INJ_SOURCE": "ESPN",
-            })
+        athlete = injury.get("athlete") or {}
+        # Per-team endpoint uses injury={type, location}; some league payloads
+        # use details/type directly.
+        injury_detail = injury.get("injury") or {}
+        details = injury.get("details") or {}
+        fantasy = details.get("fantasyStatus") or {}
+        fantasy_status = (
+            fantasy.get("abbreviation")
+            if isinstance(fantasy, dict)
+            else fantasy
+        )
+
+        name = athlete.get("displayName") or athlete.get("fullName") or ""
+        pid = pd.to_numeric(athlete.get("id"), errors="coerce")
+        status = _normalize_injury_status(
+            injury.get("status"),
+            fantasy_status,
+        )
+
+        injury_type = injury.get("type") or injury_detail.get("type") or {}
+        injury_type_text = (
+            injury_type.get("description") or injury_type.get("name") or ""
+            if isinstance(injury_type, dict)
+            else str(injury_type or "")
+        )
+        reason = (
+            injury.get("shortComment")
+            or injury.get("longComment")
+            or details.get("detail")
+            or details.get("type")
+            or injury_type_text
+            or injury_detail.get("location")
+            or ""
+        )
+
+        rows.append({
+            "PLAYER_ID_IR": int(pid) if pd.notna(pid) else None,
+            "PLAYER_KEY_IR": _name_key(name),
+            "PLAYER_NAME_IR": str(name),
+            "TEAM_ID_IR": int(official_team_id) if official_team_id else None,
+            "INJ_STATUS": status,
+            "INJ_REASON": str(reason or ""),
+            "INJ_REPORT_URL": "",
+            "INJ_SOURCE": "ESPN",
+        })
 
     return pd.DataFrame(rows)
+
 
 
 def _stat_map(stat_block: dict[str, Any], athlete_row: dict[str, Any]) -> dict[str, Any]:
