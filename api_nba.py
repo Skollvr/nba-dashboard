@@ -261,10 +261,62 @@ def _nba_team_from_espn(competitor: dict) -> tuple[int, str, str]:
     return team_id, team_name, abbr
 
 
+def _espn_event_nba_date(event: dict):
+    """Return ESPN event date in the NBA's Eastern-time calendar day."""
+    raw_date = event.get("date")
+    if not raw_date:
+        competitions = event.get("competitions", []) or []
+        if competitions:
+            raw_date = (competitions[0] or {}).get("date")
+
+    if not raw_date:
+        return None
+
+    timestamp = pd.to_datetime(raw_date, errors="coerce", utc=True)
+    if pd.isna(timestamp):
+        return None
+
+    try:
+        return timestamp.tz_convert("America/New_York").date()
+    except Exception:
+        return timestamp.date()
+
+
+def _filter_espn_events_for_date(payload: dict, target_date) -> dict:
+    """Filter a monthly ESPN scoreboard payload to one NBA calendar date."""
+    events = payload.get("events", [])
+    if not isinstance(events, list):
+        raise RuntimeError("A agenda alternativa retornou um formato inesperado.")
+
+    filtered_events = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+
+        event_date = _espn_event_nba_date(event)
+        if event_date is None:
+            continue
+        if event_date == target_date:
+            filtered_events.append(event)
+
+    filtered_payload = dict(payload)
+    filtered_payload["events"] = filtered_events
+    return filtered_payload
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_espn_games_for_date(target_date) -> dict:
-    """Busca apenas a agenda do dia no scoreboard público da ESPN."""
-    params = {"dates": target_date.strftime("%Y%m%d")}
+    """
+    Busca a agenda ESPN pelo mês e depois filtra pelo dia NBA em Eastern Time.
+
+    O endpoint diário da ESPN pode agrupar um jogo noturno no dia UTC seguinte.
+    A consulta mensal evita perder esses jogos; limit alto evita truncamento.
+    """
+    params = {
+        "dates": target_date.strftime("%Y%m"),
+        "limit": 1000,
+        "tz": "America/New_York",
+    }
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -288,11 +340,7 @@ def fetch_espn_games_for_date(target_date) -> dict:
             "A agenda alternativa não respondeu rapidamente."
         ) from exc
 
-    events = payload.get("events", [])
-    if not isinstance(events, list):
-        raise RuntimeError("A agenda alternativa retornou um formato inesperado.")
-
-    return payload
+    return _filter_espn_events_for_date(payload, target_date)
 
 
 def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
