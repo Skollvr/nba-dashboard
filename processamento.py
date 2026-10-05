@@ -1100,6 +1100,16 @@ def enrich_team_with_context(
 
     enriched["TEAM_GP_CURRENT"] = current_team_gp
 
+    if not opponent_defense.empty:
+        opp_diag = opponent_defense.iloc[0]
+        enriched["OPP_DEF_SAMPLE_GP"] = int(
+            float(pd.to_numeric(opp_diag.get("TEAM_DEF_SAMPLE_GP", 0), errors="coerce") or 0)
+        )
+        enriched["DEFENSE_SOURCE"] = str(opp_diag.get("DEFENSE_SOURCE", "ESPN") or "ESPN")
+    else:
+        enriched["OPP_DEF_SAMPLE_GP"] = 0
+        enriched["DEFENSE_SOURCE"] = "ESPN indisponível"
+
     for metric in ["PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA"]:
         pct_col = f"TEAM_DEF_PCT_{metric}"
         rank_col = f"TEAM_DEF_RANK_{metric}"
