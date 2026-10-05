@@ -44,13 +44,28 @@ def get_previous_season_string(season: str) -> str:
 
 def get_analysis_season(selected_date: date, today: date) -> str:
     """
-    O modelo usa somente dados da própria temporada do jogo.
+    Mantém jogos históricos na própria temporada, mas usa a temporada anterior
+    como base temporária no começo da temporada corrente.
 
-    Não misturamos a temporada anterior no início do ano. Até que os dois times
-    tenham pelo menos 10 jogos na temporada atual, as projeções permanecem
-    disponíveis para desenvolvimento e teste, mas a amostra é marcada como inicial.
+    Para a temporada atual, de outubro até 15 de novembro, usamos a temporada
+    anterior como referência estatística enquanto a amostra nova ainda é pequena.
+    A partir de 16 de novembro, o modelo passa a usar a temporada corrente.
     """
-    return get_season_string(selected_date)
+    game_season = get_season_string(selected_date)
+    current_season = get_season_string(today)
+
+    # Jogos históricos continuam usando os dados da própria temporada.
+    if game_season != current_season:
+        return game_season
+
+    early_season_window = (
+        today.month == 10
+        or (today.month == 11 and today.day <= 15)
+    )
+    if early_season_window:
+        return get_previous_season_string(game_season)
+
+    return game_season
 
 
 def main():
@@ -174,10 +189,17 @@ def main():
     analysis_season = get_analysis_season(selected_date, today)
     selected_date_key = selected_date.isoformat()
 
-    st.caption(
-        f"Temporada detectada: {season} • Base estatística: somente {analysis_season} "
-        f"• Recorte: {season_scope_label}"
-    )
+    using_early_season_base = analysis_season != season
+    if using_early_season_base:
+        st.caption(
+            f"Temporada detectada: {season} • Base estatística temporária: {analysis_season} "
+            f"• Recorte: {season_scope_label}"
+        )
+    else:
+        st.caption(
+            f"Temporada detectada: {season} • Base estatística: {analysis_season} "
+            f"• Recorte: {season_scope_label}"
+        )
 
     if search_games:
         st.session_state.pop("loaded_matchup_key", None)
@@ -276,11 +298,17 @@ def main():
     away_gp = _team_gp(away_df)
     home_gp = _team_gp(home_df)
 
-    if away_gp >= min_model_games and home_gp >= min_model_games:
+    if using_early_season_base:
+        st.info(
+            f"Modo início de temporada: o jogo pertence a {season}, mas a base estatística temporária "
+            f"é {analysis_season}. Essa referência fica ativa até 15/11 para evitar projeções baseadas "
+            "em uma amostra muito pequena da temporada nova."
+        )
+    elif away_gp >= min_model_games and home_gp >= min_model_games:
         st.success(
             f"Amostra mínima atingida: {selected_game['away_team_name']} {away_gp} jogos • "
             f"{selected_game['home_team_name']} {home_gp} jogos. "
-            "O modelo está usando somente dados da temporada atual."
+            f"O modelo está usando dados de {analysis_season}."
         )
     else:
         st.warning(
