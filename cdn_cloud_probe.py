@@ -105,6 +105,19 @@ def made_attempted(value: Any) -> tuple[float | None, float | None]:
     return float(match.group(1)), float(match.group(2))
 
 
+def stat_value(stat_map: dict[str, Any], *aliases: str) -> Any:
+    """Return the first ESPN stat value matching any compact or verbose key."""
+    normalized = {
+        re.sub(r"[^a-z0-9]", "", str(key).lower()): value
+        for key, value in stat_map.items()
+    }
+    for alias in aliases:
+        key = re.sub(r"[^a-z0-9]", "", alias.lower())
+        if key in normalized:
+            return normalized[key]
+    return None
+
+
 def nba_minutes(value: Any) -> float | None:
     if value is None:
         return None
@@ -155,9 +168,20 @@ def extract_espn_players(payload: Any) -> list[dict[str, Any]]:
                 stats = entry.get("stats") or []
                 stat_map = {str(k).lower(): v for k, v in zip(keys, stats)}
 
-                fg_made, fg_attempted = made_attempted(stat_map.get("fg"))
+                fg_made, fg_attempted = made_attempted(
+                    stat_value(
+                        stat_map,
+                        "fg",
+                        "fieldGoalsMade-fieldGoalsAttempted",
+                    )
+                )
                 three_made, three_attempted = made_attempted(
-                    stat_map.get("3pt") or stat_map.get("3p")
+                    stat_value(
+                        stat_map,
+                        "3pt",
+                        "3p",
+                        "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
+                    )
                 )
 
                 name = (
@@ -175,10 +199,17 @@ def extract_espn_players(payload: Any) -> list[dict[str, Any]]:
                         "provider_id": athlete.get("id"),
                         "position": position.get("abbreviation") if isinstance(position, dict) else position,
                         "starter": bool(entry.get("starter")),
-                        "min": to_number(stat_map.get("min")),
-                        "pts": to_number(stat_map.get("pts")),
-                        "reb": to_number(stat_map.get("reb")),
-                        "ast": to_number(stat_map.get("ast")),
+                        "min": to_number(stat_value(stat_map, "min", "minutes")),
+                        "pts": to_number(stat_value(stat_map, "pts", "points")),
+                        "reb": to_number(
+                            stat_value(
+                                stat_map,
+                                "reb",
+                                "rebounds",
+                                "totalRebounds",
+                            )
+                        ),
+                        "ast": to_number(stat_value(stat_map, "ast", "assists")),
                         "3pm": three_made,
                         "3pa": three_attempted,
                         "fgm": fg_made,
@@ -478,6 +509,18 @@ if st.button("Executar teste", type="primary"):
         )
 
         if not comparison.empty:
+            check_fields = ["min", "pts", "reb", "ast", "3pm", "3pa", "fga"]
+            mismatch_counts = {
+                field: int((comparison[f"{field}_ok"] == False).sum())  # noqa: E712
+                for field in check_fields
+            }
+            st.write(
+                "**Divergências por campo:** "
+                + " | ".join(
+                    f"{field.upper()}: {count}"
+                    for field, count in mismatch_counts.items()
+                )
+            )
             st.dataframe(comparison, use_container_width=True, hide_index=True)
 
             mismatch = comparison[comparison["stats_exact"] == False]  # noqa: E712
