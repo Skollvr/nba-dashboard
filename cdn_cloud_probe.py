@@ -16,6 +16,13 @@ import pandas as pd
 import requests
 import streamlit as st
 from nba_api.stats.endpoints import commonteamroster, leaguedashplayerstats
+from api_espn import (
+    aggregate_espn_player_stats,
+    get_espn_team_player_logs,
+    get_espn_team_roster,
+)
+
+
 
 
 ESPN_SCOREBOARD_URL = (
@@ -498,6 +505,119 @@ if st.button("Testar stats.nba.com agora", type="primary", key="official_nba_pro
             "Os dois endpoints falharam. Se este teste estiver no Streamlit Cloud, "
             "o bloqueio/timeout de stats.nba.com continua presente."
         )
+
+st.divider()
+
+st.title("🧩 ESPN adapter — roster + game logs")
+st.caption(
+    "Primeira etapa da migração: gerar roster e game logs no mesmo formato usado "
+    "pelo processamento atual. Ainda não troca a fonte do dashboard."
+)
+
+adapter_season = st.text_input(
+    "Temporada para validar o adapter ESPN",
+    value="2025-26",
+    key="espn_adapter_season",
+).strip()
+adapter_games = st.number_input(
+    "Quantidade de jogos recentes para montar",
+    min_value=1,
+    max_value=20,
+    value=10,
+    step=1,
+    key="espn_adapter_games",
+)
+
+if st.button("Testar adapter ESPN", type="primary", key="espn_adapter_button"):
+    hou_team_id = 1610612745
+
+    started = time.perf_counter()
+    try:
+        with st.spinner("Montando roster e game logs pela ESPN..."):
+            adapter_roster = get_espn_team_roster(
+                hou_team_id,
+                adapter_season or "2025-26",
+            )
+            adapter_logs = get_espn_team_player_logs(
+                hou_team_id,
+                adapter_season or "2025-26",
+                season_scope="Regular Season",
+                max_games=int(adapter_games),
+            )
+            adapter_stats = aggregate_espn_player_stats(
+                adapter_logs,
+                last_n_games=5,
+            )
+
+        elapsed = time.perf_counter() - started
+        game_count = (
+            int(adapter_logs["GAME_ID"].nunique())
+            if not adapter_logs.empty and "GAME_ID" in adapter_logs.columns
+            else 0
+        )
+        player_count = (
+            int(adapter_logs["PLAYER_ID"].nunique())
+            if not adapter_logs.empty and "PLAYER_ID" in adapter_logs.columns
+            else 0
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Roster", len(adapter_roster))
+        c2.metric("Jogos montados", game_count)
+        c3.metric("Jogadores com logs", player_count)
+        c4.metric("Tempo total", f"{elapsed:.2f}s")
+
+        required_log_cols = [
+            "PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GAME_ID", "GAME_DATE",
+            "MATCHUP", "WL", "MIN", "PTS", "REB", "AST", "FG3M", "FGA",
+            "FG3A", "PRA",
+        ]
+        missing_cols = [
+            col for col in required_log_cols if col not in adapter_logs.columns
+        ]
+
+        if adapter_roster.empty:
+            st.error("O roster ESPN voltou vazio.")
+        elif adapter_logs.empty:
+            st.error("Os game logs ESPN voltaram vazios.")
+        elif missing_cols:
+            st.error(
+                "O adapter ainda não entregou todas as colunas esperadas: "
+                + ", ".join(missing_cols)
+            )
+        else:
+            st.success(
+                "Adapter ESPN montou roster + game logs com o schema esperado pelo app."
+            )
+
+        if not adapter_roster.empty:
+            with st.expander("Amostra do roster ESPN"):
+                st.dataframe(
+                    adapter_roster.head(25),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        if not adapter_logs.empty:
+            st.subheader("Amostra dos game logs padronizados")
+            st.dataframe(
+                adapter_logs[
+                    [c for c in required_log_cols if c in adapter_logs.columns]
+                ].head(40),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        if not adapter_stats.empty:
+            st.subheader("Agregado L5 produzido a partir dos logs ESPN")
+            st.dataframe(
+                adapter_stats.sort_values("PTS", ascending=False).head(20),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+    except Exception as exc:
+        st.error(f"Falha no adapter ESPN: {type(exc).__name__}: {exc}")
 
 st.divider()
 
