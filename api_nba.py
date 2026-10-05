@@ -16,7 +16,7 @@ from nba_api.stats.endpoints import (
 
 # Puxando a configuração que salvamos no passo anterior!
 from config import APP_TIMEZONE, TEAM_LOOKUP
-from api_espn import get_espn_player_log, get_espn_team_schedule
+from api_espn import OFFICIAL_TEAM_ID_BY_ABBR, get_espn_player_log, get_espn_team_schedule
 
 # ==========================================
 # 1. FUNÇÃO MESTRE DE TENTATIVAS (RETRY)
@@ -49,13 +49,6 @@ NBA_CDN_SCHEDULE_URLS = [
 ESPN_NBA_SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
 )
-
-TEAM_ID_BY_ABBR = {
-    str(team_data.get("abbreviation", "")).upper(): int(team_id)
-    for team_id, team_data in TEAM_LOOKUP.items()
-    if team_data.get("abbreviation")
-}
-
 
 def _empty_games_df() -> pd.DataFrame:
     return pd.DataFrame(
@@ -253,7 +246,7 @@ def _games_from_nba_cdn_payload(payload: dict, target_date) -> pd.DataFrame:
 def _nba_team_from_espn(competitor: dict) -> tuple[int, str, str]:
     team = competitor.get("team", {}) or {}
     abbr = str(team.get("abbreviation", "") or "").upper().strip()
-    team_id = TEAM_ID_BY_ABBR.get(abbr, 0)
+    team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(abbr, 0)
 
     if team_id:
         team_name = TEAM_LOOKUP.get(team_id, {}).get(
