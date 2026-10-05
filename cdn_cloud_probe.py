@@ -15,6 +15,7 @@ from typing import Any
 import pandas as pd
 import requests
 import streamlit as st
+from nba_api.stats.endpoints import commonteamroster, leaguedashplayerstats
 
 
 ESPN_SCOREBOARD_URL = (
@@ -386,7 +387,119 @@ def comparison_table(
     return merged[display_cols], len(merged), exact_players
 
 
+def probe_official_nba_stats_api(season: str = "2025-26") -> dict[str, dict[str, Any]]:
+    """One-shot reachability test using the same nba_api package as the dashboard."""
+
+    results: dict[str, dict[str, Any]] = {}
+
+    started = time.perf_counter()
+    try:
+        response = commonteamroster.CommonTeamRoster(
+            team_id=1610612738,  # Boston Celtics
+            season=season,
+            timeout=12,
+        )
+        frames = response.get_data_frames()
+        rows = len(frames[0]) if frames and frames[0] is not None else 0
+        results["CommonTeamRoster"] = {
+            "ok": True,
+            "time": time.perf_counter() - started,
+            "rows": rows,
+            "error": None,
+        }
+    except Exception as exc:
+        results["CommonTeamRoster"] = {
+            "ok": False,
+            "time": time.perf_counter() - started,
+            "rows": 0,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    started = time.perf_counter()
+    try:
+        response = leaguedashplayerstats.LeagueDashPlayerStats(
+            season=season,
+            season_type_all_star="Regular Season",
+            per_mode_detailed="PerGame",
+            measure_type_detailed_defense="Base",
+            last_n_games=0,
+            month=0,
+            opponent_team_id=0,
+            pace_adjust="N",
+            plus_minus="N",
+            rank="N",
+            period=0,
+            team_id_nullable="",
+            timeout=12,
+        )
+        frames = response.get_data_frames()
+        rows = len(frames[0]) if frames and frames[0] is not None else 0
+        results["LeagueDashPlayerStats"] = {
+            "ok": True,
+            "time": time.perf_counter() - started,
+            "rows": rows,
+            "error": None,
+        }
+    except Exception as exc:
+        results["LeagueDashPlayerStats"] = {
+            "ok": False,
+            "time": time.perf_counter() - started,
+            "rows": 0,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    return results
+
+
 st.set_page_config(page_title="ESPN NBA Equivalence Probe", page_icon="🏀", layout="wide")
+
+st.title("🧪 Re-teste da API oficial da NBA")
+st.caption(
+    "Teste único de conectividade contra stats.nba.com usando exatamente o pacote nba_api. "
+    "Ele não altera o dashboard nem o cache principal."
+)
+
+probe_season = st.text_input(
+    "Temporada usada no re-teste",
+    value="2025-26",
+    help="Usamos uma temporada concluída para garantir que os endpoints tenham dados para retornar.",
+    key="official_nba_probe_season",
+).strip()
+
+if st.button("Testar stats.nba.com agora", type="primary", key="official_nba_probe_button"):
+    with st.spinner("Consultando a API oficial da NBA uma única vez..."):
+        official_results = probe_official_nba_stats_api(probe_season or "2025-26")
+
+    cols = st.columns(2)
+    for col, endpoint_name in zip(cols, ["CommonTeamRoster", "LeagueDashPlayerStats"]):
+        result = official_results[endpoint_name]
+        with col:
+            st.subheader(endpoint_name)
+            st.metric("Resultado", "OK" if result["ok"] else "FALHOU")
+            st.metric("Tempo", f'{result["time"]:.2f}s')
+            st.metric("Linhas", result["rows"])
+            if result["ok"]:
+                st.success("stats.nba.com respondeu normalmente.")
+            else:
+                st.error(result["error"])
+
+    if all(item["ok"] for item in official_results.values()):
+        st.success(
+            "Os dois endpoints oficiais responderam. Isso indica que o acesso a stats.nba.com "
+            "está funcionando neste host neste momento."
+        )
+    elif any(item["ok"] for item in official_results.values()):
+        st.warning(
+            "O resultado foi parcial: um endpoint respondeu e outro falhou. "
+            "Ainda não é suficiente para considerar o problema resolvido."
+        )
+    else:
+        st.warning(
+            "Os dois endpoints falharam. Se este teste estiver no Streamlit Cloud, "
+            "o bloqueio/timeout de stats.nba.com continua presente."
+        )
+
+st.divider()
 
 st.title("🏀 ESPN NBA — acesso cloud + equivalência de estatísticas")
 st.caption(
