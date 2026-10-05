@@ -72,6 +72,12 @@ def main():
         unsafe_allow_html=True,
     )
 
+    st.info(
+        "🧪 Branch de migração ESPN: agenda, roster e game logs já usam ESPN. "
+        "Nesta etapa, matchup defensivo/percentis e lineup externo ficam neutros "
+        "até serem reconstruídos pela ESPN."
+    )
+
     today = get_brasilia_today()
     if "selected_game_date" not in st.session_state:
         st.session_state["selected_game_date"] = today
