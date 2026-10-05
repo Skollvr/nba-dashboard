@@ -1735,6 +1735,7 @@ def get_matchup_context(
         opponent_team_name=away_team_name,
         season=season,
         season_scope=season_scope,
+        as_of_date=as_of_date,
     )
 
     away_df["TEAM_NAME"] = away_team_name
