@@ -811,7 +811,9 @@ def render_team_section_v2(
     if show_injury:
         with st.spinner("Atualizando lesões e rotação ESPN..."):
             try:
-                injury_df = get_espn_injuries_standard()
+                injury_df = get_espn_injuries_standard(
+                    (int(team_id),)
+                )
             except Exception:
                 injury_df = pd.DataFrame()
 
