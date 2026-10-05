@@ -7,6 +7,7 @@ from config import (
 )
 from api_nba import get_games_for_date
 from api_lineups import clear_lineup_cache
+from espn_context import clear_espn_pregame_cache
 from api_odds import get_odds_api_key, clear_odds_cache
 from pdf_reader import get_season_string, clear_injury_cache
 from processamento import get_matchup_context
@@ -73,9 +74,10 @@ def main():
     )
 
     st.info(
-        "🧪 Branch de migração ESPN: agenda, roster e game logs já usam ESPN. "
-        "Nesta etapa, matchup defensivo/percentis e lineup externo ficam neutros "
-        "até serem reconstruídos pela ESPN."
+        "🧪 Branch de validação ESPN completa: agenda, roster, game logs, H2H, "
+        "defesa/percentis, matchup por posição, depth chart e lesões usam ESPN. "
+        "Os minutos projetados continuam com o modelo interno quando a ESPN não "
+        "publica uma projeção explícita."
     )
 
     today = get_brasilia_today()
@@ -155,6 +157,7 @@ def main():
 
         if st.button("🔄 Atualizar dados pré-jogo", use_container_width=True):
             clear_lineup_cache()
+            clear_espn_pregame_cache()
             clear_injury_cache()
             clear_odds_cache()
             st.session_state.pop("loaded_matchup_key", None)
@@ -297,7 +300,7 @@ def main():
             "LINEUP_SOURCE",
             pd.Series(["Modelo interno"] * len(lineup_test_df)),
         ).fillna("Modelo interno").astype(str)
-        nba_lineup_count = int(source_series.eq("NBA Daily Lineups").sum())
+        espn_depth_count = int(source_series.eq("ESPN Depth Chart").sum())
         external_min_count = int(
             pd.to_numeric(
                 lineup_test_df.get(
@@ -308,16 +311,23 @@ def main():
             ).notna().sum()
         )
 
-        if nba_lineup_count > 0:
+        if espn_depth_count > 0:
+            starter_count = int(
+                lineup_test_df.get(
+                    "LINEUP_STATUS",
+                    pd.Series([""] * len(lineup_test_df)),
+                ).astype(str).eq("Titular projetado").sum()
+            )
             st.info(
-                f"Teste de rotação: feed NBA reconhecido para {nba_lineup_count} jogador(es) • "
-                f"minutos externos disponíveis para {external_min_count}. "
-                "Os demais jogadores usam o modelo interno de minutos."
+                f"Rotação ESPN reconhecida para {espn_depth_count} jogador(es) • "
+                f"{starter_count} titular(es) projetado(s) pelo depth chart. "
+                f"Minutos externos explícitos: {external_min_count}; quando ausentes, "
+                "o modelo interno de minutos continua sendo usado."
             )
         else:
             st.caption(
-                "Teste de rotação: o feed diário da NBA ainda não trouxe uma lineup utilizável "
-                "para este jogo; status e minutos permanecem no fallback interno."
+                "Depth chart ESPN não trouxe uma rotação utilizável para este jogo; "
+                "o app manteve a estimativa interna por minutos."
             )
 
     # Linhas manuais são individuais por jogador. Isso evita comparar todo o
