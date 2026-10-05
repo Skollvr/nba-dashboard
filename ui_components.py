@@ -29,30 +29,28 @@ from datetime import timedelta
 # 1. ESTILIZAÇÃO E CSS
 # =========================================================
 
-def get_game_datetime_brasilia(status_text: str) -> str:
-    """Converte o status de horário da NBA (ET) para o horário de Brasília."""
+def get_game_datetime_brasilia(status_text: str, game_time_brt: str = "") -> str:
+    """Prefer the exact Brasilia timestamp calculated from the ESPN event."""
+    if game_time_brt and str(game_time_brt).strip().lower() not in {"nan", "none"}:
+        return str(game_time_brt)
+
+    # Fallback for non-ESPN schedule sources that still expose only ET text.
     if not status_text or "ET" not in status_text:
-        return status_text # Retorna "Final" ou "Live" se o jogo já começou
-    
+        return status_text
+
     try:
-        # Extrai o horário (ex: "7:30 pm")
         time_part = status_text.replace(" ET", "").strip()
-        # Converte para objeto datetime assumindo a data de hoje
         et_time = datetime.strptime(time_part, "%I:%M %p")
-        
-        # Define o fuso de NY (Eastern Time) e de Brasília
         tz_et = pytz.timezone("US/Eastern")
-        tz_br = pytz.timezone("America/Sao_Paulo") # Ou use a variável APP_TIMEZONE
-        
-        # Ajusta para hoje e aplica o fuso ET
+        tz_br = pytz.timezone("America/Sao_Paulo")
         now = datetime.now()
-        et_dt = tz_et.localize(datetime(now.year, now.month, now.day, et_time.hour, et_time.minute))
-        
-        # Converte para Brasília
+        et_dt = tz_et.localize(
+            datetime(now.year, now.month, now.day, et_time.hour, et_time.minute)
+        )
         br_dt = et_dt.astimezone(tz_br)
         return br_dt.strftime("%H:%M BRT")
     except Exception:
-        return status_text # Caso algo falhe, mantém o original para não quebrar a tela
+        return status_text
 
 def inject_css() -> None:
     """Lê o arquivo style.css e aplica no Streamlit."""
@@ -1193,8 +1191,10 @@ def render_matchup_header(game_row: pd.Series) -> None:
 
     with c2:
         st.markdown('<div class="center-vs">VS</div>', unsafe_allow_html=True)
-        # CONVERSÃO DE HORÁRIO AQUI DENTRO:
-        status_display = get_game_datetime_brasilia(game_row["GAME_STATUS_TEXT"])
+        status_display = get_game_datetime_brasilia(
+            game_row["GAME_STATUS_TEXT"],
+            game_row.get("GAME_TIME_BRT", ""),
+        )
         st.markdown(
             f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{status_display}</span></div>',
             unsafe_allow_html=True,
