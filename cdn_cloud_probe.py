@@ -199,6 +199,8 @@ def extract_espn_players(payload: Any) -> list[dict[str, Any]]:
                         "provider_id": athlete.get("id"),
                         "position": position.get("abbreviation") if isinstance(position, dict) else position,
                         "starter": bool(entry.get("starter")),
+                        "active": entry.get("active"),
+                        "did_not_play": entry.get("didNotPlay"),
                         "min": to_number(stat_value(stat_map, "min", "minutes")),
                         "pts": to_number(stat_value(stat_map, "pts", "points")),
                         "reb": to_number(
@@ -241,6 +243,8 @@ def extract_nba_players(payload: Any) -> list[dict[str, Any]]:
                     "provider_id": player.get("personId"),
                     "position": player.get("position"),
                     "starter": str(player.get("starter")) in {"1", "true", "True"},
+                    "played": player.get("played"),
+                    "status": player.get("status"),
                     "min": nba_minutes(stats.get("minutesCalculated") or stats.get("minutes")),
                     "pts": to_number(stats.get("points")),
                     "reb": to_number(stats.get("reboundsTotal")),
@@ -310,12 +314,31 @@ def count_injuries(payload: Any) -> int:
     return len(items) if isinstance(items, list) else 0
 
 
+def row_has_played(row: dict[str, Any]) -> bool:
+    """Keep only players who logged actual game participation."""
+    if row.get("did_not_play") is True:
+        return False
+
+    played = row.get("played")
+    if played in (False, 0, "0"):
+        return False
+
+    minute_value = to_number(row.get("min"))
+    if minute_value is not None and minute_value > 0:
+        return True
+
+    stat_fields = ("pts", "reb", "ast", "3pm", "3pa", "fga")
+    return any(to_number(row.get(field)) is not None for field in stat_fields)
+
+
 def comparison_table(
     espn_rows: list[dict[str, Any]],
     nba_rows: list[dict[str, Any]],
 ) -> tuple[pd.DataFrame, int, int]:
-    espn = pd.DataFrame(espn_rows)
-    nba = pd.DataFrame(nba_rows)
+    espn_played = [row for row in espn_rows if row_has_played(row)]
+    nba_played = [row for row in nba_rows if row_has_played(row)]
+    espn = pd.DataFrame(espn_played)
+    nba = pd.DataFrame(nba_played)
     if espn.empty or nba.empty:
         return pd.DataFrame(), 0, 0
 
@@ -496,16 +519,19 @@ if st.button("Executar teste", type="primary"):
 
         total_espn = len(espn_players)
         total_nba = len(nba_players)
+        played_espn = sum(row_has_played(row) for row in espn_players)
+        played_nba = sum(row_has_played(row) for row in nba_players)
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Jogadores ESPN", total_espn)
-        c2.metric("Jogadores NBA CDN", total_nba)
+        c1.metric("ESPN — jogaram", f"{played_espn}/{total_espn}")
+        c2.metric("NBA CDN — jogaram", f"{played_nba}/{total_nba}")
         c3.metric("Jogadores pareados", matched)
         c4.metric("Stats essenciais iguais", f"{exact_players}/{matched}" if matched else "0/0")
 
         st.caption(
-            "Pareamento por time + nome normalizado. IDs da ESPN e da NBA são de provedores "
-            "diferentes e não são esperados ser iguais. Para minutos aceitamos diferença de até "
-            "1 minuto por arredondamento; as demais estatísticas exigem igualdade."
+            "A comparação estatística considera apenas jogadores que efetivamente entraram em quadra. "
+            "DNP/inativos ficam fora do game log. Pareamento por time + nome normalizado; IDs da ESPN "
+            "e da NBA são de provedores diferentes. Para minutos aceitamos diferença de até 1 minuto "
+            "por arredondamento; as demais estatísticas exigem igualdade."
         )
 
         if not comparison.empty:
