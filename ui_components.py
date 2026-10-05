@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 import pytz
 from datetime import datetime
 from pandas.io.formats.style import Styler
-from pdf_reader import parse_injury_report_timestamp_from_url
 from config import (
     NBA_TEAM_COLORS, TEAM_LOGO_URL, PLAYER_HEADSHOT_URL, 
     LINE_METRIC_OPTIONS, CHART_OPTIONS, TEAM_LOOKUP, SORT_OPTIONS
@@ -14,7 +13,6 @@ from processamento import (
     get_line_context,
     get_matchup_chip_class,
     get_metric_matchup_context,
-    fetch_latest_injury_report_df,
     merge_injury_report,
     filter_and_sort_team_df,
     build_display_dataframes,
@@ -23,6 +21,7 @@ from processamento import (
     get_metric_allowed_column
 )
 from api_nba import get_player_log
+from espn_context import get_espn_injuries_standard
 
 from datetime import timedelta
 
@@ -804,57 +803,56 @@ def render_team_section_v2(
         )
 
     st.divider()
-    show_injury = st.toggle(f"🏥 Carregar Status Oficial — {team_name}", key=f"ir_toggle_{team_name}")
+    show_injury = st.toggle(
+        f"🏥 Ver lesões e rotação ESPN — {team_name}",
+        key=f"ir_toggle_{team_name}",
+    )
 
     if show_injury:
-        with st.spinner("Buscando PDF oficial da NBA..."):
-            injury_df = fetch_latest_injury_report_df()
-            team_id = next((tid for tid, t in TEAM_LOOKUP.items() if t.get("full_name") == team_name), 0)
-            
+        with st.spinner("Atualizando lesões e rotação ESPN..."):
+            try:
+                injury_df = get_espn_injuries_standard()
+            except Exception:
+                injury_df = pd.DataFrame()
+
+            team_id = next(
+                (tid for tid, t in TEAM_LOOKUP.items() if t.get("full_name") == team_name),
+                0,
+            )
+
             enriched_team_df = merge_injury_report(
                 team_df=team_df,
                 injury_df=injury_df,
                 team_name=team_name,
-                team_id=team_id
+                team_id=team_id,
             )
-            
-            ir_tab, lineup_tab = st.tabs(["Status Oficial", "Rotação Atualizada"])
-            with ir_tab: render_injury_report_tab(enriched_team_df, team_name)
-            with lineup_tab: render_lineup_report_tab(enriched_team_df, team_name)
+
+            ir_tab, lineup_tab = st.tabs(["Lesões ESPN", "Rotação ESPN"])
+            with ir_tab:
+                render_injury_report_tab(enriched_team_df, team_name)
+            with lineup_tab:
+                render_lineup_report_tab(enriched_team_df, team_name)
 
 
 def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
-        '<div class="section-note">Status oficial do injury report da NBA para o elenco do time.</div>',
+        '<div class="section-note">Status de lesões publicado pela ESPN para o elenco atual. '
+        'Out/Doubtful são tratados como indisponíveis pelo modelo; Questionable permanece visível '
+        'com ajuste de contexto.</div>',
         unsafe_allow_html=True,
     )
 
     if "INJ_STATUS" not in team_df.columns:
-        st.info("Injury report ainda não integrado nesta execução.")
+        st.info("Dados de lesões ESPN ainda não integrados nesta execução.")
         return
 
-    report_url = ""
-    if "INJ_REPORT_URL" in team_df.columns:
-        valid_urls = team_df["INJ_REPORT_URL"].dropna().astype(str)
-        valid_urls = valid_urls[valid_urls.str.strip() != ""]
-        if not valid_urls.empty:
-            report_url = valid_urls.iloc[0]
-
-    report_meta = parse_injury_report_timestamp_from_url(report_url)
-
-    top_cols = st.columns([1.4, 1.2, 1.4])
-    with top_cols[0]:
-        st.caption(f"PDF oficial: {report_meta['report_label_et']}")
-    with top_cols[1]:
-        st.caption(f"Brasília: {report_meta['report_label_brt']}")
-    with top_cols[2]:
-        if report_url:
-            st.caption("Fonte oficial carregada")
-        else:
-            st.caption("Fonte oficial não identificada")
+    st.caption("Fonte: ESPN • atualização pré-jogo disponível no botão da barra lateral")
 
     if "INJ_MATCHUP_FOUND" in team_df.columns and not bool(team_df["INJ_MATCHUP_FOUND"].any()):
-        st.warning("Não encontrei linhas do injury report oficial para este matchup. O app não deve assumir disponibilidade oficial aqui.")
+        st.warning(
+            "A consulta ESPN não retornou uma lista de lesões utilizável para este time. "
+            "O app não deve assumir disponibilidade nesse caso."
+        )
 
     report_df = team_df[["PLAYER", "INJ_STATUS", "INJ_REASON"]].copy()
     report_df = report_df.rename(
@@ -876,9 +874,9 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
 
 def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
-        '<div class="section-note">Rotação do dia. Quando o feed oficial estiver disponível, '
-        'o status Projetado/Confirmado substitui a estimativa por minutos. O status visual não '
-        'adiciona bônus artificial à projeção de minutos.</div>',
+        '<div class="section-note">Rotação projetada pelo depth chart da ESPN. '
+        'Depth 1 em cada posição é tratado como Titular projetado; isso não equivale a '
+        'lineup confirmado. O status visual não adiciona bônus artificial aos minutos.</div>',
         unsafe_allow_html=True,
     )
 
@@ -993,7 +991,7 @@ def get_team_logo_url(team_id: int) -> str:
 
 
 def get_player_headshot_url(player_id: int) -> str:
-    return PLAYER_HEADSHOT_URL.format(player_id=player_id)
+    return f"https://a.espncdn.com/i/headshots/nba/players/full/{int(player_id)}.png"
 
 
 def format_number(value, decimals: int = 1) -> str:
