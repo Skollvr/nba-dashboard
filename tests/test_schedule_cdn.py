@@ -1,6 +1,7 @@
 import unittest
+from datetime import date
 
-from api_nba import _games_from_espn_payload
+from api_nba import _filter_espn_events_for_date, _games_from_espn_payload
 
 
 class EspnScheduleParsingTests(unittest.TestCase):
@@ -52,6 +53,24 @@ class EspnScheduleParsingTests(unittest.TestCase):
 
         self.assertTrue(result.empty)
         self.assertIn("GAME_ID", result.columns)
+
+    def test_monthly_payload_keeps_all_opening_night_games_on_eastern_date(self):
+        payload = {
+            "events": [
+                {"id": "bos-det", "date": "2026-10-20T19:00:00Z"},
+                {"id": "phi-nyk", "date": "2026-10-20T23:00:00Z"},
+                # 9:30 PM ET is already Oct. 21 in UTC, but still belongs to Oct. 20 NBA schedule.
+                {"id": "okc-sas", "date": "2026-10-21T01:30:00Z"},
+                {"id": "atl-orl", "date": "2026-10-21T23:00:00Z"},
+            ]
+        }
+
+        result = _filter_espn_events_for_date(payload, date(2026, 10, 20))
+
+        self.assertEqual(
+            [event["id"] for event in result["events"]],
+            ["bos-det", "phi-nyk", "okc-sas"],
+        )
 
 
 if __name__ == "__main__":
