@@ -16,6 +16,11 @@ from api_nba import (
     get_league_player_logs, get_position_allowed_profile,
     get_league_position_baseline, get_team_defense_percentiles
 )
+from api_espn import (
+    aggregate_espn_player_stats,
+    get_espn_team_player_logs,
+    get_espn_team_roster,
+)
 from api_lineups import get_daily_lineups
 
 # 3. API de Odds
@@ -962,20 +967,18 @@ def enrich_team_with_context(
     
     if team_df.empty: return team_df
 
-    # Preferimos logs da liga inteira para preservar L5/L10 e H2H de
-    # jogadores que trocaram de time. Se a consulta falhar, recuamos para
-    # os logs do time atual.
-    league_logs = get_league_player_logs(
-        season,
-        season_scope=season_scope,
-    )
-
-    if league_logs is None or league_logs.empty:
-        league_logs = get_team_player_logs(
+    # Phase 1 ESPN: use the team's standardized ESPN game logs.
+    # Cross-team transfer history will be restored with ESPN player gamelogs
+    # after the cloud integration is validated end-to-end.
+    try:
+        league_logs = get_espn_team_player_logs(
             team_id,
             season,
             season_scope=season_scope,
+            max_games=None,
         )
+    except Exception:
+        league_logs = pd.DataFrame()
 
     opponent_abbr = TEAM_ABBR_LOOKUP.get(int(opponent_team_id), "")
 
@@ -988,16 +991,9 @@ def enrich_team_with_context(
         h2h_history_logs=league_logs,
     )
 
-    matchup_rows = [
-    get_position_opponent_profile_v2(
-        season,
-        opponent_team_id,
-        pos,
-        season_scope=season_scope,
-    )
-    for pos in ["G", "F", "C"]
-]
-    matchup_df = pd.DataFrame(matchup_rows)
+    # Phase 1 cloud migration: roster/form already come from ESPN.
+    # Positional matchup remains neutral until the ESPN defense adapter is added.
+    matchup_df = pd.DataFrame()
 
     if matchup_df.empty or "POSITION_GROUP" not in matchup_df.columns:
         enriched["OPP_TEAM_NAME"] = opponent_team_name
@@ -1052,10 +1048,9 @@ def enrich_team_with_context(
 
     # Percentil defensivo relativo aos times da liga. Uma única consulta traz
     # os 30 times e evita depender apenas de cortes absolutos arbitrários.
-    team_defense = get_team_defense_percentiles(
-        season,
-        season_scope=season_scope,
-    )
+    # Avoid blocked stats.nba.com calls in Streamlit Cloud during Phase 1.
+    # The ESPN-derived defensive percentile model is the next migration step.
+    team_defense = pd.DataFrame()
 
     opponent_defense = pd.DataFrame()
     current_team_defense = pd.DataFrame()
@@ -1345,87 +1340,163 @@ def build_team_table(
     season_scope: str = "Regular Season",
     roster_season: str | None = None,
 ) -> pd.DataFrame:
-    # LeagueDashPlayerStats já traz PLAYER_ID, PLAYER_NAME e TEAM_ID.
-    # Buscamos essa base primeiro para termos um fallback caso
-    # CommonTeamRoster não responda no Streamlit Cloud.
-    season_stats = get_league_player_stats(
-        season,
-        last_n_games=0,
-        season_scope=season_scope,
-    )
+    """
+    Phase 1 ESPN integration.
 
+    Roster and player averages now come from ESPN so the same code can run in
+    Streamlit Cloud without stats.nba.com. The returned schema stays identical
+    to the existing dashboard contract.
+    """
     roster_season = roster_season or season
 
     try:
-        roster = get_team_roster(team_id, roster_season)
+        roster = get_espn_team_roster(team_id, roster_season)
     except Exception:
         roster = pd.DataFrame()
 
-    fallback_source = season_stats
-
-    if roster.empty and roster_season != season:
-        try:
-            current_roster_stats = get_league_player_stats(
-                roster_season,
-                last_n_games=0,
-                season_scope="Regular Season",
-            )
-            if not current_roster_stats.empty:
-                fallback_source = current_roster_stats
-        except Exception:
-            pass
-
-    if roster.empty and not fallback_source.empty and "TEAM_ID" in fallback_source.columns:
-        fallback_roster = fallback_source.copy()
-        fallback_roster["TEAM_ID"] = pd.to_numeric(
-            fallback_roster["TEAM_ID"],
-            errors="coerce",
+    try:
+        player_logs = get_espn_team_player_logs(
+            team_id,
+            season,
+            season_scope=season_scope,
+            max_games=None,
         )
-        fallback_roster = fallback_roster[
-            fallback_roster["TEAM_ID"] == int(team_id)
-        ].copy()
+    except Exception:
+        player_logs = pd.DataFrame()
 
-        if not fallback_roster.empty:
-            fallback_roster = fallback_roster.rename(
-                columns={"PLAYER_NAME": "PLAYER"}
-            )
-            roster = fallback_roster[
-                [c for c in ["PLAYER", "PLAYER_ID"] if c in fallback_roster.columns]
-            ].copy()
-            roster["POSITION"] = ""
-
-    last5_stats = get_league_player_stats(
-        season,
-        last_n_games=5,
-        season_scope=season_scope,
-    )
-
-    last10_stats = get_league_player_stats(
-        season,
-        last_n_games=10,
-        season_scope=season_scope,
-    )
+    season_stats = aggregate_espn_player_stats(player_logs, last_n_games=0)
+    last5_stats = aggregate_espn_player_stats(player_logs, last_n_games=5)
+    last10_stats = aggregate_espn_player_stats(player_logs, last_n_games=10)
 
     if roster.empty:
         return pd.DataFrame()
 
-    roster = roster[[c for c in ["PLAYER", "PLAYER_ID", "POSITION"] if c in roster.columns]].copy()
-    if "POSITION" not in roster.columns: roster["POSITION"] = ""
+    roster = roster[
+        [c for c in ["PLAYER", "PLAYER_ID", "POSITION"] if c in roster.columns]
+    ].copy()
+    if "POSITION" not in roster.columns:
+        roster["POSITION"] = ""
 
-    season_view = pd.DataFrame(columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]) if season_stats.empty else season_stats.rename(columns={"GP": "SEASON_GP", "MIN": "SEASON_MIN", "PTS": "SEASON_PTS", "REB": "SEASON_REB", "AST": "SEASON_AST", "FG3M": "SEASON_3PM", "FGA": "SEASON_FGA", "FG3A": "SEASON_3PA"})
-    last5_view = pd.DataFrame(columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA"]) if last5_stats.empty else last5_stats.rename(columns={"GP": "L5_GP", "MIN": "L5_MIN", "PTS": "L5_PTS", "REB": "L5_REB", "AST": "L5_AST", "FG3M": "L5_3PM", "FGA": "L5_FGA", "FG3A": "L5_3PA"})
-    last10_view = pd.DataFrame(columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"]) if last10_stats.empty else last10_stats.rename(columns={"GP": "L10_GP", "MIN": "L10_MIN", "PTS": "L10_PTS", "REB": "L10_REB", "AST": "L10_AST", "FG3M": "L10_3PM", "FGA": "L10_FGA", "FG3A": "L10_3PA"})
+    season_view = (
+        pd.DataFrame(
+            columns=[
+                "PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS",
+                "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA",
+                "SEASON_3PA",
+            ]
+        )
+        if season_stats.empty
+        else season_stats.rename(
+            columns={
+                "GP": "SEASON_GP",
+                "MIN": "SEASON_MIN",
+                "PTS": "SEASON_PTS",
+                "REB": "SEASON_REB",
+                "AST": "SEASON_AST",
+                "FG3M": "SEASON_3PM",
+                "FGA": "SEASON_FGA",
+                "FG3A": "SEASON_3PA",
+            }
+        )
+    )
+    last5_view = (
+        pd.DataFrame(
+            columns=[
+                "PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB",
+                "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA",
+            ]
+        )
+        if last5_stats.empty
+        else last5_stats.rename(
+            columns={
+                "GP": "L5_GP",
+                "MIN": "L5_MIN",
+                "PTS": "L5_PTS",
+                "REB": "L5_REB",
+                "AST": "L5_AST",
+                "FG3M": "L5_3PM",
+                "FGA": "L5_FGA",
+                "FG3A": "L5_3PA",
+            }
+        )
+    )
+    last10_view = (
+        pd.DataFrame(
+            columns=[
+                "PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB",
+                "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA",
+            ]
+        )
+        if last10_stats.empty
+        else last10_stats.rename(
+            columns={
+                "GP": "L10_GP",
+                "MIN": "L10_MIN",
+                "PTS": "L10_PTS",
+                "REB": "L10_REB",
+                "AST": "L10_AST",
+                "FG3M": "L10_3PM",
+                "FGA": "L10_FGA",
+                "FG3A": "L10_3PA",
+            }
+        )
+    )
 
-    team_df = roster.merge(season_view[["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]], on="PLAYER_ID", how="left").merge(last5_view[["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA"]], on="PLAYER_ID", how="left").merge(last10_view[["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"]], on="PLAYER_ID", how="left")
+    team_df = (
+        roster
+        .merge(
+            season_view[
+                [
+                    "PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS",
+                    "SEASON_REB", "SEASON_AST", "SEASON_3PM",
+                    "SEASON_FGA", "SEASON_3PA",
+                ]
+            ],
+            on="PLAYER_ID",
+            how="left",
+        )
+        .merge(
+            last5_view[
+                [
+                    "PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB",
+                    "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA",
+                ]
+            ],
+            on="PLAYER_ID",
+            how="left",
+        )
+        .merge(
+            last10_view[
+                [
+                    "PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS",
+                    "L10_REB", "L10_AST", "L10_3PM", "L10_FGA",
+                    "L10_3PA",
+                ]
+            ],
+            on="PLAYER_ID",
+            how="left",
+        )
+    )
 
-    numeric_cols = ["SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"]
+    numeric_cols = [
+        "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB",
+        "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA",
+        "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM",
+        "L5_FGA", "L5_3PA", "L10_GP", "L10_MIN", "L10_PTS",
+        "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA",
+    ]
     for col in numeric_cols:
-        if col not in team_df.columns: team_df[col] = 0.0
+        if col not in team_df.columns:
+            team_df[col] = 0.0
         team_df[col] = pd.to_numeric(team_df[col], errors="coerce").fillna(0.0)
 
-    team_df["SEASON_PRA"] = team_df["SEASON_PTS"] + team_df["SEASON_REB"] + team_df["SEASON_AST"]
+    team_df["SEASON_PRA"] = (
+        team_df["SEASON_PTS"] + team_df["SEASON_REB"] + team_df["SEASON_AST"]
+    )
     team_df["L5_PRA"] = team_df["L5_PTS"] + team_df["L5_REB"] + team_df["L5_AST"]
-    team_df["L10_PRA"] = team_df["L10_PTS"] + team_df["L10_REB"] + team_df["L10_AST"]
+    team_df["L10_PRA"] = (
+        team_df["L10_PTS"] + team_df["L10_REB"] + team_df["L10_AST"]
+    )
     team_df["DELTA_PRA_L5"] = team_df["L5_PRA"] - team_df["SEASON_PRA"]
     team_df["DELTA_PRA_L10"] = team_df["L10_PRA"] - team_df["SEASON_PRA"]
 
@@ -1443,11 +1514,25 @@ def build_team_table(
             team_df["PLAYER_ID"].isin(starter_ids),
             "ROLE",
         ] = "Estimativa por minutos"
+
     team_df["LINEUP_STATUS"] = team_df["ROLE"]
     team_df["LINEUP_SOURCE"] = "Modelo interno"
     team_df["PROJECTED_MINUTES_EXTERNAL"] = np.nan
+    team_df["DATA_SOURCE"] = "ESPN"
 
-    return team_df[["PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP", "ROLE", "LINEUP_STATUS", "LINEUP_SOURCE", "PROJECTED_MINUTES_EXTERNAL", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB", "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM", "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA", "SEASON_3PA", "L5_3PA", "L10_3PA", "SEASON_PRA", "L5_PRA", "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND"]].copy()
+    return team_df[
+        [
+            "PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP",
+            "ROLE", "LINEUP_STATUS", "LINEUP_SOURCE",
+            "PROJECTED_MINUTES_EXTERNAL", "SEASON_GP", "SEASON_MIN",
+            "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB",
+            "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM",
+            "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA",
+            "SEASON_3PA", "L5_3PA", "L10_3PA", "SEASON_PRA", "L5_PRA",
+            "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND",
+            "DATA_SOURCE",
+        ]
+    ].copy()
 
 def merge_daily_lineups(
     team_df: pd.DataFrame,
@@ -1571,13 +1656,11 @@ def get_matchup_context(
         roster_season=roster_season,
     )
 
-    report("Consultando lineups e rotação do dia...")
+    report("Preparando rotação do dia...")
+    # NBA Daily Lineups is also hosted under stats.nba.com and is not reliable
+    # from Streamlit Cloud. Keep internal rotation until ESPN lineup/depth-chart
+    # handling is connected in a later phase.
     lineups_df = pd.DataFrame()
-    if target_date is not None:
-        try:
-            lineups_df = get_daily_lineups(target_date)
-        except Exception:
-            lineups_df = pd.DataFrame()
 
     away_df = merge_daily_lineups(away_df, lineups_df, away_team_id)
     home_df = merge_daily_lineups(home_df, lineups_df, home_team_id)
