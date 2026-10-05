@@ -10,6 +10,7 @@ class EspnScheduleParsingTests(unittest.TestCase):
             "events": [
                 {
                     "id": "401999999",
+                    "date": "2026-10-20T23:30:00Z",
                     "status": {
                         "type": {
                             "shortDetail": "7:30 PM ET"
@@ -47,6 +48,9 @@ class EspnScheduleParsingTests(unittest.TestCase):
         self.assertGreater(int(result.iloc[0]["VISITOR_TEAM_ID"]), 0)
         self.assertGreater(int(result.iloc[0]["HOME_TEAM_ID"]), 0)
         self.assertIn("Boston Celtics @ New York Knicks", result.iloc[0]["label"])
+        self.assertIn("20:30 BRT", result.iloc[0]["label"])
+        self.assertEqual(result.iloc[0]["GAME_DATE_BRT"], "20/10/2026")
+        self.assertEqual(result.iloc[0]["GAME_TIME_BRT"], "20:30 BRT")
 
     def test_returns_empty_frame_for_empty_schedule(self):
         result = _games_from_espn_payload({"events": []})
@@ -54,22 +58,27 @@ class EspnScheduleParsingTests(unittest.TestCase):
         self.assertTrue(result.empty)
         self.assertIn("GAME_ID", result.columns)
 
-    def test_monthly_payload_keeps_all_opening_night_games_on_eastern_date(self):
+    def test_monthly_payload_groups_games_by_brasilia_calendar_date(self):
         payload = {
             "events": [
-                {"id": "bos-det", "date": "2026-10-20T19:00:00Z"},
-                {"id": "phi-nyk", "date": "2026-10-20T23:00:00Z"},
-                # 9:30 PM ET is already Oct. 21 in UTC, but still belongs to Oct. 20 NBA schedule.
+                {"id": "bos-det", "date": "2026-10-20T23:00:00Z"},
                 {"id": "okc-sas", "date": "2026-10-21T01:30:00Z"},
+                # 03:30 UTC is 00:30 in Brasilia, so this belongs to Oct. 21 locally.
+                {"id": "late-west", "date": "2026-10-21T03:30:00Z"},
                 {"id": "atl-orl", "date": "2026-10-21T23:00:00Z"},
             ]
         }
 
-        result = _filter_espn_events_for_date(payload, date(2026, 10, 20))
+        oct20 = _filter_espn_events_for_date(payload, date(2026, 10, 20))
+        oct21 = _filter_espn_events_for_date(payload, date(2026, 10, 21))
 
         self.assertEqual(
-            [event["id"] for event in result["events"]],
-            ["bos-det", "phi-nyk", "okc-sas"],
+            [event["id"] for event in oct20["events"]],
+            ["bos-det", "okc-sas"],
+        )
+        self.assertEqual(
+            [event["id"] for event in oct21["events"]],
+            ["late-west", "atl-orl"],
         )
 
 
