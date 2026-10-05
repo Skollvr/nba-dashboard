@@ -196,6 +196,7 @@ def get_espn_injuries_standard(
         }
 
     entries: list[dict[str, Any]] = []
+    successful_team_ids: set[int] = set()
 
     if team_ids:
         for official_id in team_ids:
@@ -207,6 +208,7 @@ def get_espn_injuries_standard(
             except Exception:
                 continue
 
+            successful_team_ids.add(int(official_id))
             for entry in payload.get("injuries") or []:
                 if not isinstance(entry, dict):
                     continue
@@ -294,6 +296,22 @@ def get_espn_injuries_standard(
             "INJ_REASON": str(reason or ""),
             "INJ_REPORT_URL": "",
             "INJ_SOURCE": "ESPN",
+            "QUERY_OK": True,
+        })
+
+    # Sentinel rows distinguish "query succeeded and no injuries" from a failed
+    # request, so the processing layer never marks a failed team as Available.
+    for official_id in sorted(successful_team_ids):
+        rows.append({
+            "PLAYER_ID_IR": None,
+            "PLAYER_KEY_IR": "",
+            "PLAYER_NAME_IR": "",
+            "TEAM_ID_IR": int(official_id),
+            "INJ_STATUS": "",
+            "INJ_REASON": "",
+            "INJ_REPORT_URL": "",
+            "INJ_SOURCE": "ESPN",
+            "QUERY_OK": True,
         })
 
     return pd.DataFrame(rows)
