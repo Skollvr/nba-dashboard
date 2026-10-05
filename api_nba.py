@@ -13,7 +13,7 @@ from nba_api.stats.endpoints import (
 )
 
 # Puxando a configuração que salvamos no passo anterior!
-from config import TEAM_LOOKUP
+from config import APP_TIMEZONE, TEAM_LOOKUP
 from api_espn import get_espn_player_log
 
 # ==========================================
@@ -62,6 +62,9 @@ def _empty_games_df() -> pd.DataFrame:
             "HOME_TEAM_ID",
             "VISITOR_TEAM_ID",
             "GAME_STATUS_TEXT",
+            "GAME_DATETIME_BRT",
+            "GAME_DATE_BRT",
+            "GAME_TIME_BRT",
             "HOME_TEAM_ABBR",
             "VISITOR_TEAM_ABBR",
             "home_team_name",
@@ -261,8 +264,8 @@ def _nba_team_from_espn(competitor: dict) -> tuple[int, str, str]:
     return team_id, team_name, abbr
 
 
-def _espn_event_nba_date(event: dict):
-    """Return ESPN event date in the NBA's Eastern-time calendar day."""
+def _espn_event_brasilia_datetime(event: dict):
+    """Return ESPN event timestamp converted from UTC to Brasilia time."""
     raw_date = event.get("date")
     if not raw_date:
         competitions = event.get("competitions", []) or []
@@ -277,13 +280,13 @@ def _espn_event_nba_date(event: dict):
         return None
 
     try:
-        return timestamp.tz_convert("America/New_York").date()
+        return timestamp.tz_convert(APP_TIMEZONE)
     except Exception:
-        return timestamp.date()
+        return None
 
 
 def _filter_espn_events_for_date(payload: dict, target_date) -> dict:
-    """Filter a monthly ESPN scoreboard payload to one NBA calendar date."""
+    """Filter a monthly ESPN scoreboard payload by the Brasilia calendar date."""
     events = payload.get("events", [])
     if not isinstance(events, list):
         raise RuntimeError("A agenda alternativa retornou um formato inesperado.")
@@ -293,10 +296,10 @@ def _filter_espn_events_for_date(payload: dict, target_date) -> dict:
         if not isinstance(event, dict):
             continue
 
-        event_date = _espn_event_nba_date(event)
-        if event_date is None:
+        brasilia_dt = _espn_event_brasilia_datetime(event)
+        if brasilia_dt is None:
             continue
-        if event_date == target_date:
+        if brasilia_dt.date() == target_date:
             filtered_events.append(event)
 
     filtered_payload = dict(payload)
@@ -307,15 +310,15 @@ def _filter_espn_events_for_date(payload: dict, target_date) -> dict:
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_espn_games_for_date(target_date) -> dict:
     """
-    Busca a agenda ESPN pelo mês e depois filtra pelo dia NBA em Eastern Time.
+    Busca a agenda ESPN pelo mês e filtra pelo dia local de Brasilia.
 
-    O endpoint diário da ESPN pode agrupar um jogo noturno no dia UTC seguinte.
-    A consulta mensal evita perder esses jogos; limit alto evita truncamento.
+    O timestamp da ESPN vem em UTC. A consulta mensal evita perder jogos que,
+    por causa do fuso, pertencem a outro dia no Brasil; limit alto evita truncamento.
     """
     params = {
         "dates": target_date.strftime("%Y%m"),
         "limit": 1000,
-        "tz": "America/New_York",
+        "tz": "America/Sao_Paulo",
     }
     headers = {
         "User-Agent": (
@@ -344,17 +347,7 @@ def fetch_espn_games_for_date(target_date) -> dict:
 
 
 def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
-    columns = [
-        "GAME_ID",
-        "HOME_TEAM_ID",
-        "VISITOR_TEAM_ID",
-        "GAME_STATUS_TEXT",
-        "HOME_TEAM_ABBR",
-        "VISITOR_TEAM_ABBR",
-        "home_team_name",
-        "away_team_name",
-        "label",
-    ]
+    columns = list(_empty_games_df().columns)
 
     rows = []
 
@@ -394,16 +387,31 @@ def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
             or "Agendado"
         )
 
+        brasilia_dt = _espn_event_brasilia_datetime(event)
+        if brasilia_dt is not None:
+            game_datetime_brt = brasilia_dt.isoformat()
+            game_date_brt = brasilia_dt.strftime("%d/%m/%Y")
+            game_time_brt = brasilia_dt.strftime("%H:%M BRT")
+            display_status = game_time_brt
+        else:
+            game_datetime_brt = ""
+            game_date_brt = ""
+            game_time_brt = ""
+            display_status = str(game_status_text)
+
         rows.append({
             "GAME_ID": str(event.get("id", "")),
             "HOME_TEAM_ID": home_team_id,
             "VISITOR_TEAM_ID": away_team_id,
             "GAME_STATUS_TEXT": str(game_status_text),
+            "GAME_DATETIME_BRT": game_datetime_brt,
+            "GAME_DATE_BRT": game_date_brt,
+            "GAME_TIME_BRT": game_time_brt,
             "HOME_TEAM_ABBR": home_abbr,
             "VISITOR_TEAM_ABBR": away_abbr,
             "home_team_name": home_team_name,
             "away_team_name": away_team_name,
-            "label": f"{away_team_name} @ {home_team_name} • {game_status_text}",
+            "label": f"{away_team_name} @ {home_team_name} • {display_status}",
         })
 
     return pd.DataFrame(rows, columns=columns)
