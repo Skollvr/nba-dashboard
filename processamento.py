@@ -28,17 +28,11 @@ from espn_context import (
     get_espn_team_defense_percentiles,
     get_espn_team_rotation,
 )
-from api_lineups import get_daily_lineups
 
 # 3. API de Odds
 from api_odds import (
     normalize_text, normalize_person_name, fetch_nba_odds_events,
     find_matching_odds_event, extract_betmgm_player_props
-)
-
-# 4. Leitor de PDF (Lesões)
-from pdf_reader import (
-    fetch_latest_injury_report_df, parse_injury_report_timestamp_from_url
 )
 
 # ---------------------------------------------------------
@@ -1851,26 +1845,48 @@ def merge_injury_report(
     return enriched
 
 
-@st.cache_data(ttl=36000, show_spinner=False)
-def get_matchup_injury_context(away_team_id: int, home_team_id: int, away_team_name: str, home_team_name: str, away_df: pd.DataFrame, home_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+@st.cache_data(ttl=300, show_spinner=False)
+def get_matchup_injury_context(
+    away_team_id: int,
+    home_team_id: int,
+    away_team_name: str,
+    home_team_name: str,
+    away_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Compatibility helper now backed by ESPN instead of the NBA PDF."""
     try:
-        injury_df = fetch_latest_injury_report_df()
+        injury_df = get_espn_injuries_standard(
+            (int(away_team_id), int(home_team_id))
+        )
     except Exception:
         injury_df = pd.DataFrame()
 
-    injury_report_url = ""
-    if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
-        valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
-        valid_urls = valid_urls[valid_urls.str.strip() != ""]
-        if not valid_urls.empty: injury_report_url = valid_urls.iloc[0]
+    game_matchup = (
+        f"{TEAM_ABBR_LOOKUP[int(away_team_id)]}@"
+        f"{TEAM_ABBR_LOOKUP[int(home_team_id)]}"
+    )
+    away_injury_df = merge_injury_report(
+        away_df,
+        injury_df,
+        away_team_name,
+        away_team_id,
+        game_matchup=game_matchup,
+    )
+    home_injury_df = merge_injury_report(
+        home_df,
+        injury_df,
+        home_team_name,
+        home_team_id,
+        game_matchup=game_matchup,
+    )
 
-    injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
-    game_matchup = f"{TEAM_ABBR_LOOKUP[int(away_team_id)]}@{TEAM_ABBR_LOOKUP[int(home_team_id)]}"
+    return away_injury_df, home_injury_df, {
+        "source": "ESPN",
+        "report_label_et": "ESPN",
+        "report_label_brt": "ESPN",
+    }
 
-    away_injury_df = merge_injury_report(away_df, injury_df, away_team_name, away_team_id, game_matchup=game_matchup)
-    home_injury_df = merge_injury_report(home_df, injury_df, home_team_name, home_team_id, game_matchup=game_matchup)
-
-    return away_injury_df, home_injury_df, injury_report_meta
 
 # ---------------------------------------------------------
 # 5. FUNÇÕES DE FILTRO E VISUALIZAÇÃO DE TABELAS
