@@ -14,6 +14,7 @@ from nba_api.stats.endpoints import (
 
 # Puxando a configuração que salvamos no passo anterior!
 from config import TEAM_LOOKUP
+from api_espn import get_espn_player_log
 
 # ==========================================
 # 1. FUNÇÃO MESTRE DE TENTATIVAS (RETRY)
@@ -363,59 +364,42 @@ def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date) -> pd.DataFrame:
     """
-    Busca os jogos da data selecionada usando três fontes.
+    ESPN-first schedule lookup for cloud reliability.
 
-    Ordem de prioridade:
-    1. calendário oficial da temporada no CDN da NBA;
-    2. ScoreboardV2 da NBA;
-    3. ESPN como fallback complementar.
-
-    As fontes são combinadas e os jogos duplicados são removidos pelo par
-    visitante/casa. Assim, uma agenda parcial de uma fonte não apaga jogos
-    encontrados por outra.
+    Streamlit Cloud is blocked by both stats.nba.com and cdn.nba.com in our
+    tests, so ESPN is now the primary source. NBA sources remain local fallbacks
+    if ESPN is temporarily unavailable.
     """
-    cdn_games = _empty_games_df()
-    nba_games = _empty_games_df()
-    espn_games = _empty_games_df()
+    espn_error = None
+    try:
+        espn_payload = fetch_espn_games_for_date(target_date)
+        espn_games = _games_from_espn_payload(espn_payload)
+        if espn_games is not None and not espn_games.empty:
+            return espn_games.reset_index(drop=True)
+    except Exception as exc:
+        espn_error = exc
 
     cdn_error = None
     nba_error = None
-    espn_error = None
 
     try:
         cdn_payload = fetch_nba_cdn_schedule()
         cdn_games = _games_from_nba_cdn_payload(cdn_payload, target_date)
+        if cdn_games is not None and not cdn_games.empty:
+            return cdn_games.reset_index(drop=True)
     except Exception as exc:
         cdn_error = exc
 
     try:
         nba_games = fetch_nba_scoreboard_v2_once(target_date)
+        if nba_games is not None and not nba_games.empty:
+            return nba_games.reset_index(drop=True)
     except Exception as exc:
         nba_error = exc
 
-    try:
-        espn_payload = fetch_espn_games_for_date(target_date)
-        espn_games = _games_from_espn_payload(espn_payload)
-    except Exception as exc:
-        espn_error = exc
-
-    frames = [
-        df
-        for df in [cdn_games, nba_games, espn_games]
-        if df is not None and not df.empty
-    ]
-
-    if frames:
-        combined = pd.concat(frames, ignore_index=True)
-        combined = combined.drop_duplicates(
-            subset=["VISITOR_TEAM_ID", "HOME_TEAM_ID"],
-            keep="first",
-        ).reset_index(drop=True)
-        return combined
-
-    if cdn_error is not None and nba_error is not None and espn_error is not None:
+    if espn_error is not None and cdn_error is not None and nba_error is not None:
         raise RuntimeError(
-            "Não foi possível consultar a agenda: NBA CDN, ScoreboardV2 e ESPN falharam."
+            "Não foi possível consultar a agenda pela ESPN nem pelos fallbacks da NBA."
         ) from espn_error
 
     return _empty_games_df()
@@ -598,38 +582,51 @@ def get_player_log(
     season: str,
     season_scope: str = "All",
 ) -> pd.DataFrame:
-    season_types = get_season_types_for_scope(season_scope)
-    all_logs = []
+    try:
+        espn_log = get_espn_player_log(
+            player_id,
+            season,
+            season_scope=season_scope,
+        )
+        if espn_log is not None and not espn_log.empty:
+            return espn_log
+    except Exception:
+        pass
 
-    for stype in season_types:
-        try:
-            response = run_api_call_with_retry(
-                lambda st=stype: playergamelog.PlayerGameLog(
-                    player_id=player_id,
-                    season=season,
-                    season_type_all_star=st,
-                    timeout=15,
-                ),
-                endpoint_name=f"PlayerGameLog_{stype}",
-            )
+    # Local fallback: preserve the previous NBA Stats implementation when ESPN
+    # is unavailable and stats.nba.com happens to be reachable.
+season_types = get_season_types_for_scope(season_scope)
+        all_logs = []
 
-            frames = response.get_data_frames()
+        for stype in season_types:
+            try:
+                response = run_api_call_with_retry(
+                    lambda st=stype: playergamelog.PlayerGameLog(
+                        player_id=player_id,
+                        season=season,
+                        season_type_all_star=st,
+                        timeout=15,
+                    ),
+                    endpoint_name=f"PlayerGameLog_{stype}",
+                )
 
-            if frames and not frames[0].empty:
-                temp_df = frames[0].copy()
-                temp_df["SEASON_SCOPE"] = stype
-                all_logs.append(temp_df)
+                frames = response.get_data_frames()
 
-        except Exception:
-            continue
+                if frames and not frames[0].empty:
+                    temp_df = frames[0].copy()
+                    temp_df["SEASON_SCOPE"] = stype
+                    all_logs.append(temp_df)
 
-    if not all_logs:
-        return pd.DataFrame()
+            except Exception:
+                continue
 
-    df = pd.concat(all_logs, ignore_index=True)
-    df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
+        if not all_logs:
+            return pd.DataFrame()
 
-    return df.sort_values("GAME_DATE", ascending=False)
+        df = pd.concat(all_logs, ignore_index=True)
+        df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
+
+        return df.sort_values("GAME_DATE", ascending=False)
 
 @st.cache_data(ttl=54000, show_spinner=False)
 def get_team_player_logs(
