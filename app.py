@@ -330,6 +330,45 @@ def main():
                 "o app manteve a estimativa interna por minutos."
             )
 
+    defense_diag_df = pd.concat(
+        [df for df in [away_df, home_df] if df is not None and not df.empty],
+        ignore_index=True,
+    )
+    if not defense_diag_df.empty:
+        def_sources = defense_diag_df.get(
+            "DEFENSE_SOURCE",
+            pd.Series([""] * len(defense_diag_df)),
+        ).fillna("").astype(str)
+        def_samples = pd.to_numeric(
+            defense_diag_df.get(
+                "OPP_DEF_SAMPLE_GP",
+                pd.Series([0] * len(defense_diag_df)),
+            ),
+            errors="coerce",
+        ).fillna(0)
+        team_counts = pd.to_numeric(
+            defense_diag_df.get(
+                "TEAM_DEF_TEAM_COUNT",
+                pd.Series([0] * len(defense_diag_df)),
+            ),
+            errors="coerce",
+        ).fillna(0)
+
+        if def_samples.max() > 0:
+            source_label = next(
+                (value for value in def_sources.tolist() if value and "indisponível" not in value),
+                "ESPN",
+            )
+            st.caption(
+                f"Defesa ESPN ativa • {int(team_counts.max()) or 30} times no ranking • "
+                f"amostra do adversário: até {int(def_samples.max())} jogos • {source_label}."
+            )
+        else:
+            st.warning(
+                "O contexto defensivo ESPN não formou amostra para este confronto; "
+                "matchup defensivo permanece neutro nesta execução."
+            )
+
     # Linhas manuais são individuais por jogador. Isso evita comparar todo o
     # roster contra uma única linha global. Se BetMGM estiver ativo e houver
     # linha de mercado para o jogador, ela continua tendo prioridade.
