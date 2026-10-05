@@ -1,4 +1,5 @@
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 import pandas as pd
 import requests
@@ -15,7 +16,7 @@ from nba_api.stats.endpoints import (
 
 # Puxando a configuração que salvamos no passo anterior!
 from config import APP_TIMEZONE, TEAM_LOOKUP
-from api_espn import get_espn_player_log
+from api_espn import get_espn_player_log, get_espn_team_schedule
 
 # ==========================================
 # 1. FUNÇÃO MESTRE DE TENTATIVAS (RETRY)
@@ -459,6 +460,176 @@ def _games_from_espn_payload(payload: dict) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
+def _season_string_for_date(target_date) -> str:
+    if target_date.month >= 10:
+        start_year = target_date.year
+        end_year = str(target_date.year + 1)[-2:]
+    else:
+        start_year = target_date.year - 1
+        end_year = str(target_date.year)[-2:]
+    return f"{start_year}-{end_year}"
+
+
+def _games_from_espn_team_schedule_frames(
+    schedule_frames: dict[int, pd.DataFrame],
+    target_date,
+) -> pd.DataFrame:
+    """
+    Build one daily league schedule from per-team ESPN schedules.
+
+    Each NBA game appears in two team schedules. GAME_ID deduplication collapses
+    those duplicates after converting the ESPN UTC timestamp to Brasilia time.
+    """
+    rows = []
+    seen_game_ids = set()
+
+    for schedule in schedule_frames.values():
+        if schedule is None or schedule.empty:
+            continue
+
+        for _, item in schedule.iterrows():
+            game_id = str(item.get("GAME_ID") or "").strip()
+            if not game_id or game_id in seen_game_ids:
+                continue
+
+            game_dt = pd.to_datetime(item.get("GAME_DATE"), errors="coerce", utc=True)
+            if pd.isna(game_dt):
+                continue
+
+            try:
+                brasilia_dt = game_dt.tz_convert(APP_TIMEZONE)
+            except Exception:
+                continue
+
+            if brasilia_dt.date() != target_date:
+                continue
+
+            team_id = pd.to_numeric(item.get("TEAM_ID"), errors="coerce")
+            opponent_id = pd.to_numeric(item.get("OPPONENT_TEAM_ID"), errors="coerce")
+            if pd.isna(team_id) or pd.isna(opponent_id):
+                continue
+
+            team_id = int(team_id)
+            opponent_id = int(opponent_id)
+            home_away = str(item.get("HOME_AWAY") or "").strip().lower()
+
+            if home_away == "home":
+                home_team_id = team_id
+                away_team_id = opponent_id
+            elif home_away == "away":
+                home_team_id = opponent_id
+                away_team_id = team_id
+            else:
+                continue
+
+            home_meta = TEAM_LOOKUP.get(home_team_id, {}) or {}
+            away_meta = TEAM_LOOKUP.get(away_team_id, {}) or {}
+            home_name = str(home_meta.get("full_name") or home_team_id)
+            away_name = str(away_meta.get("full_name") or away_team_id)
+            home_abbr = str(home_meta.get("abbreviation") or "")
+            away_abbr = str(away_meta.get("abbreviation") or "")
+
+            game_time_brt = brasilia_dt.strftime("%H:%M BRT")
+            completed = bool(item.get("COMPLETED"))
+            status_text = "Final" if completed else "Agendado"
+
+            rows.append({
+                "GAME_ID": game_id,
+                "HOME_TEAM_ID": home_team_id,
+                "VISITOR_TEAM_ID": away_team_id,
+                "GAME_STATUS_TEXT": status_text,
+                "GAME_DATETIME_BRT": brasilia_dt.isoformat(),
+                "GAME_DATE_BRT": brasilia_dt.strftime("%d/%m/%Y"),
+                "GAME_TIME_BRT": game_time_brt,
+                "HOME_TEAM_ABBR": home_abbr,
+                "VISITOR_TEAM_ABBR": away_abbr,
+                "home_team_name": home_name,
+                "away_team_name": away_name,
+                "label": f"{away_name} @ {home_name} • {game_time_brt}",
+            })
+            seen_game_ids.add(game_id)
+
+    if not rows:
+        return _empty_games_df()
+
+    result = pd.DataFrame(rows, columns=_empty_games_df().columns)
+    return result.sort_values(
+        by=["GAME_DATETIME_BRT", "GAME_ID"],
+        ascending=[True, True],
+    ).reset_index(drop=True)
+
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_espn_league_schedule_for_date(target_date) -> pd.DataFrame:
+    """
+    Reconstruct the day's full NBA slate from all 30 ESPN team schedules.
+
+    ESPN's future scoreboard can be partial. Team schedules are independently
+    published and have proved more complete, so they supplement the scoreboard.
+    """
+    season = _season_string_for_date(target_date)
+    team_ids = [int(team_id) for team_id in TEAM_LOOKUP.keys()]
+    schedule_frames: dict[int, pd.DataFrame] = {}
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        future_map = {
+            pool.submit(
+                get_espn_team_schedule,
+                team_id,
+                season,
+                "Regular Season",
+            ): team_id
+            for team_id in team_ids
+        }
+        for future in as_completed(future_map):
+            team_id = future_map[future]
+            try:
+                schedule_frames[team_id] = future.result()
+            except Exception:
+                schedule_frames[team_id] = pd.DataFrame()
+
+    return _games_from_espn_team_schedule_frames(schedule_frames, target_date)
+
+
+def _merge_game_frames(*frames: pd.DataFrame) -> pd.DataFrame:
+    valid = [frame.copy() for frame in frames if frame is not None and not frame.empty]
+    if not valid:
+        return _empty_games_df()
+
+    combined = pd.concat(valid, ignore_index=True, sort=False)
+    for col in _empty_games_df().columns:
+        if col not in combined.columns:
+            combined[col] = ""
+
+    game_ids = combined["GAME_ID"].fillna("").astype(str).str.strip()
+    combined["_DEDUP_KEY"] = game_ids
+    missing_id = combined["_DEDUP_KEY"].eq("")
+    combined.loc[missing_id, "_DEDUP_KEY"] = (
+        combined.loc[missing_id, "VISITOR_TEAM_ID"].astype(str)
+        + "@"
+        + combined.loc[missing_id, "HOME_TEAM_ID"].astype(str)
+        + "::"
+        + combined.loc[missing_id, "GAME_DATE_BRT"].astype(str)
+    )
+
+    combined = combined.drop_duplicates(subset=["_DEDUP_KEY"], keep="first")
+    combined = combined.drop(columns=["_DEDUP_KEY"])
+
+    if "GAME_DATETIME_BRT" in combined.columns:
+        combined["_SORT_DT"] = pd.to_datetime(
+            combined["GAME_DATETIME_BRT"],
+            errors="coerce",
+            utc=True,
+        )
+        combined = combined.sort_values(
+            by=["_SORT_DT", "label"],
+            ascending=[True, True],
+            na_position="last",
+        ).drop(columns=["_SORT_DT"])
+
+    return combined[_empty_games_df().columns].reset_index(drop=True)
+
+
 @st.cache_data(ttl=1800, show_spinner=False)
 def get_games_for_date(target_date) -> pd.DataFrame:
     """
@@ -468,14 +639,28 @@ def get_games_for_date(target_date) -> pd.DataFrame:
     tests, so ESPN is now the primary source. NBA sources remain local fallbacks
     if ESPN is temporarily unavailable.
     """
-    espn_error = None
+    espn_scoreboard_error = None
+    espn_team_schedule_error = None
+    espn_scoreboard_games = _empty_games_df()
+    espn_team_schedule_games = _empty_games_df()
+
     try:
         espn_payload = fetch_espn_games_for_date(target_date)
-        espn_games = _games_from_espn_payload(espn_payload)
-        if espn_games is not None and not espn_games.empty:
-            return espn_games.reset_index(drop=True)
+        espn_scoreboard_games = _games_from_espn_payload(espn_payload)
     except Exception as exc:
-        espn_error = exc
+        espn_scoreboard_error = exc
+
+    try:
+        espn_team_schedule_games = fetch_espn_league_schedule_for_date(target_date)
+    except Exception as exc:
+        espn_team_schedule_error = exc
+
+    espn_games = _merge_game_frames(
+        espn_scoreboard_games,
+        espn_team_schedule_games,
+    )
+    if espn_games is not None and not espn_games.empty:
+        return espn_games.reset_index(drop=True)
 
     cdn_error = None
     nba_error = None
@@ -495,10 +680,15 @@ def get_games_for_date(target_date) -> pd.DataFrame:
     except Exception as exc:
         nba_error = exc
 
-    if espn_error is not None and cdn_error is not None and nba_error is not None:
+    if (
+        espn_scoreboard_error is not None
+        and espn_team_schedule_error is not None
+        and cdn_error is not None
+        and nba_error is not None
+    ):
         raise RuntimeError(
             "Não foi possível consultar a agenda pela ESPN nem pelos fallbacks da NBA."
-        ) from espn_error
+        ) from espn_scoreboard_error
 
     return _empty_games_df()
 
@@ -538,6 +728,7 @@ def clear_schedule_cache() -> None:
         fetch_nba_scoreboard_v2_once,
         fetch_nba_cdn_schedule,
         fetch_espn_games_for_date,
+        fetch_espn_league_schedule_for_date,
         get_games_for_date,
     ]:
         try:
