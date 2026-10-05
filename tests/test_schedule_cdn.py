@@ -1,9 +1,12 @@
 import unittest
 from datetime import date
 
+import pandas as pd
+
 from api_nba import (
     _filter_espn_events_for_date,
     _games_from_espn_payload,
+    _games_from_espn_team_schedule_frames,
     _merge_espn_scoreboard_payloads,
 )
 
@@ -111,6 +114,65 @@ class EspnScheduleParsingTests(unittest.TestCase):
         self.assertEqual(
             [event["id"] for event in oct21["events"]],
             ["game-d"],
+        )
+
+    def test_team_schedules_reconstruct_three_opening_night_games(self):
+        frames = {
+            1610612738: pd.DataFrame([
+                {
+                    "GAME_ID": "bos-det",
+                    "GAME_DATE": "2026-10-20T19:00:00Z",
+                    "TEAM_ID": 1610612738,
+                    "OPPONENT_TEAM_ID": 1610612765,
+                    "HOME_AWAY": "away",
+                    "COMPLETED": False,
+                }
+            ]),
+            1610612755: pd.DataFrame([
+                {
+                    "GAME_ID": "phi-nyk",
+                    "GAME_DATE": "2026-10-20T23:00:00Z",
+                    "TEAM_ID": 1610612755,
+                    "OPPONENT_TEAM_ID": 1610612752,
+                    "HOME_AWAY": "away",
+                    "COMPLETED": False,
+                }
+            ]),
+            1610612760: pd.DataFrame([
+                {
+                    "GAME_ID": "okc-sas",
+                    "GAME_DATE": "2026-10-21T01:30:00Z",
+                    "TEAM_ID": 1610612760,
+                    "OPPONENT_TEAM_ID": 1610612759,
+                    "HOME_AWAY": "away",
+                    "COMPLETED": False,
+                }
+            ]),
+            1610612765: pd.DataFrame([
+                {
+                    "GAME_ID": "bos-det",
+                    "GAME_DATE": "2026-10-20T19:00:00Z",
+                    "TEAM_ID": 1610612765,
+                    "OPPONENT_TEAM_ID": 1610612738,
+                    "HOME_AWAY": "home",
+                    "COMPLETED": False,
+                }
+            ]),
+        }
+
+        result = _games_from_espn_team_schedule_frames(
+            frames,
+            date(2026, 10, 20),
+        )
+
+        self.assertEqual(len(result), 3)
+        self.assertEqual(
+            result["GAME_ID"].tolist(),
+            ["bos-det", "phi-nyk", "okc-sas"],
+        )
+        self.assertEqual(
+            result["GAME_TIME_BRT"].tolist(),
+            ["16:00 BRT", "20:00 BRT", "22:30 BRT"],
         )
 
 
