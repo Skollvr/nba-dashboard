@@ -10,12 +10,7 @@ from config import (
     INACTIVE_STATUSES, ODDS_METRIC_COLUMNS, ODDS_BOOKMAKER, ODDS_STAT_MAP
 )
 
-# 2. API da NBA
-from api_nba import (
-    get_team_roster, get_league_player_stats, get_team_player_logs,
-    get_league_player_logs, get_position_allowed_profile,
-    get_league_position_baseline, get_team_defense_percentiles
-)
+# 2. Fonte principal de dados: ESPN
 from api_espn import (
     aggregate_espn_player_stats,
     get_espn_team_roster,
