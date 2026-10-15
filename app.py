@@ -44,25 +44,32 @@ def get_previous_season_string(season: str) -> str:
 
 def get_analysis_season(selected_date: date, today: date) -> str:
     """
-    Mantém jogos históricos na própria temporada, mas usa a temporada anterior
-    como base temporária no começo da temporada corrente.
+    Escolhe a temporada estatística sem introduzir informação futura.
 
-    Para a temporada atual, de outubro até 15 de novembro, usamos a temporada
-    anterior como referência estatística enquanto a amostra nova ainda é pequena.
-    A partir de 16 de novembro, o modelo passa a usar a temporada corrente.
+    Regras:
+    - jogos de temporadas históricas usam a própria temporada;
+    - jogos da temporada corrente até 15/11 usam a temporada anterior como
+      referência, mesmo quando revisitados mais tarde;
+    - enquanto a data real ainda estiver no período inicial (até 15/11), jogos
+      futuros da temporada corrente também usam a temporada anterior;
+    - depois disso, datas posteriores a 15/11 usam a temporada corrente.
     """
     game_season = get_season_string(selected_date)
     current_season = get_season_string(today)
 
-    # Jogos históricos continuam usando os dados da própria temporada.
     if game_season != current_season:
         return game_season
 
-    early_season_window = (
+    selected_is_early = (
+        selected_date.month == 10
+        or (selected_date.month == 11 and selected_date.day <= 15)
+    )
+    today_is_early = (
         today.month == 10
         or (today.month == 11 and today.day <= 15)
     )
-    if early_season_window:
+
+    if selected_is_early or today_is_early:
         return get_previous_season_string(game_season)
 
     return game_season
