@@ -2496,8 +2496,9 @@ def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
         </div>
 
         <div class="hero-note">
-            Modelo de teste: 55% defesa relativa entre os times da NBA, 15% recorte por posição
-            e até 30% H2H. O H2H recebe menos peso quando há poucos confrontos.
+            Modelo calibrado: 55% defesa relativa entre os times da NBA, 15% recorte por posição
+            e até 30% H2H. Quando não há H2H confiável, esse peso permanece neutro em vez de
+            ser redistribuído para a defesa.
         </div>
     </div>
     """
