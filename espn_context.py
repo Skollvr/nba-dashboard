@@ -28,6 +28,7 @@ from api_espn import (
     ESPN_BASE,
     OFFICIAL_TEAM_ID_BY_ABBR,
     _espn_team_id_for_official,
+    normalize_espn_team_abbr,
     _request_json,
     get_espn_game_summary,
     get_espn_player_log,
@@ -352,8 +353,9 @@ def _extract_game_rows(payload: dict[str, Any], game_id: str, game_date: Any) ->
     rows: list[dict[str, Any]] = []
     for team_block in (payload.get("boxscore") or {}).get("players") or []:
         team = team_block.get("team") or {}
-        abbr = str(team.get("abbreviation") or "").upper()
-        official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(abbr)
+        espn_abbr = str(team.get("abbreviation") or "").upper()
+        abbr = normalize_espn_team_abbr(espn_abbr)
+        official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(espn_abbr)
         if not official_team_id:
             continue
 
