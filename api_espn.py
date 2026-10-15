@@ -63,6 +63,12 @@ for espn_abbr, nba_abbr in ESPN_TO_NBA_ABBR.items():
         OFFICIAL_TEAM_ID_BY_ABBR[espn_abbr] = official_id
 
 
+def normalize_espn_team_abbr(value: Any) -> str:
+    """Convert ESPN-specific NBA abbreviations to the dashboard's NBA standard."""
+    abbr = str(value or "").upper().strip()
+    return ESPN_TO_NBA_ABBR.get(abbr, abbr)
+
+
 def _request_json(
     url: str,
     *,
@@ -119,8 +125,9 @@ def get_espn_team_directory() -> pd.DataFrame:
     rows = []
     for entry in entries:
         team = (entry or {}).get("team") or entry or {}
-        abbr = str(team.get("abbreviation") or "").upper()
-        official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(abbr)
+        espn_abbr = str(team.get("abbreviation") or "").upper()
+        abbr = normalize_espn_team_abbr(espn_abbr)
+        official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(espn_abbr)
         if not team.get("id") or not abbr or not official_team_id:
             continue
         rows.append(
@@ -249,8 +256,9 @@ def get_espn_team_schedule(
             )
 
         opponent_team = (opponent or {}).get("team") or {}
-        opponent_abbr = str(opponent_team.get("abbreviation") or "").upper()
-        opponent_official_id = OFFICIAL_TEAM_ID_BY_ABBR.get(opponent_abbr)
+        opponent_espn_abbr = str(opponent_team.get("abbreviation") or "").upper()
+        opponent_abbr = normalize_espn_team_abbr(opponent_espn_abbr)
+        opponent_official_id = OFFICIAL_TEAM_ID_BY_ABBR.get(opponent_espn_abbr)
 
         own_home_away = str((own or {}).get("homeAway") or "")
         winner = (own or {}).get("winner")
@@ -320,8 +328,9 @@ def _extract_summary_rows(
 
     for team_block in boxscore.get("players") or []:
         team = team_block.get("team") or {}
-        team_abbr = str(team.get("abbreviation") or "").upper()
-        official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(team_abbr)
+        team_espn_abbr = str(team.get("abbreviation") or "").upper()
+        team_abbr = normalize_espn_team_abbr(team_espn_abbr)
+        official_team_id = OFFICIAL_TEAM_ID_BY_ABBR.get(team_espn_abbr)
         if not official_team_id:
             continue
 
@@ -783,7 +792,7 @@ def _parse_espn_player_gamelog_payload(
 
         opponent = event.get("opponent") or {}
         opp_abbr = (
-            str(opponent.get("abbreviation") or "").upper()
+            normalize_espn_team_abbr(opponent.get("abbreviation"))
             if isinstance(opponent, dict)
             else ""
         )
