@@ -95,3 +95,24 @@ def test_parses_legacy_season_types_and_filters_regular_season():
     assert row["REB"] == 8
     assert row["AST"] == 6
     assert pd.notna(row["GAME_DATE"])
+
+
+def test_normalizes_espn_opponent_alias_for_h2h_matching():
+    payload = {
+        "labels": ["MIN", "FG", "3PT", "FT", "REB", "AST", "STL", "BLK", "PTS"],
+        "events": [
+            {
+                "id": "401000003",
+                "date": "2026-01-10T00:00Z",
+                "opponent": {"abbreviation": "NY"},
+                "gameResult": "W",
+                "homeAway": "away",
+                "stats": ["35", "9-18", "2-6", "4-5", "7", "5", "1", "0", "24"],
+            }
+        ],
+    }
+
+    df = _parse_espn_player_gamelog_payload(payload, 789, "Regular Season")
+
+    assert len(df) == 1
+    assert df.iloc[0]["MATCHUP"] == "@ NYK"
