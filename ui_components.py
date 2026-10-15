@@ -2463,45 +2463,43 @@ def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
         else "Sem amostra"
     )
 
-    return f"""
-    <div class="detail-box">
-        <div class="detail-box-top">
-            <div class="detail-box-title">Leitura do matchup — {metric}</div>
-            <div class="delta-pill-row">
-                <span class="matchup-chip {matchup_class}">Final: {matchup_label}</span>
-            </div>
-        </div>
-
-        <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
-            <div class="detail-mini">
-                <div class="detail-mini-label">Defesa geral NBA</div>
-                <div class="detail-mini-value">{team_def_label}</div>
-                <div class="detail-mini-label">{rank_text} • P{int(round(team_def_pct * 100))}</div>
-            </div>
-            <div class="detail-mini">
-                <div class="detail-mini-label">Recorte vs {row.get('POSITION_GROUP', '-')}</div>
-                <div class="detail-mini-value">{position_label}</div>
-                <div class="detail-mini-label">score {format_signed_number(position_score, 2)}</div>
-            </div>
-            <div class="detail-mini">
-                <div class="detail-mini-label">Histórico H2H</div>
-                <div class="detail-mini-value">{h2h_value}</div>
-                <div class="detail-mini-label">{h2h_label} • score {format_signed_number(h2h_score, 2)}</div>
-            </div>
-            <div class="detail-mini detail-mini-highlight">
-                <div class="detail-mini-label">Efeito na projeção</div>
-                <div class="detail-mini-value">{matchup_effect_pct:+.1f}%</div>
-                <div class="detail-mini-label">score final {format_signed_number(matchup_score, 2)}</div>
-            </div>
-        </div>
-
-        <div class="hero-note">
-            Modelo calibrado: 55% defesa relativa entre os times da NBA, 15% recorte por posição
-            e até 30% H2H. Quando não há H2H confiável, esse peso permanece neutro em vez de
-            ser redistribuído para a defesa.
-        </div>
-    </div>
-    """
+    return (
+        f'<div class="detail-box">'
+        f'<div class="detail-box-top">'
+        f'<div class="detail-box-title">Leitura do matchup — {metric}</div>'
+        f'<div class="delta-pill-row">'
+        f'<span class="matchup-chip {matchup_class}">Final: {matchup_label}</span>'
+        f'</div>'
+        f'</div>'
+        f'<div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">'
+        f'<div class="detail-mini">'
+        f'<div class="detail-mini-label">Defesa geral NBA</div>'
+        f'<div class="detail-mini-value">{team_def_label}</div>'
+        f'<div class="detail-mini-label">{rank_text} • P{int(round(team_def_pct * 100))}</div>'
+        f'</div>'
+        f'<div class="detail-mini">'
+        f'<div class="detail-mini-label">Recorte vs {row.get("POSITION_GROUP", "-")}</div>'
+        f'<div class="detail-mini-value">{position_label}</div>'
+        f'<div class="detail-mini-label">score {format_signed_number(position_score, 2)}</div>'
+        f'</div>'
+        f'<div class="detail-mini">'
+        f'<div class="detail-mini-label">Histórico H2H</div>'
+        f'<div class="detail-mini-value">{h2h_value}</div>'
+        f'<div class="detail-mini-label">{h2h_label} • score {format_signed_number(h2h_score, 2)}</div>'
+        f'</div>'
+        f'<div class="detail-mini detail-mini-highlight">'
+        f'<div class="detail-mini-label">Efeito na projeção</div>'
+        f'<div class="detail-mini-value">{matchup_effect_pct:+.1f}%</div>'
+        f'<div class="detail-mini-label">score final {format_signed_number(matchup_score, 2)}</div>'
+        f'</div>'
+        f'</div>'
+        f'<div class="hero-note">'
+        f'Modelo calibrado: 55% defesa relativa entre os times da NBA, 15% recorte por posição '
+        f'e até 30% H2H. Quando não há H2H confiável, esse peso permanece neutro em vez de '
+        f'ser redistribuído para a defesa.'
+        f'</div>'
+        f'</div>'
+    )
 
 
 def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
