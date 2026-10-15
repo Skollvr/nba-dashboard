@@ -2216,7 +2216,7 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
         st.markdown("**PTS L10**")
         st.markdown(f"### {format_number(row.get('L10_PTS', 0.0))}")
         st.caption(
-            f"Proj {format_number(row.get('PROJ_PTS', 0.0))} • "
+            f"Proj {format_number(row.get('PROJ_PTS_V1', row.get('PROJ_PTS', 0.0)))} • "
             f"Hit {row.get('PTS_HIT_RATE_L10_TEXT', '-')}"
         )
 
@@ -2224,7 +2224,7 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
         st.markdown("**REB L10**")
         st.markdown(f"### {format_number(row.get('L10_REB', 0.0))}")
         st.caption(
-            f"Proj {format_number(row.get('PROJ_REB', 0.0))} • "
+            f"Proj {format_number(row.get('PROJ_REB_V1', row.get('PROJ_REB', 0.0)))} • "
             f"Hit {row.get('REB_HIT_RATE_L10_TEXT', '-')}"
         )
 
@@ -2232,7 +2232,7 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
         st.markdown("**AST L10**")
         st.markdown(f"### {format_number(row.get('L10_AST', 0.0))}")
         st.caption(
-            f"Proj {format_number(row.get('PROJ_AST', 0.0))} • "
+            f"Proj {format_number(row.get('PROJ_AST_V1', row.get('PROJ_AST', 0.0)))} • "
             f"Hit {row.get('AST_HIT_RATE_L10_TEXT', '-')}"
         )
 
