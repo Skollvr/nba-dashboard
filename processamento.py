@@ -362,22 +362,48 @@ def classify_matchup_score_label(score: float) -> str:
 
 def classify_percentile_matchup_score(score: float) -> str:
     """
-    Classificação final calibrada para um score centrado em percentil.
+    Classificação final do matchup com faixa neutra mais ampla.
 
-    Um score derivado apenas do percentil dos 30 times produziria, em tese,
-    cerca de 20% em cada faixa: muito difícil, difícil, neutro, favorável
-    e muito favorável.
+    "Muito" fica reservado para alinhamentos realmente extremos entre defesa
+    geral, recorte por posição e H2H. A maior parte dos confrontos médios deve
+    permanecer neutra em vez de ser forçada para favorável/difícil.
     """
     score = float(score)
-    if score >= 0.60:
+    if score >= 0.62:
         return "Muito favorável"
-    if score >= 0.20:
+    if score >= 0.30:
         return "Favorável"
-    if score <= -0.60:
+    if score <= -0.62:
         return "Muito difícil"
-    if score <= -0.20:
+    if score <= -0.30:
         return "Difícil"
     return "Neutro"
+
+
+def combine_matchup_score(
+    team_score: float,
+    position_score: float,
+    h2h_score: float,
+    h2h_reliability: float,
+) -> float:
+    """
+    Combina sinais sem redistribuir o peso de um H2H ausente.
+
+    A defesa geral e o recorte por posição são correlacionados. Quando não há
+    H2H confiável, o peso faltante permanece neutro em vez de ser redistribuído
+    para esses dois sinais defensivos, evitando dupla penalização.
+    """
+    team_score = clamp_value(float(team_score), -1.0, 1.0)
+    position_score = clamp_value(float(position_score), -1.0, 1.0)
+    h2h_score = clamp_value(float(h2h_score), -1.0, 1.0)
+    reliability = clamp_value(float(h2h_reliability), 0.0, 1.0)
+
+    score = (
+        0.55 * team_score
+        + 0.15 * position_score
+        + (0.30 * reliability) * h2h_score
+    )
+    return clamp_value(score, -1.0, 1.0)
 
 
 def classify_defense_percentile(percentile: float) -> str:
@@ -1205,10 +1231,11 @@ def enrich_team_with_context(
             enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
         )
 
-    # Matchup V3 de teste para o primeiro mês:
+    # Matchup V4 calibrado:
     # 55% força defensiva relativa entre os times da liga;
     # 15% sinal posicional vs G/F/C;
     # até 30% histórico individual H2H, reduzido quando a amostra é pequena.
+    # O peso de H2H ausente NÃO é redistribuído para defesa/posição.
     for metric, (season_col, _, _) in metric_map.items():
         scale = get_metric_matchup_scale(metric)
         diff_col = get_metric_matchup_diff_column(metric)
@@ -1273,28 +1300,11 @@ def enrich_team_with_context(
         )
 
         def _combined_matchup_score(row):
-            team_score = float(row.get(f"TEAM_DEF_SCORE_{metric}_V3", 0.0) or 0.0)
-            position_score = float(row.get(f"POSITION_SCORE_{metric}_V3", 0.0) or 0.0)
-            h2h_score = float(row.get(f"H2H_SCORE_{metric}_V3", 0.0) or 0.0)
-            reliability = float(row.get(f"H2H_RELIABILITY_{metric}_V2", 0.0) or 0.0)
-
-            team_weight = 0.55
-            position_weight = 0.15
-            h2h_weight = 0.30 * reliability
-
-            denominator = team_weight + position_weight + h2h_weight
-            if denominator <= 0:
-                return 0.0
-
-            return clamp_value(
-                (
-                    team_weight * team_score
-                    + position_weight * position_score
-                    + h2h_weight * h2h_score
-                )
-                / denominator,
-                -1.0,
-                1.0,
+            return combine_matchup_score(
+                team_score=float(row.get(f"TEAM_DEF_SCORE_{metric}_V3", 0.0) or 0.0),
+                position_score=float(row.get(f"POSITION_SCORE_{metric}_V3", 0.0) or 0.0),
+                h2h_score=float(row.get(f"H2H_SCORE_{metric}_V3", 0.0) or 0.0),
+                h2h_reliability=float(row.get(f"H2H_RELIABILITY_{metric}_V2", 0.0) or 0.0),
             )
 
         enriched[f"MATCHUP_SCORE_{metric}_V1"] = enriched.apply(
@@ -1302,11 +1312,11 @@ def enrich_team_with_context(
             axis=1,
         )
 
-        # O matchup final pode mover a projeção em no máximo 8%.
+        # O matchup final pode mover a projeção em no máximo 6%.
         enriched[f"MATCHUP_EFFECT_PCT_{metric}_V2"] = enriched[
             f"MATCHUP_SCORE_{metric}_V1"
         ].apply(
-            lambda score: clamp_value(0.08 * float(score), -0.08, 0.08)
+            lambda score: clamp_value(0.06 * float(score), -0.06, 0.06)
         )
 
         enriched[f"PROJ_{metric}_V1"] = (
