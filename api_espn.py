@@ -317,6 +317,79 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
+def parse_espn_minutes(value: Any) -> float | None:
+    """ESPN minutes can be a decimal number or MM:SS clock value."""
+    if value is None or str(value).strip().upper() in {"", "DNP", "DND", "--"}:
+        return None
+    raw = str(value).strip()
+    if ":" in raw:
+        parts = raw.split(":")
+        if len(parts) != 2:
+            return None
+        try:
+            whole, seconds = int(parts[0]), int(parts[1])
+        except (TypeError, ValueError):
+            return None
+        if whole < 0 or not (0 <= seconds < 60):
+            return None
+        return whole + seconds / 60.0
+    return _to_float(value)
+
+
+def parse_espn_shooting_stats(
+    stat_map: dict[str, Any],
+) -> tuple[float | None, float | None, float | None, tuple[str, ...]]:
+    """
+    Parse ESPN FG/3PT pairs without manufacturing unknown attempts as zero.
+
+    ESPN changes field names between gamelog and boxscore payloads (FG, FGM-A,
+    FGM-FGA, 3PM-A, etc.). Valid zero attempts and missing data are different.
+    """
+    fg_value = _first_stat(
+        stat_map, "FG", "FGM-A", "FGM-FGA", "FG-FGA",
+        "fieldGoalsMade-fieldGoalsAttempted", "fieldGoals",
+    )
+    three_value = _first_stat(
+        stat_map, "3PT", "3P", "3PM-A", "3PM-3PA", "3PM/3PA",
+        "3FGM-3FGA", "3FGM-A",
+        "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
+        "threePointFieldGoals",
+    )
+    _, fga = _made_attempted(fg_value)
+    fg3m, fg3a = _made_attempted(three_value)
+
+    if fga is None:
+        fga = _to_float(_first_stat(stat_map, "FGA", "fieldGoalsAttempted"))
+    if fg3m is None:
+        fg3m = _to_float(_first_stat(
+            stat_map, "3PM", "3FGM", "threePointFieldGoalsMade",
+            "threePointsMade",
+        ))
+    if fg3a is None:
+        fg3a = _to_float(_first_stat(
+            stat_map, "3PA", "3FGA", "threePointFieldGoalsAttempted",
+        ))
+
+    issues: list[str] = []
+    if fga is None:
+        issues.append("FGA_missing")
+    if fg3a is None:
+        issues.append("3PA_missing")
+    if fga is not None and (fga < 0 or fga > 90):
+        issues.append("FGA_out_of_range")
+        fga = None
+    if fg3a is not None and (fg3a < 0 or fg3a > 60):
+        issues.append("3PA_out_of_range")
+        fg3a = None
+    if fg3m is not None and (fg3m < 0 or (fg3a is not None and fg3m > fg3a)):
+        issues.append("3PM_exceeds_3PA")
+        fg3m = None
+    if fga is not None and fg3a is not None and fg3a > fga:
+        issues.append("3PA_exceeds_FGA")
+        fga = None
+    return fga, fg3m, fg3a, tuple(issues)
+
+
 def _extract_summary_rows(
     payload: dict[str, Any],
     *,
@@ -347,7 +420,7 @@ def _extract_summary_rows(
                     for key, value in zip(keys, stats)
                 }
 
-                minutes = _to_float(stat_map.get("min") or stat_map.get("minutes"))
+                minutes = parse_espn_minutes(_first_stat(stat_map, "min", "minutes"))
                 points = _to_float(stat_map.get("pts") or stat_map.get("points"))
                 rebounds = _to_float(
                     stat_map.get("reb")
@@ -355,17 +428,7 @@ def _extract_summary_rows(
                     or stat_map.get("totalrebounds")
                 )
                 assists = _to_float(stat_map.get("ast") or stat_map.get("assists"))
-                fg_made, fga = _made_attempted(
-                    stat_map.get("fg")
-                    or stat_map.get("fieldgoalsmade-fieldgoalsattempted")
-                )
-                fg3m, fg3a = _made_attempted(
-                    stat_map.get("3pt")
-                    or stat_map.get("3p")
-                    or stat_map.get(
-                        "threepointfieldgoalsmade-threepointfieldgoalsattempted"
-                    )
-                )
+                fga, fg3m, fg3a, shooting_issues = parse_espn_shooting_stats(stat_map)
 
                 played = minutes is not None and minutes > 0
                 if not played:
@@ -430,8 +493,9 @@ def _extract_summary_rows(
                         "REB": rebounds or 0.0,
                         "AST": assists or 0.0,
                         "FG3M": fg3m or 0.0,
-                        "FGA": fga or 0.0,
-                        "FG3A": fg3a or 0.0,
+                        "FGA": fga if fga is not None else float("nan"),
+                        "FG3A": fg3a if fg3a is not None else float("nan"),
+                        "SHOOTING_ISSUES": "|".join(shooting_issues),
                         "SEASON_SCOPE": season_scope,
                         "DATA_SOURCE": "ESPN",
                     }
@@ -504,8 +568,10 @@ def get_espn_team_player_logs(
     for col in ["PLAYER_ID", "TEAM_ID", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    for col in ["MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
+    for col in ["MIN", "PTS", "REB", "AST"]:
         df[col] = df[col].fillna(0.0)
+    # Shooting fields stay NaN if ESPN did not provide a valid count.
+    # Aggregation must not turn missing FGA into a real zero-attempt game.
 
     df["GAME_DATE"] = pd.to_datetime(df["GAME_DATE"], errors="coerce")
     df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
@@ -736,52 +802,11 @@ def _parse_espn_player_gamelog_payload(
             for name, value in zip(names, stats)
         }
 
-        minutes = _to_float(_first_stat(stat_map, "min", "minutes"))
+        minutes = parse_espn_minutes(_first_stat(stat_map, "min", "minutes"))
         pts = _to_float(_first_stat(stat_map, "pts", "points"))
-        reb = _to_float(
-            _first_stat(
-                stat_map,
-                "reb",
-                "rebounds",
-                "totalRebounds",
-            )
-        )
+        reb = _to_float(_first_stat(stat_map, "reb", "rebounds", "totalRebounds"))
         ast = _to_float(_first_stat(stat_map, "ast", "assists"))
-        _, fga = _made_attempted(
-            _first_stat(
-                stat_map,
-                "fg",
-                "fieldGoalsMade-fieldGoalsAttempted",
-                "fieldGoalsMade",
-            )
-        )
-        fg3m, fg3a = _made_attempted(
-            _first_stat(
-                stat_map,
-                "3pt",
-                "3p",
-                "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
-                "threePointsMade",
-            )
-        )
-
-        if fga is None:
-            fga = _to_float(
-                _first_stat(stat_map, "fieldGoalsAttempted", "fga")
-            )
-        if fg3m is None:
-            fg3m = _to_float(
-                _first_stat(
-                    stat_map,
-                    "threePointFieldGoalsMade",
-                    "threePointsMade",
-                    "3pm",
-                )
-            )
-        if fg3a is None:
-            fg3a = _to_float(
-                _first_stat(stat_map, "threePointFieldGoalsAttempted", "3pa")
-            )
+        fga, fg3m, fg3a, shooting_issues = parse_espn_shooting_stats(stat_map)
 
         # ESPN can include DNP/header rows with metadata but no participation.
         if minutes is None and all(
@@ -840,9 +865,10 @@ def _parse_espn_player_gamelog_payload(
                 "PTS": pts or 0.0,
                 "REB": reb or 0.0,
                 "AST": ast or 0.0,
-                "FG3M": fg3m or 0.0,
-                "FGA": fga or 0.0,
-                "FG3A": fg3a or 0.0,
+                "FG3M": fg3m if fg3m is not None else float("nan"),
+                "FGA": fga if fga is not None else float("nan"),
+                "FG3A": fg3a if fg3a is not None else float("nan"),
+                "SHOOTING_ISSUES": "|".join(shooting_issues),
                 "SEASON_SCOPE": season_scope,
                 "DATA_SOURCE": "ESPN",
             }
