@@ -482,6 +482,11 @@ def main():
                 st.info("Amostra insuficiente para backtest (mínimo de 10 jogos anteriores por jogador).")
             else:
                 st.dataframe(report, use_container_width=True, hide_index=True)
+                if "FGA" not in report["Métrica"].tolist():
+                    st.warning(
+                        "FGA não foi avaliado: a amostra de tentativas totais "
+                        "não passou na validação estatística. Não é um MAE igual a zero."
+                    )
                 st.caption(
                     "MAE = erro absoluto médio (menor é melhor). Viés positivo "
                     "significa superestimar. Ganho MAE positivo favorece o modelo "
