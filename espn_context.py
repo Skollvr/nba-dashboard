@@ -486,6 +486,14 @@ def build_espn_defense_context(
             if opponent_rows.empty:
                 continue
 
+            # An incomplete shot-attempt boxscore must not look like a
+            # zero-attempt opponent. Suppress that game's affected metric.
+            def shot_total(column: str) -> float:
+                values = pd.to_numeric(opponent_rows[column], errors="coerce")
+                if values.isna().any():
+                    return float("nan")
+                return float(values.sum())
+
             team_allowed_records.append({
                 "TEAM_ID": defending,
                 "GAME_ID": gid,
@@ -493,9 +501,9 @@ def build_espn_defense_context(
                 "REB": float(opponent_rows["REB"].sum()),
                 "AST": float(opponent_rows["AST"].sum()),
                 "PRA": float(opponent_rows["PRA"].sum()),
-                "3PM": float(opponent_rows["FG3M"].sum()),
-                "FGA": float(opponent_rows["FGA"].sum()),
-                "3PA": float(opponent_rows["FG3A"].sum()),
+                "3PM": shot_total("FG3M"),
+                "FGA": shot_total("FGA"),
+                "3PA": shot_total("FG3A"),
             })
 
             for pos, pos_rows in opponent_rows.groupby("POSITION_GROUP"):
@@ -535,10 +543,10 @@ def build_espn_defense_context(
         for metric in metric_names:
             value_col = f"TEAM_DEF_{metric}"
             team_defense[f"TEAM_DEF_PCT_{metric}"] = (
-                team_defense[value_col].rank(method="average", pct=True, ascending=True).clip(0.0, 1.0)
+                team_defense[value_col].rank(method="average", pct=True, ascending=True).clip(0.0, 1.0).fillna(0.5)
             )
             team_defense[f"TEAM_DEF_RANK_{metric}"] = (
-                team_defense[value_col].rank(method="average", ascending=True).round().astype(int)
+                team_defense[value_col].rank(method="average", ascending=True).round().fillna(0).astype(int)
             )
 
     pos_allowed = pd.DataFrame(pos_allowed_records)
