@@ -7,7 +7,8 @@ from config import (
 )
 from api_nba import get_games_for_date
 from api_lineups import clear_lineup_cache
-from espn_context import clear_espn_pregame_cache
+from espn_context import clear_espn_pregame_cache, get_espn_roster_player_logs
+from projection_validation import rolling_projection_backtest
 from api_odds import get_odds_api_key, clear_odds_cache
 from pdf_reader import get_season_string, clear_injury_cache
 from processamento import get_matchup_context
@@ -403,6 +404,90 @@ def main():
                 "O contexto defensivo ESPN não formou amostra para este confronto; "
                 "matchup defensivo permanece neutro nesta execução."
             )
+
+    # Audit the sample coverage of shooting attempts, not just its averages.
+    if not lineup_test_df.empty and {
+        "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP", "SEASON_GP",
+    }.issubset(lineup_test_df.columns):
+        inspected = lineup_test_df.copy()
+        inspected["SEASON_GP"] = pd.to_numeric(
+            inspected["SEASON_GP"], errors="coerce"
+        ).fillna(0)
+        inspected["SEASON_FGA_VALID_GP"] = pd.to_numeric(
+            inspected["SEASON_FGA_VALID_GP"], errors="coerce"
+        ).fillna(0)
+        inspected["SEASON_3PA_VALID_GP"] = pd.to_numeric(
+            inspected["SEASON_3PA_VALID_GP"], errors="coerce"
+        ).fillna(0)
+        incomplete = inspected[
+            (inspected["SEASON_GP"] > 0)
+            & (
+                (inspected["SEASON_FGA_VALID_GP"] < 0.8 * inspected["SEASON_GP"])
+                | (inspected["SEASON_3PA_VALID_GP"] < 0.8 * inspected["SEASON_GP"])
+            )
+        ].copy()
+        if not incomplete.empty:
+            st.warning(
+                f"Auditoria ESPN: {len(incomplete)} jogador(es) têm menos de "
+                "80% dos jogos com FGA/3PA válidos. Projeções de arremesso "
+                "com amostra insuficiente são ocultadas e não geram Edge."
+            )
+            with st.expander("Ver amostras incompletas de FGA/3PA"):
+                st.dataframe(
+                    incomplete[[
+                        "PLAYER", "SEASON_GP", "SEASON_FGA_VALID_GP",
+                        "SEASON_3PA_VALID_GP",
+                    ]].rename(columns={
+                        "PLAYER": "Jogador",
+                        "SEASON_GP": "GP",
+                        "SEASON_FGA_VALID_GP": "FGA válidos",
+                        "SEASON_3PA_VALID_GP": "3PA válidos",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+
+    with st.expander("Backtest temporal — minutos + forma (diagnóstico)", expanded=False):
+        st.caption(
+            "Avalia previsões para jogos passados usando SOMENTE jogos anteriores "
+            "do mesmo jogador. Compara a base de minutos/forma V1 à média L10. "
+            "Não inclui matchup, defesa, H2H, status de lesão ou roster histórico; "
+            "não é validação completa da projeção contextual V1."
+        )
+        report_key = f"backtest::{selected_game_key}"
+        if st.button("Calcular backtest dos jogadores deste confronto", key=f"run::{report_key}"):
+            with st.spinner("Validando previsões cronológicas com logs ESPN..."):
+                history_frames = []
+                for team_id in (
+                    int(selected_game["VISITOR_TEAM_ID"]),
+                    int(selected_game["HOME_TEAM_ID"]),
+                ):
+                    try:
+                        frame = get_espn_roster_player_logs(
+                            team_id, analysis_season,
+                            season_scope=season_scope,
+                            as_of_date=selected_date.isoformat(),
+                        )
+                        if frame is not None and not frame.empty:
+                            history_frames.append(frame)
+                    except Exception:
+                        continue
+                history = (
+                    pd.concat(history_frames, ignore_index=True)
+                    if history_frames else pd.DataFrame()
+                )
+                st.session_state[report_key] = rolling_projection_backtest(history)
+        report = st.session_state.get(report_key)
+        if isinstance(report, pd.DataFrame):
+            if report.empty:
+                st.info("Amostra insuficiente para backtest (mínimo de 10 jogos anteriores por jogador).")
+            else:
+                st.dataframe(report, use_container_width=True, hide_index=True)
+                st.caption(
+                    "MAE = erro absoluto médio (menor é melhor). Viés positivo "
+                    "significa superestimar. Ganho MAE positivo favorece o modelo "
+                    "temporal sobre a média L10. Resultados não representam lucro "
+                    "nem probabilidade de acerto em apostas."
+                )
 
     # Linhas manuais são individuais por jogador. Isso evita comparar todo o
     # roster contra uma única linha global. Se BetMGM estiver ativo e houver
