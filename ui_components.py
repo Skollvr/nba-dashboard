@@ -2076,6 +2076,16 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     matchup_parts.append(f"ajuste {effect_pct:+.1f}%")
     matchup_text = " • ".join(matchup_parts)
 
+    if not ctx.get("has_active_line", False) and pd.isna(
+        pd.to_numeric(ctx.get("projection"), errors="coerce")
+    ):
+        return (
+            "⚪ Dados incompletos",
+            f"Projeção {metric} indisponível",
+            "a ESPN não trouxe uma amostra confiável; nenhum Edge será calculado",
+            f"{opponent} • projeção suspensa até validar os dados de {metric}",
+        )
+
     if not ctx.get("has_active_line", False):
         context_line = (
             f"{opponent} • {matchup_text}"
@@ -2259,11 +2269,15 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
                 f"L10 {line_context['hit_l10']}"
             )
         else:
-            st.markdown(f"**Sem linha {line_metric}**")
+            quality_missing = not pd.notna(
+                pd.to_numeric(line_context.get("projection"), errors="coerce")
+            )
+            st.markdown(f"**{'Dados insuficientes' if quality_missing else 'Sem linha'} {line_metric}**")
             st.markdown("### —")
             st.caption(
-                f"Proj {format_number(proj_std)} • "
-                f"V1 {format_number(proj_v1)}"
+                "Estatística ESPN não validada"
+                if quality_missing
+                else f"Proj {format_number(proj_std)} • V1 {format_number(proj_v1)}"
             )
 
 def render_projection_detail_box_html(row: pd.Series) -> str:
