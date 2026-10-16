@@ -507,9 +507,9 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
         return {
             "projection": projection,
             "edge": 0.0,
-            "label": "Sem linha",
+            "label": "Dados insuficientes" if pd.isna(projection_num) else "Sem linha",
             "line_value": None,
-            "line_source": "Sem linha",
+            "line_source": "Dados ESPN incompletos" if pd.isna(projection_num) else "Sem linha",
             "has_market_line": False,
             "has_active_line": False,
             "over_dec": None,
@@ -522,7 +522,11 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
             "hit_sequence": "",
             "under_sequence": "",
             "icon": "",
-            "tooltip": "Nenhuma linha informada para este jogador.",
+            "tooltip": (
+                "Sem amostra validada para esta estatística."
+                if pd.isna(projection_num)
+                else "Nenhuma linha informada para este jogador."
+            ),
             "hit_l5": "-",
             "under_l5": "-",
         }
@@ -1360,7 +1364,7 @@ def enrich_team_with_context(
         valid_games = pd.to_numeric(
             enriched.get(sample_column, 0), errors="coerce"
         ).fillna(0.0)
-        invalid = (gp > 0) & (valid_games < (gp * 0.80))
+        invalid = (gp <= 0) | (valid_games < (gp * 0.80))
         enriched[f"DATA_QUALITY_{metric}"] = ~invalid
         enriched.loc[invalid, f"PROJ_{metric}"] = np.nan
         enriched.loc[invalid, f"PROJ_{metric}_V1"] = np.nan
