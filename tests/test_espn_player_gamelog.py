@@ -1,6 +1,11 @@
 import pandas as pd
 
-from api_espn import _parse_espn_player_gamelog_payload
+from api_espn import (
+    _parse_espn_player_gamelog_payload,
+    aggregate_espn_player_stats,
+    parse_espn_minutes,
+    parse_espn_shooting_stats,
+)
 
 
 def test_parses_flat_espn_gamelog_events():
@@ -116,3 +121,74 @@ def test_normalizes_espn_opponent_alias_for_h2h_matching():
 
     assert len(df) == 1
     assert df.iloc[0]["MATCHUP"] == "@ NYK"
+
+
+def test_espn_fgm_a_and_3pm_a_labels_are_recognized():
+    payload = {
+        "labels": ["MIN", "FGM-A", "3PM-A", "PTS", "REB", "AST"],
+        "events": [{
+            "id": "fgm-variant",
+            "date": "2026-02-01T23:00:00Z",
+            "opponent": {"abbreviation": "NY"},
+            "homeAway": "away",
+            "stats": ["34:30", "11-23", "2-9", "24", "6", "8"],
+        }],
+    }
+    logs = _parse_espn_player_gamelog_payload(payload, 22)
+    assert len(logs) == 1
+    assert logs.iloc[0]["MIN"] == 34.5
+    assert logs.iloc[0]["FGA"] == 23
+    assert logs.iloc[0]["FG3A"] == 9
+    assert logs.iloc[0]["FG3M"] == 2
+    assert logs.iloc[0]["MATCHUP"] == "@ NYK"
+    logs["PLAYER_NAME"] = "Player"
+    logs["TEAM_ID"] = 1
+    summary = aggregate_espn_player_stats(logs)
+    assert summary.iloc[0]["FGA"] == 23
+    assert summary.iloc[0]["FGA_VALID_GP"] == 1
+
+
+def test_missing_fga_is_not_silently_zeroed_in_aggregation():
+    fga, made, three_attempts, issues = parse_espn_shooting_stats({
+        "3PM-A": "2-8",
+    })
+    assert fga is None
+    assert made == 2
+    assert three_attempts == 8
+    assert "FGA_missing" in issues
+
+    logs = pd.DataFrame([{
+        "PLAYER_ID": 12,
+        "PLAYER_NAME": "Player",
+        "TEAM_ID": 1,
+        "GAME_DATE": pd.Timestamp("2026-02-02"),
+        "MIN": 30,
+        "PTS": 20, "REB": 4, "AST": 5,
+        "FG3M": 2, "FGA": float("nan"), "FG3A": 8,
+    }])
+    summary = aggregate_espn_player_stats(logs)
+    assert pd.isna(summary.iloc[0]["FGA"])
+    assert summary.iloc[0]["FGA_VALID_GP"] == 0
+    assert summary.iloc[0]["FG3A_VALID_GP"] == 1
+
+
+def test_invalid_attempt_relation_is_not_used():
+    fga, made, three_attempts, issues = parse_espn_shooting_stats({
+        "FGM-A": "2-4",
+        "3PM-A": "3-8",
+    })
+    assert fga is None
+    assert made == 3
+    assert three_attempts == 8
+    assert "3PA_exceeds_FGA" in issues
+
+
+def test_valid_zero_attempts_are_kept():
+    fga, made, three_attempts, issues = parse_espn_shooting_stats({
+        "FGM-A": "0-0",
+        "3PM-A": "0-0",
+    })
+    assert (fga, made, three_attempts) == (0.0, 0.0, 0.0)
+    assert not issues
+    assert parse_espn_minutes("37:45") == 37.75
+    assert parse_espn_minutes("DNP") is None
