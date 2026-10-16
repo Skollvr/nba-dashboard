@@ -471,7 +471,7 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
     # projected minutes, recent rate, matchup and injury status.
     projection_raw = row.get(projection_v1_col, row.get(projection_col, 0.0))
     projection_num = pd.to_numeric(projection_raw, errors="coerce")
-    projection = float(projection_num) if pd.notna(projection_num) else 0.0
+    projection = float(projection_num) if pd.notna(projection_num) else float("nan")
 
     market_info = get_market_line_for_metric(row, metric)
     market_line = pd.to_numeric(market_info.get("line"), errors="coerce")
@@ -483,6 +483,12 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
 
     has_manual_line = bool(pd.notna(manual_line) and float(manual_line) > 0)
     has_fallback_line = bool(pd.notna(fallback_line) and float(fallback_line) > 0)
+
+    # Missing ESPN shooting data must not produce an OVER/UNDER opinion.
+    if pd.isna(projection_num):
+        use_market = False
+        has_manual_line = False
+        has_fallback_line = False
 
     if use_market:
         active_line = float(market_line)
@@ -1327,6 +1333,49 @@ def enrich_team_with_context(
         enriched[f"MATCHUP_LABEL_{metric}_V1"] = enriched[
             f"MATCHUP_SCORE_{metric}_V1"
         ].apply(classify_percentile_matchup_score)
+
+    # PRA is a compound market. Its model projection must equal the sum of
+    # component projections (before rounding) across headline, edge and tables.
+    enriched["PROJ_PRA"] = (
+        enriched["PROJ_PTS"] + enriched["PROJ_REB"] + enriched["PROJ_AST"]
+    )
+    enriched["BASE_PRA_V1"] = (
+        enriched["BASE_PTS_V1"] + enriched["BASE_REB_V1"] + enriched["BASE_AST_V1"]
+    )
+    enriched["PROJ_PRA_V1"] = (
+        enriched["PROJ_PTS_V1"] + enriched["PROJ_REB_V1"] + enriched["PROJ_AST_V1"]
+    )
+    base_pra = enriched["BASE_PRA_V1"].replace(0.0, np.nan)
+    enriched["MATCHUP_EFFECT_PCT_PRA_V2"] = (
+        (enriched["PROJ_PRA_V1"] / base_pra) - 1.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    # Never advertise a shooting projection based on missing/invalid samples.
+    gp = pd.to_numeric(enriched["SEASON_GP"], errors="coerce").fillna(0.0)
+    for metric, sample_column in [
+        ("FGA", "SEASON_FGA_VALID_GP"),
+        ("3PA", "SEASON_3PA_VALID_GP"),
+        ("3PM", "SEASON_3PM_VALID_GP"),
+    ]:
+        valid_games = pd.to_numeric(
+            enriched.get(sample_column, 0), errors="coerce"
+        ).fillna(0.0)
+        invalid = (gp > 0) & (valid_games < (gp * 0.80))
+        enriched[f"DATA_QUALITY_{metric}"] = ~invalid
+        enriched.loc[invalid, f"PROJ_{metric}"] = np.nan
+        enriched.loc[invalid, f"PROJ_{metric}_V1"] = np.nan
+
+    # For valid data, enforce the fundamental shot-attempt inequalities.
+    fg_valid = enriched["DATA_QUALITY_FGA"] & enriched["DATA_QUALITY_3PA"]
+    enriched.loc[fg_valid, "PROJ_FGA_V1"] = np.maximum(
+        enriched.loc[fg_valid, "PROJ_FGA_V1"],
+        enriched.loc[fg_valid, "PROJ_3PA_V1"],
+    )
+    three_valid = enriched["DATA_QUALITY_3PM"] & enriched["DATA_QUALITY_3PA"]
+    enriched.loc[three_valid, "PROJ_3PM_V1"] = np.minimum(
+        enriched.loc[three_valid, "PROJ_3PM_V1"],
+        enriched.loc[three_valid, "PROJ_3PA_V1"],
+    )
 
     return enriched
 
