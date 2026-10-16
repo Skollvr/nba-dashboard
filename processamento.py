@@ -1411,7 +1411,8 @@ def build_team_table(
             columns=[
                 "PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS",
                 "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA",
-                "SEASON_3PA",
+                "SEASON_3PA", "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP",
+                "SEASON_3PM_VALID_GP",
             ]
         )
         if season_stats.empty
@@ -1425,6 +1426,9 @@ def build_team_table(
                 "FG3M": "SEASON_3PM",
                 "FGA": "SEASON_FGA",
                 "FG3A": "SEASON_3PA",
+                "FGA_VALID_GP": "SEASON_FGA_VALID_GP",
+                "FG3A_VALID_GP": "SEASON_3PA_VALID_GP",
+                "FG3M_VALID_GP": "SEASON_3PM_VALID_GP",
             }
         )
     )
@@ -1479,6 +1483,8 @@ def build_team_table(
                     "PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS",
                     "SEASON_REB", "SEASON_AST", "SEASON_3PM",
                     "SEASON_FGA", "SEASON_3PA",
+                    "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP",
+                    "SEASON_3PM_VALID_GP",
                 ]
             ],
             on="PLAYER_ID",
@@ -1510,6 +1516,8 @@ def build_team_table(
     numeric_cols = [
         "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB",
         "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA",
+        "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP",
+        "SEASON_3PM_VALID_GP",
         "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM",
         "L5_FGA", "L5_3PA", "L10_GP", "L10_MIN", "L10_PTS",
         "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA",
@@ -1557,7 +1565,9 @@ def build_team_table(
             "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB",
             "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM",
             "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA",
-            "SEASON_3PA", "L5_3PA", "L10_3PA", "SEASON_PRA", "L5_PRA",
+            "SEASON_3PA", "L5_3PA", "L10_3PA",
+            "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP",
+            "SEASON_3PM_VALID_GP", "SEASON_PRA", "L5_PRA",
             "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND",
             "DATA_SOURCE",
         ]
