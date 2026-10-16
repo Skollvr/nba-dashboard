@@ -996,9 +996,10 @@ def get_player_headshot_url(player_id: int) -> str:
 
 def format_number(value, decimals: int = 1) -> str:
     try:
-        return f"{float(value):.{decimals}f}"
+        number = float(value)
+        return f"{number:.{decimals}f}" if np.isfinite(number) else "—"
     except (TypeError, ValueError):
-        return "-"
+        return "—"
 
 
 def format_signed_number(value, decimals: int = 1) -> str:
