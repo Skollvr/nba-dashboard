@@ -291,6 +291,42 @@ def blend_rate(season_pm: float, l10_pm: float, l5_pm: float) -> float:
     return sum(value * weight for value, weight in available) / weight_sum
 
 
+def estimate_two_point_attempts(
+    season_fga: float,
+    l10_fga: float,
+    l5_fga: float,
+    season_3pa: float,
+    l10_3pa: float,
+    l5_3pa: float,
+    season_min: float,
+    l10_min: float,
+    l5_min: float,
+    projected_min: float,
+) -> float:
+    """Estimate 2PA directly, not by clipping total FGA up to projected 3PA.
+
+    The data must support both categories: FGA = 2PA + 3PA on each observed
+    sample. An unknown/contradictory attempt count yields NaN rather than a
+    fabricated total.
+    """
+    observations = (
+        (season_fga, season_3pa, season_min),
+        (l10_fga, l10_3pa, l10_min),
+        (l5_fga, l5_3pa, l5_min),
+    )
+    rates = []
+    for fga, three_pa, minutes in observations:
+        vals = (fga, three_pa, minutes)
+        if any(not np.isfinite(pd.to_numeric(x, errors="coerce")) for x in vals):
+            return float("nan")
+        if fga < 0 or three_pa < 0 or three_pa > fga:
+            return float("nan")
+        rates.append(safe_rate(fga - three_pa, minutes))
+    if not np.isfinite(projected_min) or projected_min < 0:
+        return float("nan")
+    return max(0.0, float(projected_min) * blend_rate(*rates))
+
+
 def project_minutes_v1(
     season_min: float,
     l10_median: float,
@@ -1369,12 +1405,42 @@ def enrich_team_with_context(
         enriched.loc[invalid, f"PROJ_{metric}"] = np.nan
         enriched.loc[invalid, f"PROJ_{metric}_V1"] = np.nan
 
-    # For valid data, enforce the fundamental shot-attempt inequalities.
-    fg_valid = enriched["DATA_QUALITY_FGA"] & enriched["DATA_QUALITY_3PA"]
-    enriched.loc[fg_valid, "PROJ_FGA_V1"] = np.maximum(
-        enriched.loc[fg_valid, "PROJ_FGA_V1"],
-        enriched.loc[fg_valid, "PROJ_3PA_V1"],
+    # FGA must be based on observed 2PA PLUS projected 3PA, not on
+    # max(FGA, 3PA), which previously fabricated equal values.
+    def _project_two_pa(row):
+        return estimate_two_point_attempts(
+            row["SEASON_FGA"], row["L10_FGA"], row["L5_FGA"],
+            row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"],
+            row["SEASON_MIN"], row["L10_MIN"], row["L5_MIN"],
+            row["PROJ_MIN_V1"],
+        )
+
+    enriched["BASE_2PA_V1"] = enriched.apply(_project_two_pa, axis=1)
+    valid_fga = (
+        enriched["DATA_QUALITY_FGA"]
+        & enriched["DATA_QUALITY_3PA"]
+        & enriched["BASE_2PA_V1"].notna()
+        & enriched["PROJ_3PA_V1"].notna()
     )
+    enriched["DATA_QUALITY_FGA"] = valid_fga
+    enriched["PROJ_2PA_V1"] = (
+        enriched["BASE_2PA_V1"]
+        * (1.0 + enriched["MATCHUP_EFFECT_PCT_FGA_V2"])
+    ).clip(lower=0.0)
+    enriched["BASE_FGA_V1"] = (
+        enriched["BASE_2PA_V1"] + enriched["BASE_3PA_V1"]
+    )
+    enriched["PROJ_FGA_V1"] = (
+        enriched["PROJ_2PA_V1"] + enriched["PROJ_3PA_V1"]
+    )
+    enriched.loc[~valid_fga, ["BASE_FGA_V1", "PROJ_FGA_V1"]] = np.nan
+    enriched.loc[~valid_fga, "PROJ_FGA"] = np.nan
+    enriched["MATCHUP_EFFECT_PCT_FGA_V2"] = (
+        enriched["PROJ_FGA_V1"]
+        / enriched["BASE_FGA_V1"].replace(0.0, np.nan)
+        - 1.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
     three_valid = enriched["DATA_QUALITY_3PM"] & enriched["DATA_QUALITY_3PA"]
     enriched.loc[three_valid, "PROJ_3PM_V1"] = np.minimum(
         enriched.loc[three_valid, "PROJ_3PM_V1"],
