@@ -192,3 +192,63 @@ def test_valid_zero_attempts_are_kept():
     assert not issues
     assert parse_espn_minutes("37:45") == 37.75
     assert parse_espn_minutes("DNP") is None
+
+
+
+def test_missing_field_goal_attempts_remain_nan_with_known_three_attempts():
+    # Regression: previously fillna(0) created a fake 0-FGA game.
+    payload = {
+        "labels": ["MIN", "3PT", "REB", "AST", "PTS"],
+        "events": [{
+            "id": "missing-fga",
+            "date": "2026-02-05T01:00:00Z",
+            "stats": ["34", "3-8", "7", "5", "25"],
+        }],
+    }
+    logs = _parse_espn_player_gamelog_payload(payload, 999)
+    assert len(logs) == 1
+    assert pd.isna(logs.loc[0, "FGA"])
+    assert logs.loc[0, "FG3A"] == 8
+    logs["PLAYER_NAME"] = "Demo Player"
+    logs["TEAM_ID"] = 1610612738
+    agg = aggregate_espn_player_stats(logs)
+    assert pd.isna(agg.loc[0, "FGA"])
+    assert agg.loc[0, "FGA_VALID_GP"] == 0
+    assert agg.loc[0, "FG3A_VALID_GP"] == 1
+
+
+def test_descriptive_espn_names_with_made_attempted_values():
+    # Other ESPN variants use descriptive keys for made/attempt pairs.
+    payload = {
+        "names": [
+            "date", "opponent", "gameResult", "minutes",
+            "fieldGoalsMade", "threePointsMade", "freeThrowsMade",
+            "rebounds", "assists", "steals", "blocks", "points",
+        ],
+        "events": [{
+            "id": "names-variant",
+            "date": "2026-01-16T00:00:00Z",
+            "stats": ["36", "9-21", "4-10", "2-2", "8", "7", "1", "0", "24"],
+        }],
+    }
+    logs = _parse_espn_player_gamelog_payload(payload, 998)
+    assert logs.loc[0, "FGA"] == 21
+    assert logs.loc[0, "FG3A"] == 10
+    assert logs.loc[0, "FG3M"] == 4
+    assert logs.loc[0, "SHOOTING_ISSUES"] == ""
+
+
+def test_three_attempts_exceeding_total_are_flagged_not_clipped():
+    payload = {
+        "labels": ["MIN", "FG", "3PT", "PTS"],
+        "events": [{
+            "id": "invalid-attempts",
+            "date": "2026-02-01T00:00:00Z",
+            "stats": ["32", "4-5", "2-8", "12"],
+        }],
+    }
+    logs = _parse_espn_player_gamelog_payload(payload, 997)
+    assert len(logs) == 1
+    assert pd.isna(logs.loc[0, "FGA"])
+    assert logs.loc[0, "FG3A"] == 8
+    assert "3PA_exceeds_FGA" in logs.loc[0, "SHOOTING_ISSUES"]
