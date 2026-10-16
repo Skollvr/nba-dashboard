@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from processamento import blend_rate, project_minutes_v1
+from processamento import blend_rate, project_minutes_v1, estimate_two_point_attempts
 
 
 METRICS = ("PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA")
@@ -54,6 +54,28 @@ def _project_core(history: pd.DataFrame) -> dict[str, float]:
             mean_l5 / mean_min_l5 if mean_min_l5 > 0 else 0.0,
         )
         results[metric] = max(0.0, proj_min * rate)
+    # Total shot attempts = projected 2PA + projected 3PA. We never
+    # manufacture FGA by clamping a missing/zero source up to 3PA.
+    if "FGA" in results and "3PA" in results:
+        two_pa = estimate_two_point_attempts(
+            float(history["FGA"].mean()),
+            float(l10["FGA"].mean()),
+            float(l5["FGA"].mean()),
+            float(history["FG3A"].mean()),
+            float(l10["FG3A"].mean()),
+            float(l5["FG3A"].mean()),
+            float(history["MIN"].mean()),
+            float(l10["MIN"].mean()),
+            float(l5["MIN"].mean()),
+            float(proj_min),
+        )
+        if np.isfinite(two_pa):
+            results["FGA"] = two_pa + results["3PA"]
+        else:
+            del results["FGA"]
+    else:
+        results.pop("FGA", None)
+
     if all(key in results for key in ("PTS", "REB", "AST")):
         results["PRA"] = results["PTS"] + results["REB"] + results["AST"]
     return results
@@ -83,6 +105,26 @@ def rolling_projection_backtest(
     for column in ["MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
         if column in work:
             work[column] = pd.to_numeric(work[column], errors="coerce")
+
+    # Defensive validation for old/cached logs: reject physically impossible
+    # shooting counts even if another parser passed them through.
+    if {"FGA", "FG3A"}.issubset(work.columns):
+        inconsistent = (
+            (work["FGA"] < 0)
+            | (work["FG3A"] < 0)
+            | (work["FG3A"] > work["FGA"])
+        )
+        work.loc[inconsistent, "FGA"] = np.nan
+        # A whole player season of zero FGA with positive scoring is a broken
+        # feed, not proof of a perfect zero-error shooting forecast.
+        for _, idx in work.groupby("PLAYER_ID").groups.items():
+            sample = work.loc[idx]
+            if (
+                sample["FGA"].notna().any()
+                and sample["FGA"].dropna().eq(0).all()
+                and pd.to_numeric(sample["PTS"], errors="coerce").gt(0).any()
+            ):
+                work.loc[idx, "FGA"] = np.nan
 
     work = work.dropna(subset=["PLAYER_ID", "GAME_DATE", "MIN"])
     if "GAME_ID" in work:
