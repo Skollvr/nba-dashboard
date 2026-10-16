@@ -348,12 +348,13 @@ def parse_espn_shooting_stats(
     fg_value = _first_stat(
         stat_map, "FG", "FGM-A", "FGM-FGA", "FG-FGA",
         "fieldGoalsMade-fieldGoalsAttempted", "fieldGoals",
+        "fieldGoalsMade", "FGM/FGA", "FGM/FGA", "FGM-A",
     )
     three_value = _first_stat(
         stat_map, "3PT", "3P", "3PM-A", "3PM-3PA", "3PM/3PA",
         "3FGM-3FGA", "3FGM-A",
         "threePointFieldGoalsMade-threePointFieldGoalsAttempted",
-        "threePointFieldGoals",
+        "threePointFieldGoals", "threePointsMade", "threePointFieldGoalsMade",
     )
     _, fga = _made_attempted(fg_value)
     fg3m, fg3a = _made_attempted(three_value)
