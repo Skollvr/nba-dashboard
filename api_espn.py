@@ -590,6 +590,7 @@ def aggregate_espn_player_stats(
     columns = [
         "PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "GP", "MIN",
         "PTS", "REB", "AST", "FG3M", "FGA", "FG3A",
+        "FGA_VALID_GP", "FG3A_VALID_GP", "FG3M_VALID_GP",
     ]
     if logs is None or logs.empty:
         return pd.DataFrame(columns=columns)
@@ -603,7 +604,10 @@ def aggregate_espn_player_stats(
 
     numeric = ["MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]
     for col in numeric:
-        work[col] = pd.to_numeric(work[col], errors="coerce").fillna(0.0)
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    # Preserve NaN for missing shooting metrics. A genuine 0-0 is a valid zero.
+    for col in ["MIN", "PTS", "REB", "AST"]:
+        work[col] = work[col].fillna(0.0)
 
     rows = []
     for player_id, group in work.groupby("PLAYER_ID", dropna=False):
@@ -614,6 +618,9 @@ def aggregate_espn_player_stats(
                 "TEAM_ID": int(group["TEAM_ID"].iloc[0]),
                 "GP": int(len(group)),
                 **{col: float(group[col].mean()) for col in numeric},
+                "FGA_VALID_GP": int(group["FGA"].notna().sum()),
+                "FG3A_VALID_GP": int(group["FG3A"].notna().sum()),
+                "FG3M_VALID_GP": int(group["FG3M"].notna().sum()),
             }
         )
 
