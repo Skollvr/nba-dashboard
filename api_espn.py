@@ -887,7 +887,9 @@ def _parse_espn_player_gamelog_payload(
     df = pd.DataFrame(rows)
     for col in ["PLAYER_ID", "MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    for col in ["MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"]:
+    # Never replace missing shot attempts with zero; doing so creates
+    # fake 0-FGA games and a false zero-error shooting backtest.
+    for col in ["MIN", "PTS", "REB", "AST"]:
         df[col] = df[col].fillna(0.0)
 
     df["PRA"] = df["PTS"] + df["REB"] + df["AST"]
