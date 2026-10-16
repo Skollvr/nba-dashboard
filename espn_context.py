@@ -29,6 +29,8 @@ from api_espn import (
     OFFICIAL_TEAM_ID_BY_ABBR,
     _espn_team_id_for_official,
     normalize_espn_team_abbr,
+    parse_espn_minutes,
+    parse_espn_shooting_stats,
     _request_json,
     get_espn_game_summary,
     get_espn_player_log,
@@ -365,20 +367,11 @@ def _extract_game_rows(payload: dict[str, Any], game_id: str, game_date: Any) ->
                     continue
                 athlete = athlete_row.get("athlete") or {}
                 stats = _stat_map(stat_block, athlete_row)
-                minutes = _num(_first(stats, "min", "minutes"))
+                minutes = parse_espn_minutes(_first(stats, "min", "minutes"))
                 pts = _num(_first(stats, "pts", "points"))
                 reb = _num(_first(stats, "reb", "rebounds", "totalRebounds"))
                 ast = _num(_first(stats, "ast", "assists"))
-                _, fga = _made_attempted(_first(stats, "fg", "fieldGoalsMade-fieldGoalsAttempted"))
-                fg3m, fg3a = _made_attempted(
-                    _first(stats, "3pt", "3p", "threePointFieldGoalsMade-threePointFieldGoalsAttempted")
-                )
-                if fga is None:
-                    fga = _num(_first(stats, "fga", "fieldGoalsAttempted"))
-                if fg3m is None:
-                    fg3m = _num(_first(stats, "3pm", "threePointFieldGoalsMade"))
-                if fg3a is None:
-                    fg3a = _num(_first(stats, "3pa", "threePointFieldGoalsAttempted"))
+                fga, fg3m, fg3a, shooting_issues = parse_espn_shooting_stats(stats)
 
                 if minutes is None and all(v is None for v in [pts, reb, ast, fga, fg3a]):
                     continue
@@ -396,9 +389,10 @@ def _extract_game_rows(payload: dict[str, Any], game_id: str, game_date: Any) ->
                     "PTS": float(pts or 0.0),
                     "REB": float(reb or 0.0),
                     "AST": float(ast or 0.0),
-                    "FG3M": float(fg3m or 0.0),
-                    "FGA": float(fga or 0.0),
-                    "FG3A": float(fg3a or 0.0),
+                    "FG3M": float(fg3m) if fg3m is not None else float("nan"),
+                    "FGA": float(fga) if fga is not None else float("nan"),
+                    "FG3A": float(fg3a) if fg3a is not None else float("nan"),
+                    "SHOOTING_ISSUES": "|".join(shooting_issues),
                 })
     df = pd.DataFrame(rows)
     if not df.empty:
