@@ -363,11 +363,16 @@ def render_player_focus_panel(
     has_active_line = bool(visual_line_context.get("has_active_line", False))
 
     if not has_active_line:
-        st.info(
-            f"Dados insuficientes para a análise completa de linha de {row['PLAYER']} em {visual_metric}. "
-            "Não há linha manual ou de mercado informada. As médias, projeções, matchup e demais análises "
-            "continuam disponíveis normalmente."
-        )
+        if pd.isna(pd.to_numeric(visual_line_context.get("projection"), errors="coerce")):
+            st.warning(
+                f"{visual_metric}: estatística de arremesso não validada para "
+                f"{row['PLAYER']}. Projeção e Edge ficam indisponíveis."
+            )
+        else:
+            st.info(
+                f"Não há linha manual ou de mercado para {row['PLAYER']} em {visual_metric}. "
+                "Médias, projeção e matchup continuam disponíveis."
+            )
 
     render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
 
@@ -425,10 +430,17 @@ def render_player_focus_panel(
 
         for col, item in zip(extra_cols, extra_detail_items):
             with col:
-                st.markdown(
-                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
-                    unsafe_allow_html=True,
-                )
+                quality_column = f"DATA_QUALITY_{item[0]}"
+                if quality_column in row.index and not bool(row.get(quality_column)):
+                    st.info(
+                        f"{item[0]} indisponível: dados de arremesso da ESPN "
+                        "não passaram na validação da amostra."
+                    )
+                else:
+                    st.markdown(
+                        render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                        unsafe_allow_html=True,
+                    )
 
         st.markdown(render_matchup_detail_box_html(row, visual_metric), unsafe_allow_html=True)
 
