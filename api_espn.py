@@ -302,7 +302,7 @@ def get_espn_game_summary(game_id: str) -> dict[str, Any]:
 def _made_attempted(value: Any) -> tuple[float | None, float | None]:
     if value is None:
         return None, None
-    match = re.search(r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)", str(value))
+    match = re.search(r"(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)", str(value))
     if not match:
         return None, None
     return float(match.group(1)), float(match.group(2))
@@ -492,7 +492,7 @@ def _extract_summary_rows(
                         "PTS": points or 0.0,
                         "REB": rebounds or 0.0,
                         "AST": assists or 0.0,
-                        "FG3M": fg3m or 0.0,
+                        "FG3M": fg3m if fg3m is not None else float("nan"),
                         "FGA": fga if fga is not None else float("nan"),
                         "FG3A": fg3a if fg3a is not None else float("nan"),
                         "SHOOTING_ISSUES": "|".join(shooting_issues),
