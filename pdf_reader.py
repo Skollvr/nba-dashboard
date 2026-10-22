@@ -9,7 +9,7 @@ import streamlit as st
 from pypdf import PdfReader
 
 # Importamos as configurações e o fuso horário
-from config import APP_TIMEZONE, EASTERN_TIMEZONE, TEAM_NAME_LOOKUP_NORM
+from config import APP_TIMEZONE, EASTERN_TIMEZONE, TEAM_NAME_LOOKUP_NORM, TEAM_LOOKUP
 # Importamos a função de normalizar nomes que criámos no ficheiro das odds
 from api_odds import normalize_person_name
 
@@ -163,65 +163,161 @@ def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
         st.error(f"🚨 DIAGNÓSTICO: O PDF foi baixado, mas não consegui ler o texto interno. Erro: {e}")
         return []
 
+_NBA_INJURY_STATUS_RE = re.compile(
+    r"(?P<player>[A-Za-zÀ-ÿ'’.\-]+(?:\s+[A-Za-zÀ-ÿ'’.\-]+)*,\s*"
+    r"[A-Za-zÀ-ÿ'’.\-]+(?:\s+[A-Za-zÀ-ÿ'’.\-]+)*)\s+"
+    r"(?P<status>Out|Questionable|Probable|Doubtful|Available)\b",
+    flags=re.IGNORECASE,
+)
+_NBA_REPORT_TEAM_IDS = {
+    str(team.get("full_name") or ""): int(team_id)
+    for team_id, team in TEAM_LOOKUP.items()
+    if team.get("full_name")
+}
+# "LA Clippers" is the short name used on some NBA documents.
+_NBA_REPORT_TEAM_IDS["LA Clippers"] = next(
+    (team_id for name, team_id in _NBA_REPORT_TEAM_IDS.items()
+     if "Clippers" in name), 0
+)
+_NBA_REPORT_TEAM_IDS = {
+    name: tid for name, tid in _NBA_REPORT_TEAM_IDS.items() if tid
+}
+_NBA_REPORT_TEAM_NAMES = sorted(
+    _NBA_REPORT_TEAM_IDS, key=len, reverse=True
+)
+
+
+def parse_official_injury_report_lines(
+    lines: list[str], pdf_url: str,
+) -> pd.DataFrame:
+    """Read the official NBA report, preserving team, matchup and submission.
+
+    The PDF groups multiple players under a team, often with the team name
+    appearing only once. A "NOT YET SUBMITTED" team is not assumed healthy.
+    This parser accepts the line structure produced by pypdf layout extraction
+    and keeps teams separate (unlike the legacy regex over the full PDF).
+    """
+    rows: list[dict] = []
+    game_date = ""
+    matchup = ""
+    team_name = ""
+    latest_player: dict | None = None
+
+    def finish_player():
+        nonlocal latest_player
+        if latest_player is not None:
+            reason = str(latest_player.get("INJ_REASON", "") or "")
+            latest_player["INJ_REASON"] = re.sub(r"\s+", " ", reason).strip()[:240]
+            rows.append(latest_player)
+            latest_player = None
+
+    def record(status: str, player: str = "", reason: str = "") -> dict:
+        return {
+            "GAME_DATE": game_date,
+            "GAME_TIME_ET": "",
+            "MATCHUP": matchup,
+            "TEAM_NAME_IR": team_name,
+            "TEAM_ID_IR": _NBA_REPORT_TEAM_IDS.get(team_name),
+            "PLAYER_ID_IR": None,
+            "PLAYER_NAME_IR": player,
+            "PLAYER_KEY_IR": normalize_person_name(player) if player else "",
+            "INJ_STATUS": status if player else "",
+            "INJ_REASON": reason,
+            "INJ_REPORT_URL": pdf_url,
+            "INJ_SOURCE": "NBA Official PDF",
+            "TEAM_REPORT_STATUS": "Reported" if player else status,
+            "QUERY_OK": status not in {"NOT YET SUBMITTED", "Unavailable"},
+        }
+
+    for raw in lines:
+        line = re.sub(r"\s+", " ", str(raw or "")).strip()
+        if not line:
+            continue
+        if line.startswith("Injury Report:") or line.startswith("Page "):
+            continue
+        if (
+            ("Game Date" in line and "Player Name" in line)
+            or (line.startswith("Game Time") and "Matchup" in line)
+        ):
+            continue
+
+        date_match = re.search(r"\b\d{2}/\d{2}/\d{4}\b", line)
+        new_matchup = re.search(r"\b[A-Z]{2,3}@[A-Z]{2,3}\b", line)
+        new_team = next(
+            (name for name in _NBA_REPORT_TEAM_NAMES
+             if re.search(r"(?<![A-Za-z])" + re.escape(name) + r"(?![A-Za-z])",
+                          line, flags=re.IGNORECASE)), None
+        )
+
+        if date_match or new_matchup or new_team:
+            finish_player()
+        if date_match:
+            game_date = date_match.group(0)
+        if new_matchup:
+            matchup = new_matchup.group(0).upper()
+        if new_team:
+            team_name = new_team
+
+        if "NOT YET SUBMITTED" in line.upper():
+            finish_player()
+            if team_name:
+                rows.append(record("NOT YET SUBMITTED"))
+            continue
+
+        # The NBA explicitly uses "None" for submitted teams with no injuries.
+        cleaned = line
+        if new_team:
+            team_position = re.search(re.escape(new_team), cleaned, flags=re.IGNORECASE)
+            cleaned = cleaned[team_position.end():] if team_position else cleaned
+
+        match = _NBA_INJURY_STATUS_RE.search(cleaned)
+        if match and team_name:
+            finish_player()
+            player = match.group("player").strip()
+            status = match.group("status").capitalize()
+            latest_player = record(status, player, cleaned[match.end():].strip())
+            continue
+
+        if team_name and re.search(r"\bNone\b", cleaned, flags=re.IGNORECASE):
+            finish_player()
+            rows.append(record("No injuries listed"))
+            continue
+
+        # Injury reason continuation lines usually appear below the player.
+        if latest_player is not None and not (new_team or new_matchup or date_match):
+            if not re.search(r"\b(Page|Injury Report|Game Date)\b", line):
+                latest_player["INJ_REASON"] = (
+                    str(latest_player.get("INJ_REASON", "") or "") + " " + line
+                ).strip()
+
+    finish_player()
+    return pd.DataFrame(rows)
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_df() -> pd.DataFrame:
+    """Retrieve NBA's latest 15-minute PDF injury bulletin, if available."""
     pdf_url = fetch_latest_injury_report_pdf_url()
-    if not pdf_url: 
+    if not pdf_url:
         return pd.DataFrame()
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "application/pdf,*/*",
-        "Referer": "https://official.nba.com/"
+        "Referer": "https://official.nba.com/",
     }
-    
     try:
-        response = requests.get(pdf_url, headers=headers, timeout=15)
+        response = requests.get(pdf_url, headers=headers, timeout=(4, 12))
         response.raise_for_status()
-    except Exception as e:
-        st.error(f"🚨 DIAGNÓSTICO: Achei o link, mas a NBA bloqueou o download. Erro: {e}")
+        if not response.content.startswith(b"%PDF"):
+            return pd.DataFrame()
+    except Exception:
         return pd.DataFrame()
 
     lines = extract_pdf_text_lines(response.content)
     if not lines:
         return pd.DataFrame()
-
-    full_text = " ".join(lines)
-    full_text = re.sub(r'\s+', ' ', full_text)
-
-    rows = []
-    name_regex = r"([A-Za-zÀ-ÿ'\.\-]+\s*(?:III|II|IV|V|Jr\.|Sr\.)?\s*,\s*[A-Za-zÀ-ÿ'\.\-]+(?:[\s\-][A-Za-zÀ-ÿ'\.\-]+)?)"
-    status_regex = r"(Available|Out|Questionable|Probable|Doubtful)"
-    
-    matches = list(re.finditer(rf"{name_regex}\s+{status_regex}\b", full_text, flags=re.IGNORECASE))
-    
-    for i, match in enumerate(matches):
-        player_name = match.group(1).strip()
-        status = match.group(2).capitalize()
-        
-        start_reason = match.end()
-        end_reason = matches[i+1].start() if i + 1 < len(matches) else start_reason + 120
-        raw_reason = full_text[start_reason:end_reason].strip()
-        
-        reason = re.split(r'\d{2}/\d{2}/\d{4}|NOT YET SUBMITTED', raw_reason)[0].strip()
-        if len(reason) > 120:
-            reason = reason[:120] + "..."
-
-        current_row = {
-            "GAME_DATE": "", "GAME_TIME_ET": "", "MATCHUP": "", "TEAM_NAME_IR": "", 
-            "PLAYER_NAME_IR": player_name, 
-            "PLAYER_KEY_IR": normalize_person_name(player_name),
-            "INJ_STATUS": status,
-            "INJ_REASON": reason,
-            "INJ_REPORT_URL": pdf_url,
-        }
-        rows.append(current_row)
-
-    injury_df = pd.DataFrame(rows)
-    if not injury_df.empty:
-        injury_df["INJ_REASON"] = injury_df["INJ_REASON"].str.replace(r"\s+", " ", regex=True).str.strip()
-    
-    return injury_df
+    return parse_official_injury_report_lines(lines, pdf_url)
 
 
 def clear_injury_cache() -> None:
