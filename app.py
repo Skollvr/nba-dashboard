@@ -158,7 +158,7 @@ def main():
         min_games = st.slider("Min Jogos", 0, 82, 0 if early_2627_test else 5)
         min_minutes = st.slider("Min Minutos", 0, 40, 0 if early_2627_test else 15)
         role_filter = st.pills("Jogadores", ROLE_OPTIONS, default="Todos")
-        line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PRA")
+        line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PTS")
         line_value = None
         api_key_available = bool(get_odds_api_key())
         use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
@@ -615,7 +615,21 @@ def main():
         ).map(manual_line_map)
 
     def _render_panorama() -> None:
-        # Rankings and leaders keep the existing model and ordering.
+        # Keep the Panorama as the separate, less-cluttered space the user prefers.
+        if st.session_state["dashboard_visual_mode"] == "Renovado":
+            st.markdown(
+                '<div class="nova-workspace-label">'
+                'Panorama da partida'
+                '<span>Melhores linhas, líderes e ranking sem poluir os cards</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="nova-workspace-sub">Compare destaques do confronto '
+                'e explore as melhores projeções. Sem linhas válidas, não '
+                'calculamos Edge nem exibimos recomendações artificiais.</div>',
+                unsafe_allow_html=True,
+            )
         render_best_game_tips(
             away_df, home_df, min_games, min_minutes,
             line_metric, line_value, use_market_line,
