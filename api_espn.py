@@ -348,8 +348,8 @@ def parse_espn_shooting_stats(
     fg_value = _first_stat(
         stat_map, "FG", "FGM-A", "FGM-FGA", "FG-FGA",
         "fieldGoalsMade-fieldGoalsAttempted", "fieldGoals",
-        "fieldGoalsMade", "FGM/FGA", "FG%", "FGM", "FG/A",
-        "fieldGoalPct", "fieldGoalsPct", "fieldGoalsMadeAttempted",
+        "fieldGoalsMade", "FGM/FGA", "FGM", "FG/A",
+        "fieldGoalsMadeAttempted",
     )
     three_value = _first_stat(
         stat_map, "3PT", "3P", "3PM-A", "3PM-3PA", "3PM/3PA",
@@ -634,11 +634,34 @@ def _compact_stat_key(value: Any) -> str:
 
 
 def _first_stat(stat_map: dict[str, Any], *aliases: str) -> Any:
-    normalized = {_compact_stat_key(k): v for k, v in stat_map.items()}
+    """Look up ESPN stats without conflating count and percentage columns.
+
+    In ESPN gamelogs both FG='7-22' and FG%='31.8' are present. Removing
+    punctuation before lookup maps both to 'fg', so FG% overwrote FG and caused
+    false missing FGA. Prefer case-insensitive EXACT names, then a conservative
+    normalized fallback excluding unrelated percentage columns.
+    """
+    exact = {str(k).strip().casefold(): value for k, value in stat_map.items()}
     for alias in aliases:
-        key = _compact_stat_key(alias)
-        if key in normalized:
-            return normalized[key]
+        key = str(alias).strip().casefold()
+        if key in exact:
+            return exact[key]
+
+    for alias in aliases:
+        candidate = _compact_stat_key(alias)
+        alias_lower = str(alias).casefold()
+        alias_is_percent = (
+            "%" in alias_lower or "pct" in alias_lower or "percent" in alias_lower
+        )
+        for raw_key, value in stat_map.items():
+            raw_lower = str(raw_key).casefold()
+            key_is_percent = (
+                "%" in raw_lower or "pct" in raw_lower or "percent" in raw_lower
+            )
+            if key_is_percent != alias_is_percent:
+                continue
+            if _compact_stat_key(raw_key) == candidate:
+                return value
     return None
 
 
