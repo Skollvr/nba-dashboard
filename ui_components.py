@@ -327,38 +327,60 @@ def render_player_focus_panel(
                 
     colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
 
-    st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
-
-    top_left, top_right = st.columns([1, 5])
-    with top_left:
-        st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
-
-    with top_right:
-        jersey = f"#{row.get('JERSEY_NUMBER')} | " if row.get('JERSEY_NUMBER') and str(row.get('JERSEY_NUMBER')).strip() else ""
-        st.markdown(f"""
-            <div style="
-                background: linear-gradient(135deg, {colors['primary']} 0%, {colors['secondary']} 150%);
-                padding: 20px; border-radius: 12px; border-left: 15px solid {colors['secondary']};
-                margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-            ">
-                <h1 style="color: {colors['secondary']}; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -1px;">
-                    {row['PLAYER']}
-                </h1>
-                <div style="color: {colors['secondary']}; opacity: 0.9; font-weight: 600; font-size: 14px;">
-                    {row.get('TEAM_NAME', 'NBA')} | {jersey}{row.get('POSITION', '')}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        # Same player image and team colors; more compact player identity.
+        player_num = pd.to_numeric(row.get("PLAYER_ID"), errors="coerce")
+        photo = get_player_headshot_url(int(player_num)) if pd.notna(player_num) else ""
+        gp_value = pd.to_numeric(row.get("SEASON_GP", 0), errors="coerce")
+        gp = int(gp_value) if pd.notna(gp_value) else 0
+        name = escape_html(str(row.get("PLAYER", "")))
+        tname = escape_html(str(row.get("TEAM_NAME", "NBA")))
+        pos = escape_html(str(row.get("POSITION", "—")))
+        sample = escape_html(str(row.get("SAMPLE_STATUS", "")))
         st.markdown(
-            f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • '
-            f'MIN temp {format_number(row["SEASON_MIN"])} • '
-            f'MIN proj {format_number(row.get("PROJ_MIN_V1", 0.0))} '
-            f'({row.get("MINUTES_SOURCE", "Modelo interno")}) • '
-            f'{row.get("SAMPLE_STATUS", "")} • Time {row["TEAM_NAME"]}</div>',
+            '<div class="nova-focus-player-heading" '
+            f'style="--nova-team:{colors["primary"]}">'
+            f'<img src="{escape_html(photo, quote=True)}" alt="Foto de {name}">'
+            '<div>'
+            f'<strong>{name}</strong>'
+            f'<small>{tname} · {pos} · GP {gp} · '
+            f'MIN proj {format_number(row.get("PROJ_MIN_V1"))} · {sample}</small>'
+            '</div></div>',
             unsafe_allow_html=True,
         )
+    else:
+        st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
+
+        top_left, top_right = st.columns([1, 5])
+        with top_left:
+            st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
+
+        with top_right:
+            jersey = f"#{row.get('JERSEY_NUMBER')} | " if row.get('JERSEY_NUMBER') and str(row.get('JERSEY_NUMBER')).strip() else ""
+            st.markdown(f"""
+                <div style="
+                    background: linear-gradient(135deg, {colors['primary']} 0%, {colors['secondary']} 150%);
+                    padding: 20px; border-radius: 12px; border-left: 15px solid {colors['secondary']};
+                    margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+                ">
+                    <h1 style="color: {colors['secondary']}; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -1px;">
+                        {row['PLAYER']}
+                    </h1>
+                    <div style="color: {colors['secondary']}; opacity: 0.9; font-weight: 600; font-size: 14px;">
+                        {row.get('TEAM_NAME', 'NBA')} | {jersey}{row.get('POSITION', '')}
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+            position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+            st.markdown(
+                f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • '
+                f'MIN temp {format_number(row["SEASON_MIN"])} • '
+                f'MIN proj {format_number(row.get("PROJ_MIN_V1", 0.0))} '
+                f'({row.get("MINUTES_SOURCE", "Modelo interno")}) • '
+                f'{row.get("SAMPLE_STATUS", "")} • Time {row["TEAM_NAME"]}</div>',
+                unsafe_allow_html=True,
+            )
             
     _visual_metric = st.pills(
         "Métrica em análise detalhada", 
