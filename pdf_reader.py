@@ -330,11 +330,25 @@ def parse_official_injury_report_lines(
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_latest_injury_report_df() -> pd.DataFrame:
-    """Retrieve NBA's latest 15-minute PDF injury bulletin, if available."""
-    pdf_url = fetch_latest_injury_report_pdf_url()
-    if not pdf_url:
-        return pd.DataFrame()
+def fetch_latest_injury_report_result() -> dict:
+    """Return PDF rows plus the exact stage of any failed download/parse."""
+    url = fetch_latest_injury_report_pdf_url()
+    info = {
+        "pdf_url": url,
+        "stage": "Localização do PDF",
+        "detail": "",
+        "pdf_bytes": 0,
+        "text_lines": 0,
+        "parsed_rows": 0,
+        "teams": 0,
+        "frame": pd.DataFrame(),
+    }
+    if not url:
+        info["detail"] = (
+            "Nenhum PDF validado no índice da NBA nem nos URLs recentes "
+            "do CDN. Verifique acesso do Streamlit Cloud aos dois domínios."
+        )
+        return info
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -342,22 +356,47 @@ def fetch_latest_injury_report_df() -> pd.DataFrame:
         "Referer": "https://official.nba.com/",
     }
     try:
-        response = requests.get(pdf_url, headers=headers, timeout=(4, 12))
+        response = requests.get(url, headers=headers, timeout=(4, 12))
         response.raise_for_status()
+        info["pdf_bytes"] = len(response.content)
         if not response.content.startswith(b"%PDF"):
-            return pd.DataFrame()
-    except Exception:
-        return pd.DataFrame()
+            info["stage"] = "Download"
+            info["detail"] = "URL retornou conteúdo que não é PDF."
+            return info
+    except Exception as exc:
+        info["stage"] = "Download"
+        info["detail"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        return info
 
     lines = extract_pdf_text_lines(response.content)
+    info["text_lines"] = len(lines)
     if not lines:
-        return pd.DataFrame()
-    return parse_official_injury_report_lines(lines, pdf_url)
+        info["stage"] = "Extração de texto"
+        info["detail"] = "PDF recebido, mas não foi possível extrair o texto."
+        return info
+
+    frame = parse_official_injury_report_lines(lines, url)
+    info["parsed_rows"] = len(frame)
+    if frame.empty:
+        info["stage"] = "Parser do boletim"
+        info["detail"] = "Texto presente no PDF, mas nenhum jogador/time foi identificado."
+        return info
+
+    info["frame"] = frame
+    info["teams"] = frame["TEAM_ID_IR"].dropna().nunique()
+    info["stage"] = "Concluído"
+    info["detail"] = "PDF oficial lido; conferir correspondência do confronto e equipe."
+    return info
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_latest_injury_report_df() -> pd.DataFrame:
+    return fetch_latest_injury_report_result()["frame"]
 
 
 def clear_injury_cache() -> None:
     """Limpa somente os caches do injury report."""
-    for cached_fn in [fetch_latest_injury_report_pdf_url, fetch_latest_injury_report_df]:
+    for cached_fn in [fetch_latest_injury_report_pdf_url, fetch_latest_injury_report_result, fetch_latest_injury_report_df]:
         try:
             cached_fn.clear()
         except Exception:
