@@ -39,6 +39,7 @@ def _context(projection=22.0, active=False):
         "has_active_line": active,
         "line_value": 20.5 if active else None,
         "edge": 1.5 if active else None,
+        "line_source": "BetMGM" if active else "Linha indisponível",
     }
 
 
@@ -85,7 +86,7 @@ def test_modern_card_displays_line_and_edge_without_recalculating_them():
     ):
         render_player_card_refresh(_player(), "PTS", 20.5, False)
     assert projection.call_count == 1
-    assert "Linha 20.5 · PTS" in html[0]
+    assert "BetMGM · 20.5 PTS" in html[0]
     assert "Edge +1.5" in html[0]
 
 
@@ -189,3 +190,16 @@ def test_dark_primary_buttons_have_dark_text_for_descendants():
     assert '#52bfad' in css
     assert 'button[kind="primary"] p' in css
     assert 'color: #07141b !important' in css
+
+
+
+def test_refreshed_card_explains_unavailable_line_and_manual_entry():
+    html = []
+    with (
+        patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)),
+        patch("ui_refresh.get_line_context", return_value=_context(22.0, False)),
+    ):
+        render_player_card_refresh(_player(), "PTS", None, True)
+    assert "LINHA INDISPONÍVEL" in html[0]
+    assert "GERAR MANUAL" in html[0]
+    assert "22.0" in html[0]
