@@ -66,7 +66,7 @@ def main():
             'Projeções, contexto e dados da temporada num só lugar.'
             '</div></div></div>'
             '<div class="nova-strip">'
-            '<span>● Temporada 2026/27</span>'
+            '<span>● Temporada 2026/27 disponível</span>'
             '<span>Dados ESPN + boletim oficial NBA</span>'
             '<span>Horários de Brasília</span>'
             '<span>Ambiente de testes</span>'
@@ -614,51 +614,56 @@ def main():
             home_df["PLAYER_ID"], errors="coerce"
         ).map(manual_line_map)
 
-    render_best_game_tips(
-        away_df,
-        home_df,
-        min_games,
-        min_minutes,
-        line_metric,
-        line_value,
-        use_market_line,
-    )
+    def _render_panorama() -> None:
+        # Rankings and leaders keep the existing model and ordering.
+        render_best_game_tips(
+            away_df, home_df, min_games, min_minutes,
+            line_metric, line_value, use_market_line,
+        )
+        render_summary_cards(
+            away_df, home_df, min_games, min_minutes, role_filter
+        )
+        render_game_rankings(
+            away_df, home_df, min_games, min_minutes, role_filter,
+            line_metric, line_value, use_market_line,
+        )
 
-    render_summary_cards(away_df, home_df, min_games, min_minutes, role_filter)
-    render_game_rankings(away_df, home_df, min_games, min_minutes, role_filter, line_metric, line_value, use_market_line)
+    def _render_players() -> None:
+        selected_team = st.segmented_control(
+            "Time em análise",
+            [selected_game["away_team_name"], selected_game["home_team_name"]],
+            default=selected_game["away_team_name"],
+        )
+        if selected_team == selected_game["away_team_name"]:
+            target_df = away_df
+            opp_abbr = selected_game.get("HOME_TEAM_ABBR", selected_game["home_team_name"])
+        else:
+            target_df = home_df
+            opp_abbr = selected_game.get("VISITOR_TEAM_ABBR", selected_game["away_team_name"])
 
-    selected_team = st.segmented_control(
-        "Time em análise",
-        [selected_game["away_team_name"], selected_game["home_team_name"]],
-        default=selected_game["away_team_name"]
-    )
+        sort_label = (
+            f"{line_metric} L10"
+            if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
+        )
+        render_team_section_v2(
+            selected_team, target_df, analysis_season,
+            min_games, min_minutes, role_filter, sort_label, False,
+            chart_mode, line_metric, line_value, use_market_line,
+            cards_per_row, opp_abbr, season_scope=season_scope,
+        )
 
-    if selected_team == selected_game["away_team_name"]:
-        target_df = away_df
-        opp_abbr = selected_game.get("HOME_TEAM_ABBR", selected_game["home_team_name"])
+    if st.session_state["dashboard_visual_mode"] == "Renovado":
+        # Put the player's decision-oriented card first. Keep panorama and
+        # rankings available in a second tab instead of above the full roster.
+        players_tab, panorama_tab = st.tabs(["🏀 Jogadores", "📊 Panorama do confronto"])
+        with players_tab:
+            _render_players()
+        with panorama_tab:
+            _render_panorama()
     else:
-        target_df = home_df
-        opp_abbr = selected_game.get("VISITOR_TEAM_ABBR", selected_game["away_team_name"])
-
-    sort_label = f"{line_metric} L10" if f"{line_metric} L10" in SORT_OPTIONS else "PRA L10"
-
-    render_team_section_v2(
-        selected_team,
-        target_df,
-        analysis_season,
-        min_games,
-        min_minutes,
-        role_filter,
-        sort_label,
-        False,
-        chart_mode,
-        line_metric,
-        line_value,
-        use_market_line,
-        cards_per_row,
-        opp_abbr,
-        season_scope=season_scope,
-    )
+        # Exact classic ordering retained for visual A/B comparison.
+        _render_panorama()
+        _render_players()
 
 if __name__ == "__main__":
     main()
