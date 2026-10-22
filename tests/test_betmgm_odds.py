@@ -168,3 +168,35 @@ def test_key_can_be_read_from_cloud_secrets_without_exposure():
         patch("api_odds.st.secrets", {"SPORTSGAMEODDS_API_KEY": "secret-value"}),
     ):
         assert get_odds_api_key() == "secret-value"
+
+
+
+def test_player_stat_entity_id_is_supported_without_player_id_field():
+    event = _event()
+    for item in event["odds"].values():
+        if item.get("playerID") == "p1":
+            item["statEntityID"] = item.pop("playerID")
+    df = extract_betmgm_player_props(event)
+    assert len(df) == 1
+    assert df.iloc[0]["PLAYER_NAME_ODDS"] == "Tyrese Maxey"
+    assert df.iloc[0]["BETMGM_PTS_LINE"] == 28.5
+
+
+def test_does_not_mix_over_under_odds_from_inconsistent_lines():
+    event = _event()
+    event["odds"]["b"]["byBookmaker"]["betmgm"]["overUnder"] = "29.5"
+    df = extract_betmgm_player_props(event)
+    assert df.iloc[0]["BETMGM_PTS_LINE"] == 28.5
+    assert df.iloc[0]["BETMGM_PTS_UNDER_DEC"] is None
+
+
+def test_ui_has_no_old_backtest_or_pdf_diagnostic_controls():
+    from pathlib import Path
+    app = Path("app.py").read_text(encoding="utf-8")
+    ui = Path("ui_components.py").read_text(encoding="utf-8")
+    assert "Backtest temporal — minutos + forma" not in app
+    assert "Diagnóstico técnico ESPN — FGA" not in app
+    assert "Diagnóstico da fonte de lesões" not in ui
+    assert "Diagnosticar localização, download e leitura do PDF NBA" not in ui
+    assert 'value=True,' in app  # BetMGM priority is enabled by default
+    assert "Gerar linha manual" in app
