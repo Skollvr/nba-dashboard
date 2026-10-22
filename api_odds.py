@@ -216,10 +216,20 @@ def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
         )
         if not isinstance(player_info, dict):
             player_info = {}
+        player_names = player_info.get("names") or {}
+        if not isinstance(player_names, dict):
+            player_names = {}
         name = (
-            (str(player_info.get("firstName") or "") + " "
-             + str(player_info.get("lastName") or "")).strip()
-            or str(player_info.get("name") or "").strip()
+            (str(player_info.get("firstName") or player_names.get("first") or "")
+             + " "
+             + str(player_info.get("lastName") or player_names.get("last") or "")).strip()
+            or str(
+                player_info.get("name")
+                or player_names.get("display")
+                or player_names.get("long")
+                or player_names.get("full")
+                or ""
+            ).strip()
         )
         if not name:
             continue
