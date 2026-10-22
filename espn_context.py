@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from config import APP_TIMEZONE
 from api_espn import (
     ESPN_BASE,
     OFFICIAL_TEAM_ID_BY_ABBR,
@@ -66,12 +67,22 @@ def _position_group(value: Any) -> str:
 
 
 def _cutoff_timestamp(as_of_date: str | date | None) -> pd.Timestamp | None:
+    """Exclusive pregame cutoff: start of selected date in Brasilia time."""
     if as_of_date in (None, ""):
         return None
     try:
-        return pd.Timestamp(as_of_date).normalize() + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)
+        midnight = pd.Timestamp(as_of_date).normalize()
+        if midnight.tzinfo is not None:
+            return midnight.tz_convert(APP_TIMEZONE).normalize()
+        return midnight.tz_localize(APP_TIMEZONE)
     except Exception:
         return None
+
+
+def _pregame_date_mask(game_dates: pd.Series, cutoff: pd.Timestamp) -> pd.Series:
+    """Compare ESPN UTC game timestamps using the Brazil calendar day."""
+    dates_utc = pd.to_datetime(game_dates, errors="coerce", utc=True)
+    return dates_utc.dt.tz_convert(APP_TIMEZONE) < cutoff
 
 
 @st.cache_data(ttl=54000, show_spinner=False)
@@ -100,8 +111,7 @@ def get_espn_roster_player_logs(
         work["TEAM_ID"] = int(team_id)
         work["POSITION"] = str(item.get("POSITION") or "")
         if cutoff is not None:
-            dates = pd.to_datetime(work["GAME_DATE"], errors="coerce")
-            work = work[dates.dt.date <= cutoff.date()].copy()
+            work = work[_pregame_date_mask(work["GAME_DATE"], cutoff)].copy()
         return work
 
     items = roster.to_dict("records")
@@ -436,10 +446,9 @@ def build_espn_defense_context(
             team_gp[tid] = 0
             continue
         work = schedule.copy()
-        dates = pd.to_datetime(work["GAME_DATE"], errors="coerce")
         mask = work["COMPLETED"].fillna(False)
         if cutoff is not None:
-            mask &= dates.dt.date <= cutoff.date()
+            mask &= _pregame_date_mask(work["GAME_DATE"], cutoff)
         completed = work[mask].copy().sort_values("GAME_DATE", ascending=False)
         team_gp[tid] = int(len(completed))
         sample = completed.head(int(window_games)) if window_games else completed
