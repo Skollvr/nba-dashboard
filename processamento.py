@@ -1240,6 +1240,29 @@ def enrich_team_with_context(
         axis=1,
     )
 
+    # Injury status overrides even an explicit external minutes estimate.
+    # Depth chart is a role indication, not proof a player will play.
+    inactive = enriched.get("IS_UNAVAILABLE", pd.Series(False, index=enriched.index))
+    inactive = inactive.fillna(False).astype(bool)
+    enriched.loc[inactive, ["PROJ_MIN_V1", "PROJ_MIN_INTERNAL"]] = 0.0
+    enriched.loc[inactive, "MINUTES_SOURCE"] = "Fora — relatório de lesões"
+
+    # GP=0 cannot establish current-season production or minutes. Keep player
+    # visible for lineup tests but suppress numeric props as unavailable.
+    player_gp = pd.to_numeric(enriched["SEASON_GP"], errors="coerce").fillna(0)
+    no_current_sample = player_gp <= 0
+    enriched["SAMPLE_STATUS"] = player_gp.apply(
+        lambda games: (
+            "Sem jogos nesta temporada" if games <= 0
+            else f"Amostra inicial: {int(games)} jogo(s)" if games < 10
+            else f"Amostra: {int(games)} jogos"
+        )
+    )
+    enriched.loc[no_current_sample & ~inactive, [
+        "PROJ_MIN_V1", "PROJ_MIN_INTERNAL",
+    ]] = np.nan
+    enriched.loc[no_current_sample & ~inactive, "MINUTES_SOURCE"] = "Sem amostra 2026/27"
+
     metric_map = {
         "PTS": ("SEASON_PTS", "L10_PTS", "L5_PTS"),
         "REB": ("SEASON_REB", "L10_REB", "L5_REB"),
@@ -1446,6 +1469,16 @@ def enrich_team_with_context(
         enriched.loc[three_valid, "PROJ_3PM_V1"],
         enriched.loc[three_valid, "PROJ_3PA_V1"],
     )
+
+    # GP=0 must never look like a genuine zero-prop prediction.
+    # This is especially important at the beginning of a new season.
+    no_sample = pd.to_numeric(
+        enriched["SEASON_GP"], errors="coerce"
+    ).fillna(0).le(0)
+    for metric in ["PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA"]:
+        enriched.loc[no_sample, f"PROJ_{metric}_V1"] = np.nan
+        enriched.loc[no_sample, f"PROJ_{metric}"] = np.nan
+        enriched.loc[no_sample, f"BASE_{metric}_V1"] = np.nan
 
     return enriched
 
