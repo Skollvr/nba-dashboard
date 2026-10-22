@@ -151,7 +151,7 @@ def test_extraction_reverses_each_pdf_page_not_full_document():
             self.rows = rows
 
         def extract_text(self, extraction_mode=None):
-            return "\\n".join(reversed(self.rows))
+            return "\n".join(reversed(self.rows))
 
     class MockReader:
         def __init__(self, contents):
