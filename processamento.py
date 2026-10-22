@@ -521,6 +521,25 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
     has_manual_line = bool(pd.notna(manual_line) and float(manual_line) > 0)
     has_fallback_line = bool(pd.notna(fallback_line) and float(fallback_line) > 0)
 
+    # An actual sportsbook quote and a usable statistical projection are
+    # independent facts. Keep the former visible when GP=0, but NEVER
+    # calculate an Edge/Hit without a validated projection.
+    has_market_quote = bool(
+        use_market_line and pd.notna(market_line) and float(market_line) > 0
+    )
+    if has_market_quote:
+        quoted_line = float(market_line)
+        quoted_source = "BetMGM"
+    elif has_manual_line:
+        quoted_line = float(manual_line)
+        quoted_source = "Manual"
+    elif has_fallback_line:
+        quoted_line = float(fallback_line)
+        quoted_source = "Manual"
+    else:
+        quoted_line = None
+        quoted_source = "Linha indisponível"
+
     # Missing ESPN shooting data must not produce an OVER/UNDER opinion.
     if pd.isna(projection_num):
         use_market = False
@@ -549,6 +568,9 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
             "line_source": "Dados ESPN incompletos" if pd.isna(projection_num) else "Linha indisponível",
             "has_market_line": False,
             "has_active_line": False,
+            "quoted_line": quoted_line,
+            "quoted_source": quoted_source,
+            "has_quote": quoted_line is not None,
             "over_dec": None,
             "under_dec": None,
             "updated_at": "",
@@ -599,6 +621,9 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
         "line_source": source_name,
         "has_market_line": use_market,
         "has_active_line": True,
+        "quoted_line": quoted_line,
+        "quoted_source": quoted_source,
+        "has_quote": quoted_line is not None,
         "over_dec": market_info.get("over_dec") if use_market else None,
         "under_dec": market_info.get("under_dec") if use_market else None,
         "updated_at": market_info.get("updated_at") if use_market else "",
