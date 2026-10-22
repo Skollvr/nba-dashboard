@@ -1,6 +1,8 @@
 import re
 import time
-from datetime import date, datetime
+from html import unescape
+from urllib.parse import urljoin, urlsplit
+from datetime import date, datetime, timedelta
 from io import BytesIO
 
 import pandas as pd
@@ -34,7 +36,7 @@ def clean_injury_pdf_line(line: str) -> str:
 def parse_report_dt_from_url(pdf_url: str) -> datetime | None:
     match = re.search(
         r"Injury[\s\-_]*Report[\s\-_]*(\d{4}-\d{2}-\d{2})[\s\-_]*(\d{1,2})[\s\-_]*(\d{2})\s*(AM|PM)\.pdf",
-        str(pdf_url),
+        urlsplit(str(pdf_url)).path,
         flags=re.IGNORECASE,
     )
     if not match:
@@ -97,54 +99,87 @@ def resolve_team_line(line: str) -> str:
 # ==========================================
 # 2. FUNÇÕES DE DOWNLOAD E LEITURA DO PDF
 # ==========================================
+def _injury_links_from_html(html: str, page_url: str) -> list[str]:
+    """Recognize NBA PDF hrefs even if page markup/query arguments change."""
+    links = re.findall(
+        r"""(?:href|data-href)\s*=\s*["']([^"']+?\.pdf(?:\?[^"']*)?)["']""",
+        html, flags=re.IGNORECASE,
+    )
+    links += re.findall(
+        r"""https?://[^\s"'<>]+?Injury[-_]Report[^\s"'<>]*?\.pdf""",
+        html, flags=re.IGNORECASE,
+    )
+    result: list[str] = []
+    for raw in links:
+        url = urljoin(page_url, unescape(raw.strip()))
+        pathname = urlsplit(url).path.lower()
+        if "injury" in pathname and "report" in pathname and pathname.endswith(".pdf"):
+            if url not in result:
+                result.append(url)
+    return result
+
+
+def _official_pdf_recent_candidates(now_et: datetime) -> list[str]:
+    """Generate the NBA CDN's existing 15-minute PDF filename convention."""
+    rounded = now_et.replace(minute=(now_et.minute // 15) * 15, second=0, microsecond=0)
+    prefix = "https://ak-static.cms.nba.com/referee/injury/"
+    return [
+        prefix + f"Injury-Report_{(rounded - timedelta(minutes=15*i)):%Y-%m-%d_%I_%M%p}.pdf"
+        for i in range(9)
+    ]
+
+
+def _pdf_header_ok(url: str, timeout=(3, 5)) -> bool:
+    """Verify the candidate URL serves a PDF without downloading whole file."""
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/pdf,*/*",
+        "Referer": "https://official.nba.com/",
+        "Range": "bytes=0-63",
+    }
+    try:
+        with requests.get(url, headers=headers, timeout=timeout, stream=True) as response:
+            response.raise_for_status()
+            chunk = next(response.iter_content(chunk_size=64), b"")
+            return chunk.startswith(b"%PDF")
+    except Exception:
+        return False
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_latest_injury_report_pdf_url() -> str:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://official.nba.com/",
-        "Cache-Control": "no-cache"
-    }
-    today = datetime.now(APP_TIMEZONE).date()
-    season_str = get_season_string(today)
-    cb = int(time.time())
-    page_url = f"https://official.nba.com/nba-injury-report-{season_str}-season/?cb={cb}"
-    
+    """Locate the latest official NBA bulletin, even if the index is blocked."""
+    now_et = datetime.now(EASTERN_TIMEZONE)
+    season = get_season_string(now_et.date())
+    page_url = f"https://official.nba.com/nba-injury-report-{season}-season/"
+    links: list[str] = []
     try:
-        response = requests.get(page_url, headers=headers, timeout=10)
-        if response.status_code == 404:
-            fallback_year = f"{today.year-1}-{str(today.year)[-2:]}"
-            page_url = f"https://official.nba.com/nba-injury-report-{fallback_year}-season/?cb={cb}"
-            response = requests.get(page_url, headers=headers, timeout=10)
+        response = requests.get(
+            page_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,*/*",
+            },
+            timeout=(3, 7),
+        )
         response.raise_for_status()
+        links = _injury_links_from_html(response.text, page_url)
     except Exception:
-        return ""
+        pass
 
-    html = response.text
-    all_hrefs = re.findall(r'href="([^"]+\.pdf)"', html, flags=re.IGNORECASE)
-    pdf_urls = []
-    for href in all_hrefs:
-        if "injury" in href.lower() and "report" in href.lower():
-            if href.startswith("http"):
-                pdf_urls.append(href)
-            else:
-                base = "https://official.nba.com"
-                pdf_urls.append(base + href if href.startswith("/") else base + "/" + href)
+    # Robust fallback: the static NBA CDN may work even if official.nba.com
+    # cannot be fetched from Streamlit Cloud.
+    candidates = links + _official_pdf_recent_candidates(now_et)
+    unique: dict[str, datetime] = {}
+    for link in candidates:
+        stamp = parse_report_dt_from_url(link)
+        if stamp is not None and stamp <= now_et:
+            unique[link] = stamp
+    for url, _ in sorted(unique.items(), key=lambda item: item[1], reverse=True):
+        if _pdf_header_ok(url):
+            return url
+    return ""
 
-    if not pdf_urls: 
-        return ""
-
-    dated_urls = []
-    for url in pdf_urls:
-        dt = parse_report_dt_from_url(url)
-        if dt is not None: 
-            dated_urls.append((dt, url))
-
-    if dated_urls:
-        dated_urls.sort(key=lambda x: x[0], reverse=True)
-        return dated_urls[0][1]
-    
-    return pdf_urls[0]
 
 def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
     try:
