@@ -27,7 +27,7 @@ from processamento import (
     get_metric_allowed_column
 )
 from api_nba import get_player_log
-from pdf_reader import parse_injury_report_timestamp_from_url, fetch_latest_injury_report_result
+from pdf_reader import parse_injury_report_timestamp_from_url
 
 from datetime import timedelta
 
@@ -416,8 +416,9 @@ def render_player_focus_panel(
             )
         else:
             st.info(
-                f"Não há linha manual ou de mercado para {row['PLAYER']} em {visual_metric}. "
-                "Médias, projeção e matchup continuam disponíveis."
+                f"Linha {visual_metric} indisponível para {row['PLAYER']}. "
+                "Preencha Gerar linha manual para calcular Edge e Hit; "
+                "as médias e o matchup continuam disponíveis."
             )
 
     modern_focus = st.session_state.get("dashboard_visual_mode") == "Renovado"
@@ -938,39 +939,6 @@ def render_team_section_v2(
         ir_tab, lineup_tab = st.tabs(["Lesões NBA / ESPN", "Rotação ESPN"])
         with ir_tab:
             render_injury_report_tab(enriched_team_df, team_name)
-            with st.expander("Diagnóstico da fonte de lesões", expanded=False):
-                view_cols = [
-                    "PLAYER", "INJ_STATUS", "INJ_REASON", "INJ_SOURCE",
-                    "TEAM_REPORT_STATUS",
-                ]
-                st.dataframe(
-                    enriched_team_df[[col for col in view_cols if col in enriched_team_df]],
-                    use_container_width=True, hide_index=True,
-                )
-                if st.button(
-                    "Diagnosticar localização, download e leitura do PDF NBA",
-                    key=f"injury_pdf_diag::{team_name}",
-                ):
-                    status = fetch_latest_injury_report_result()
-                    st.markdown(f"**Etapa:** {status['stage']}")
-                    st.caption(status["detail"])
-                    st.caption(
-                        f"Bytes recebidos: {status['pdf_bytes']} • "
-                        f"Linhas extraídas: {status['text_lines']} • "
-                        f"Registros identificados: {status['parsed_rows']} • "
-                        f"Times encontrados: {status['teams']}"
-                    )
-                    if status["pdf_url"]:
-                        st.markdown(f"[Abrir PDF identificado]({status['pdf_url']})")
-                    frame = status["frame"]
-                    if frame is not None and not frame.empty:
-                        slim = frame[[
-                            col for col in (
-                                "MATCHUP", "TEAM_NAME_IR", "TEAM_ID_IR",
-                                "PLAYER_NAME_IR", "INJ_STATUS", "TEAM_REPORT_STATUS"
-                            ) if col in frame
-                        ]].copy()
-                        st.dataframe(slim.head(40), use_container_width=True, hide_index=True)
         with lineup_tab:
             render_lineup_report_tab(enriched_team_df, team_name)
 
@@ -2431,7 +2399,7 @@ def render_player_headline_html(
     elif chosen_ctx.get("has_active_line", False):
         source_label = "✏️ Linha manual"
     else:
-        source_label = "Sem linha"
+        source_label = "Linha indisponível"
 
     return f"""
     <div class="player-headline-card">
@@ -2630,7 +2598,7 @@ def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_va
             </div>
             <div class="hero-note">
                 Projeção atual: <strong>{format_number(line_context.get('projection', 0.0))}</strong>.
-                Não há linha manual ou de mercado disponível para calcular Edge, Hit L5 e Hit L10.
+                Linha indisponível. Preencha <strong>Gerar linha manual</strong> para calcular Edge, Hit L5 e Hit L10.
             </div>
         </div>
         """
