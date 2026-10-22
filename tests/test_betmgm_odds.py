@@ -113,6 +113,10 @@ def test_missing_projection_never_produces_market_edge():
     ctx = get_line_context(row, "PTS", None, use_market_line=True)
     assert not ctx["has_active_line"]
     assert ctx["label"] == "Dados insuficientes"
+    assert ctx["has_quote"]
+    assert ctx["quoted_source"] == "BetMGM"
+    assert ctx["quoted_line"] == 28.5
+    assert ctx["edge"] == 0.0  # not a calculated betting edge
 
 
 def test_safely_ignores_unavailable_bookmaker_and_wrong_event():
