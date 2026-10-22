@@ -8,6 +8,7 @@ from config import (
 from api_nba import get_games_for_date
 from api_lineups import clear_lineup_cache
 from espn_context import clear_espn_pregame_cache, get_espn_roster_player_logs
+from api_espn import diagnose_espn_shooting_gamelog
 from projection_validation import rolling_projection_backtest
 from api_odds import get_odds_api_key, clear_odds_cache
 from pdf_reader import get_season_string, clear_injury_cache
@@ -445,6 +446,38 @@ def main():
                     }),
                     use_container_width=True, hide_index=True,
                 )
+
+    with st.expander("Diagnóstico técnico ESPN — FGA", expanded=False):
+        st.caption(
+            "Consulta os nomes das colunas e os arremessos presentes no retorno "
+            "original da ESPN. Útil apenas se FGA continuar indisponível. "
+            "Os valores são públicos e limitados a quatro jogos."
+        )
+        if not lineup_test_df.empty and {"PLAYER_ID", "PLAYER"}.issubset(lineup_test_df.columns):
+            choices = (
+                lineup_test_df[["PLAYER_ID", "PLAYER"]]
+                .dropna()
+                .drop_duplicates("PLAYER_ID")
+                .sort_values("PLAYER")
+            )
+            options = {
+                f"{row.PLAYER} ({int(row.PLAYER_ID)})": int(row.PLAYER_ID)
+                for row in choices.itertuples(index=False)
+            }
+            selected_player = st.selectbox(
+                "Jogador para diagnosticar", list(options), key=f"diag-player::{selected_game_key}"
+            )
+            if st.button("Ver retorno ESPN", key=f"diag-run::{selected_game_key}"):
+                try:
+                    diagnostic = diagnose_espn_shooting_gamelog(
+                        options[selected_player], analysis_season, season_scope
+                    )
+                    if diagnostic.empty:
+                        st.warning("ESPN não retornou jogos para este jogador e temporada.")
+                    else:
+                        st.dataframe(diagnostic, use_container_width=True, hide_index=True)
+                except Exception as exc:
+                    st.warning(f"Não foi possível consultar o diagnóstico ESPN: {type(exc).__name__}")
 
     with st.expander("Backtest temporal — minutos + forma (diagnóstico)", expanded=False):
         st.caption(
