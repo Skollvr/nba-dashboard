@@ -28,7 +28,7 @@ from espn_context import (
 # 3. API de Odds
 from api_odds import (
     normalize_text, normalize_person_name, fetch_nba_odds_events,
-    find_matching_odds_event, extract_betmgm_player_props
+    find_matching_odds_event, extract_betmgm_player_props, get_odds_api_key
 )
 
 # ---------------------------------------------------------
@@ -544,9 +544,9 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
         return {
             "projection": projection,
             "edge": 0.0,
-            "label": "Dados insuficientes" if pd.isna(projection_num) else "Sem linha",
+            "label": "Dados insuficientes" if pd.isna(projection_num) else "Linha indisponível",
             "line_value": None,
-            "line_source": "Dados ESPN incompletos" if pd.isna(projection_num) else "Sem linha",
+            "line_source": "Dados ESPN incompletos" if pd.isna(projection_num) else "Linha indisponível",
             "has_market_line": False,
             "has_active_line": False,
             "over_dec": None,
@@ -562,7 +562,7 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
             "tooltip": (
                 "Sem amostra validada para esta estatística."
                 if pd.isna(projection_num)
-                else "Nenhuma linha informada para este jogador."
+                else "Linha BetMGM indisponível: insira uma linha manual para analisar Edge e Hit."
             ),
             "hit_l5": "-",
             "under_l5": "-",
@@ -1921,21 +1921,38 @@ def get_matchup_context(
     home_df["IS_HOME"] = True
 
     odds_df = pd.DataFrame()
-
+    market_status = "Consulta BetMGM desativada — linha manual"
     if include_market:
-        report("Consultando linhas de mercado...")
-        odds_events = fetch_nba_odds_events()
-        selected_odds_event = find_matching_odds_event(
-            odds_events,
-            home_team_name=home_team_name,
-            away_team_name=away_team_name,
-        )
-        odds_df = extract_betmgm_player_props(selected_odds_event)
+        if not get_odds_api_key():
+            market_status = "BetMGM indisponível: chave SportsGameOdds não configurada"
+        else:
+            report("Consultando linhas BetMGM...")
+            try:
+                odds_events = fetch_nba_odds_events(target_date=target_date)
+                selected_odds_event = find_matching_odds_event(
+                    odds_events,
+                    home_team_name=home_team_name,
+                    away_team_name=away_team_name,
+                )
+                if selected_odds_event is None:
+                    market_status = "BetMGM: não foi encontrado mercado ativo para este confronto"
+                else:
+                    odds_df = extract_betmgm_player_props(selected_odds_event)
+                    if odds_df.empty:
+                        market_status = "BetMGM: confronto encontrado, sem props de jogadores disponíveis"
+                    else:
+                        market_status = "BetMGM: cotações recebidas para este confronto"
+            except Exception as exc:
+                # Never break ESPN projection loading when the odds service
+                # rejects the key, rate limits, or is temporarily unavailable.
+                market_status = f"BetMGM: falha de consulta ({type(exc).__name__})"
+                odds_df = pd.DataFrame()
 
     report("Finalizando projeções e cards...")
     away_df = merge_betmgm_odds(away_df, odds_df)
     home_df = merge_betmgm_odds(home_df, odds_df)
-
+    away_df["ODDS_FETCH_STATUS"] = market_status
+    home_df["ODDS_FETCH_STATUS"] = market_status
     return away_df, home_df
 
 def merge_injury_report(
