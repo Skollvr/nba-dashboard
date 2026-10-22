@@ -1,4 +1,5 @@
 import streamlit as st
+from html import escape as escape_html
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -53,13 +54,14 @@ def get_game_datetime_brasilia(status_text: str, game_time_brt: str = "") -> str
         return status_text
 
 def inject_css() -> None:
-    """Lê o arquivo style.css e aplica no Streamlit."""
-    try:
-        with open("style.css", "r", encoding="utf-8") as f:
-            css = f.read()
-        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-    except FileNotFoundError:
-        pass
+    """Classic style unchanged; load refresh stylesheet only when chosen."""
+    with open("style.css", "r", encoding="utf-8") as f:
+        st.markdown("<style>" + f.read() + "</style>", unsafe_allow_html=True)
+
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        with open("style_refresh.css", "r", encoding="utf-8") as f:
+            st.markdown("<style>" + f.read() + "</style>", unsafe_allow_html=True)
+
 
 def style_full_stats_table(df: pd.DataFrame) -> Styler:
     """Aplica cores e formatos na tabela detalhada."""
@@ -127,6 +129,10 @@ def render_metric_distribution_chart(row: pd.Series):
 # =========================================================
 
 def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        render_player_card_refresh(row, line_metric, line_value, use_market_line)
+        return
+
     # --- RASTREADOR DE CORES "BLINDADO" (CORREÇÃO DEFINITIVA) ---
     # Pegamos os dados brutos para evitar adivinhações por texto
     raw_team_name = str(row.get('TEAM_NAME', 'NBA'))
@@ -762,7 +768,14 @@ def render_team_section_v2(
         st.info("Nenhum jogador desse time passou pelos filtros atuais.")
         return
 
-    st.markdown(f"### {team_name}")
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        st.markdown(
+            '<div class="nova-section-head"><h3>' + escape_html(team_name)
+            + '</h3><small>Elenco • projeções • leitura rápida</small></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(f"### {team_name}")
 
     line_info_text = (
         f"Linha ativa: {line_metric} • mercado por jogador (BetMGM quando houver)"
@@ -1232,6 +1245,9 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> Styler:
     return styler
     
 def render_matchup_header(game_row: pd.Series) -> None:
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        render_matchup_header_refresh(game_row)
+        return
     away_team_id = int(game_row["VISITOR_TEAM_ID"])
     home_team_id = int(game_row["HOME_TEAM_ID"])
 
