@@ -18,6 +18,7 @@ def get_preferred_injury_report(
     team_ids: tuple[int, ...],
     matchup: str,
     target_date: date | None = None,
+    today: date | None = None,
 ) -> pd.DataFrame:
     """Find authoritative team-specific entries for the selected game."""
     team_ids = tuple(int(v) for v in team_ids)
@@ -27,7 +28,7 @@ def get_preferred_injury_report(
 
     # A latest official PDF is not a historical injury snapshot.
     # When testing an older game, current injuries should remain unconfirmed.
-    today = datetime.now(APP_TIMEZONE).date()
+    today = today or datetime.now(APP_TIMEZONE).date()
     if target_date is None or target_date >= today:
         try:
             report = fetch_latest_injury_report_df()
