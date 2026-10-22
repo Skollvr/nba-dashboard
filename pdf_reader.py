@@ -12,7 +12,10 @@ import streamlit as st
 from pypdf import PdfReader
 
 # Importamos as configurações e o fuso horário
-from config import APP_TIMEZONE, EASTERN_TIMEZONE, TEAM_NAME_LOOKUP_NORM, TEAM_LOOKUP
+from config import (
+    APP_TIMEZONE, EASTERN_TIMEZONE, TEAM_NAME_LOOKUP_NORM,
+    TEAM_LOOKUP, TEAM_ABBR_LOOKUP,
+)
 # Importamos a função de normalizar nomes que criámos no ficheiro das odds
 from api_odds import normalize_person_name
 
@@ -196,22 +199,76 @@ def fetch_latest_injury_report_pdf_url() -> str:
     return ""
 
 
+def _page_text_is_reversed(lines: list[str]) -> bool | None:
+    """Detect upside-down text extraction independently of PDF page order.
+
+    Some NBA PDFs are laid out correctly but pypdf's layout extractor emits
+    table rows bottom-to-top. A stateful parser then assigns the next team's
+    injuries to the previous team. The printed header and row chronology make
+    this reversible without guessing team membership from player names.
+    """
+    valid = [str(line).strip() for line in lines if str(line).strip()]
+    if not valid:
+        return None
+    for idx, line in enumerate(valid):
+        if "Game Date" in line and "Player Name" in line:
+            return idx > len(valid) / 2
+
+    # Date/time runs proceed forward in the NBA report. Prefer the report
+    # date if multiple calendar dates occur on a page.
+    dates: list[date] = []
+    for line in valid:
+        match = re.search(r"\b(\d{2})/(\d{2})/(\d{4})\b", line)
+        if match:
+            try:
+                dates.append(date(int(match.group(3)), int(match.group(1)), int(match.group(2))))
+            except ValueError:
+                continue
+    if len(dates) >= 2 and dates[0] != dates[-1]:
+        return dates[0] > dates[-1]
+    times = []
+    for line in valid:
+        match = re.search(r"(\d{2}):(\d{2})\s*\(ET\)", line)
+        if match:
+            times.append(int(match.group(1)) * 60 + int(match.group(2)))
+    if len(times) >= 2 and times[0] != times[-1]:
+        return times[0] > times[-1]
+    return None
+
+
 def extract_pdf_text_lines(pdf_bytes: bytes) -> list[str]:
+    """Extract NBA PDF rows in visual TOP-to-bottom order for each page."""
     try:
         reader = PdfReader(BytesIO(pdf_bytes))
         lines: list[str] = []
+        first_page_reversed: bool | None = None
+
         for page in reader.pages:
             try:
                 text = page.extract_text(extraction_mode="layout") or ""
             except TypeError:
                 text = page.extract_text() or ""
-                
-            page_lines = [clean_injury_pdf_line(x) for x in text.splitlines() if x.strip()]
-            lines.extend(page_lines)
+
+            page_lines = [x for x in text.splitlines() if x.strip()]
+            reversed_page = _page_text_is_reversed(page_lines)
+            if first_page_reversed is None and reversed_page is not None:
+                first_page_reversed = reversed_page
+            if reversed_page is None:
+                reversed_page = first_page_reversed
+            if reversed_page:
+                page_lines.reverse()
+            lines.extend(
+                clean_injury_pdf_line(x)
+                for x in page_lines if clean_injury_pdf_line(x)
+            )
         return lines
-    except Exception as e:
-        st.error(f"🚨 DIAGNÓSTICO: O PDF foi baixado, mas não consegui ler o texto interno. Erro: {e}")
+    except Exception as exc:
+        st.error(
+            "Diagnóstico do boletim: PDF recebido, mas texto não pôde ser "
+            f"extraído ({type(exc).__name__})."
+        )
         return []
+
 
 _NBA_INJURY_STATUS_RE = re.compile(
     r"(?P<player>[A-Za-zÀ-ÿ'’.\-]+(?:\s+[A-Za-zÀ-ÿ'’.\-]+)*,\s*"
@@ -235,6 +292,15 @@ _NBA_REPORT_TEAM_IDS = {
 _NBA_REPORT_TEAM_NAMES = sorted(
     _NBA_REPORT_TEAM_IDS, key=len, reverse=True
 )
+
+
+def _team_belongs_to_matchup(team_name: str, matchup: str) -> bool:
+    """Reject rows with team IDs impossible for the named matchup."""
+    if not team_name or not matchup or "@" not in matchup:
+        return False
+    team_id = _NBA_REPORT_TEAM_IDS.get(team_name)
+    team_abbr = TEAM_ABBR_LOOKUP.get(team_id, "")
+    return team_abbr in matchup.split("@")
 
 
 def parse_official_injury_report_lines(
@@ -305,8 +371,14 @@ def parse_official_injury_report_lines(
             game_date = date_match.group(0)
         if new_matchup:
             matchup = new_matchup.group(0).upper()
+            # A new matchup cannot inherit the previous game's team.
+            team_name = ""
         if new_team:
-            team_name = new_team
+            # If the PDF extraction is still out of reading order, fail safe
+            # instead of assigning a 76ers player to DEN@OKC, for example.
+            team_name = (
+                new_team if _team_belongs_to_matchup(new_team, matchup) else ""
+            )
 
         if "NOT YET SUBMITTED" in line.upper():
             finish_player()
@@ -321,7 +393,7 @@ def parse_official_injury_report_lines(
             cleaned = cleaned[team_position.end():] if team_position else cleaned
 
         match = _NBA_INJURY_STATUS_RE.search(cleaned)
-        if match and team_name:
+        if match and team_name and _team_belongs_to_matchup(team_name, matchup):
             finish_player()
             player = match.group("player").strip()
             status = match.group("status").capitalize()
