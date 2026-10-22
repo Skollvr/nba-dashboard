@@ -193,8 +193,13 @@ def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
             continue
         metric = ODDS_STAT_MAP.get(str(item.get("statID") or ""))
         side = str(item.get("sideID") or "").lower()
-        player_id = item.get("playerID")
-        if not player_id or not metric or side not in {"over", "under"}:
+        player_id = item.get("playerID") or item.get("statEntityID")
+        if (
+            not player_id
+            or str(player_id).lower() in {"home", "away", "all"}
+            or not metric
+            or side not in {"over", "under"}
+        ):
             continue
         book = (item.get("byBookmaker") or {}).get(ODDS_BOOKMAKER)
         if not isinstance(book, dict) or book.get("available") is not True:
