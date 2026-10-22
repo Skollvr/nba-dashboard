@@ -157,14 +157,27 @@ def main():
         line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PTS")
         line_value = None
         api_key_available = bool(get_odds_api_key())
-        use_market_line = st.toggle(
-            "Priorizar BetMGM", value=True,
-            help="Busca automaticamente a BetMGM. Se não existir cotação, permite linha manual por jogador.",
+        enable_betmgm = st.toggle(
+            "Usar BetMGM", value=True,
+            help="Busca linhas e odds BetMGM pela SportsGameOdds.",
         )
+        enable_stake = st.toggle(
+            "Usar Stake (teste)", value=False,
+            help="Consulta Stake (stake) pela SportsGameOdds; depende do plano e dos mercados disponíveis.",
+        )
+        use_market_line = enable_betmgm or enable_stake
+        if enable_betmgm and enable_stake:
+            priority_label = st.radio(
+                "Casa prioritária quando ambas tiverem linha",
+                ["BetMGM", "Stake"], horizontal=True,
+            )
+            bookmaker_priority = priority_label.lower()
+        else:
+            bookmaker_priority = "stake" if enable_stake else "betmgm"
         if not api_key_available and use_market_line:
             st.caption(
-                "BetMGM não configurada: adicione SPORTSGAMEODDS_API_KEY aos "
-                "Secrets do Streamlit Cloud. Linha manual continua disponível."
+                "SportsGameOdds sem chave: configure SPORTSGAMEODDS_API_KEY "
+                "nos Secrets. Linhas manuais continuam disponíveis."
             )
         season_scope_label = st.pills(
             "Recorte estatístico",
@@ -250,7 +263,7 @@ def main():
         f"{selected_game['GAME_ID']}::"
         f"{season_scope}::"
         f"{analysis_season}::"
-        f"{int(use_market_line)}"
+        f"{int(enable_betmgm)}::{int(enable_stake)}::{bookmaker_priority}"
     )
 
     if st.session_state.get("loaded_matchup_key") != selected_game_key:
@@ -267,8 +280,10 @@ def main():
                 selected_game["away_team_name"],
                 selected_game["home_team_name"],
                 analysis_season,
-                use_market_line,
+                enable_betmgm,
                 season_scope=season_scope,
+                include_stake=enable_stake,
+                bookmaker_priority=bookmaker_priority,
                 roster_season=season,
                 target_date=selected_date,
                 progress_callback=load_status.write,
@@ -354,31 +369,31 @@ def main():
             "mantém o matchup neutro até receber dados."
         )
 
-    # Automatic BetMGM has priority; manual per-player values remain available.
-    # No model-derived or estimated betting line is ever invented.
+    # Selected line is computed per market/player without conflating odds
+    # from the two bookmakers. Raw prices remain visible in the editor.
     manual_col = f"MANUAL_LINE_{line_metric}"
-    market_col = f"BETMGM_{line_metric}_LINE"
+    market_col = f"MARKET_{line_metric}_LINE"
     if use_market_line:
         fetch_status = (
             str(away_df["ODDS_FETCH_STATUS"].iloc[0])
             if away_df is not None and not away_df.empty
             and "ODDS_FETCH_STATUS" in away_df.columns
-            else "BetMGM: fonte não confirmou o retorno"
+            else "Odds não confirmadas para este confronto"
         )
-        available_market = sum(
-            int(
-                pd.to_numeric(
-                    df.get(market_col, pd.Series(dtype=float)),
-                    errors="coerce",
-                ).gt(0).sum()
+        st.caption(fetch_status)
+        for book, active in (("BetMGM", enable_betmgm), ("Stake", enable_stake)):
+            if not active:
+                continue
+            col = f"{book.upper()}_{line_metric}_LINE"
+            available = sum(
+                int(pd.to_numeric(df[col], errors="coerce").gt(0).sum())
+                for df in (away_df, home_df)
+                if df is not None and not df.empty and col in df.columns
             )
-            for df in (away_df, home_df)
-            if df is not None and not df.empty
-        )
-        st.caption(
-            f"{fetch_status} • {available_market} jogador(es) com linha "
-            f"BetMGM de {line_metric}. As demais linhas podem ser inseridas manualmente."
-        )
+            st.caption(
+                f"{book}: {available} jogador(es) com linha {line_metric}"
+                + (" • Fonte prioritária" if bookmaker_priority == book.lower() else "")
+            )
 
     line_rows = []
 
@@ -400,6 +415,12 @@ def main():
                     "Jogador": str(player_row.get("PLAYER", "")),
                     "Time": str(team_name),
                     "BetMGM": pd.to_numeric(
+                        player_row.get(f"BETMGM_{line_metric}_LINE"), errors="coerce"
+                    ) if enable_betmgm else float("nan"),
+                    "Stake": pd.to_numeric(
+                        player_row.get(f"STAKE_{line_metric}_LINE"), errors="coerce"
+                    ) if enable_stake else float("nan"),
+                    "Linha escolhida": pd.to_numeric(
                         player_row.get(market_col), errors="coerce"
                     ) if use_market_line else float("nan"),
                     "Linha manual": float("nan"),
@@ -410,18 +431,18 @@ def main():
         manual_lines_df = pd.DataFrame(line_rows)
 
         missing_market = int(
-            pd.to_numeric(manual_lines_df["BetMGM"], errors="coerce")
+            pd.to_numeric(manual_lines_df["Linha escolhida"], errors="coerce")
             .le(0).sum()
-            + manual_lines_df["BetMGM"].isna().sum()
+            + manual_lines_df["Linha escolhida"].isna().sum()
         )
         with st.expander(
             f"✏️ Gerar linha manual — {line_metric} "
-            f"({missing_market} sem cotação BetMGM)" if use_market_line
+            f"({missing_market} sem cotação ativa)" if use_market_line
             else f"✏️ Linhas manuais — {line_metric}",
             expanded=False,
         ):
             st.caption(
-                "BetMGM tem prioridade quando estiver ativada e disponível. "
+                "A casa escolhida tem prioridade quando oferecer uma linha. "
                 "Se aparecer Linha indisponível, informe a linha desejada "
                 "na coluna Linha manual. Não geramos cotação fictícia."
             )
@@ -430,13 +451,19 @@ def main():
                 manual_lines_df,
                 hide_index=True,
                 use_container_width=True,
-                disabled=["Jogador", "Time", "BetMGM"],
+                disabled=["Jogador", "Time", "BetMGM", "Stake", "Linha escolhida"],
                 column_config={
                     "_PLAYER_ID": None,
                     "Jogador": st.column_config.TextColumn("Jogador"),
                     "Time": st.column_config.TextColumn("Time"),
                     "BetMGM": st.column_config.NumberColumn(
                         "Linha BetMGM", format="%.1f"
+                    ),
+                    "Stake": st.column_config.NumberColumn(
+                        "Linha Stake", format="%.1f"
+                    ),
+                    "Linha escolhida": st.column_config.NumberColumn(
+                        "Linha prioritária", format="%.1f"
                     ),
                     "Linha manual": st.column_config.NumberColumn(
                         f"Linha manual {line_metric}",
