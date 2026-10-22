@@ -238,8 +238,19 @@ def render_summary_cards(away_df: pd.DataFrame, home_df: pd.DataFrame, min_games
     if combined.empty:
         return
         
-    # Título da seção atualizado
-    st.markdown('<div style="margin-top: 1rem; margin-bottom: 0.8rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; color: #10b981; font-weight: 800;">🔥 Líderes do Confronto (Média últimos 10 jogos)</div>', unsafe_allow_html=True)
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        st.markdown(
+            '<div class="nova-section-head"><h3>Líderes da partida</h3>'
+            '<small>PTS · REB · AST — médias dos últimos jogos disponíveis</small></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="nova-workspace-sub">Amostras pequenas são apenas '
+            'referência inicial. Os líderes não são recomendações de aposta.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<div style="margin-top: 1rem; margin-bottom: 0.8rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; color: #10b981; font-weight: 800;">🔥 Líderes do Confronto (Média últimos 10 jogos)</div>', unsafe_allow_html=True)
     
     # Identifica os líderes independentes para cada estatística (baseado nos últimos 10 jogos)
     leader_pts = combined.sort_values("L10_PTS", ascending=False).iloc[0]
@@ -1981,6 +1992,21 @@ def render_player_chart(
         )
         fig.update_xaxes(title="", type="category", tickangle=0, showgrid=False, tickfont=dict(size=11))
         fig.update_yaxes(title="", showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
+        if st.session_state.get("dashboard_visual_mode") == "Renovado":
+            # Presentation-only override: identical data and axis scales.
+            fig.update_layout(
+                height=335 if chart_mode == "Compacto" else 375,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(15,28,43,0.75)",
+                font=dict(color="#dcebf8"),
+                hoverlabel=dict(bgcolor="#17283d", font=dict(color="#f0f8ff")),
+            )
+            fig.update_traces(
+                marker_color="#54cbb7" if chart_mode == "Compacto" else None,
+                selector=dict(type="bar"),
+            )
+            fig.update_xaxes(showgrid=False, tickfont=dict(color="#b4c6d9"))
+            fig.update_yaxes(showgrid=True, gridcolor="rgba(117,171,186,0.15)")
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L5: {recent_view[visual_metric].mean():.1f}")
     else:
@@ -2015,6 +2041,21 @@ def render_player_chart(
         )
         fig.update_xaxes(title="", type="category", tickangle=0, showgrid=False, tickfont=dict(size=11))
         fig.update_yaxes(title="", showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
+        if st.session_state.get("dashboard_visual_mode") == "Renovado":
+            # Presentation-only override: identical data and axis scales.
+            fig.update_layout(
+                height=335 if chart_mode == "Compacto" else 375,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(15,28,43,0.75)",
+                font=dict(color="#dcebf8"),
+                hoverlabel=dict(bgcolor="#17283d", font=dict(color="#f0f8ff")),
+            )
+            fig.update_traces(
+                marker_color="#54cbb7" if chart_mode == "Compacto" else None,
+                selector=dict(type="bar"),
+            )
+            fig.update_xaxes(showgrid=False, tickfont=dict(color="#b4c6d9"))
+            fig.update_yaxes(showgrid=True, gridcolor="rgba(117,171,186,0.15)")
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L10: {recent_view[visual_metric].mean():.1f}")
 def render_badges(role: str, momentum: str, oscillation: str, matchup: str) -> None:
