@@ -67,7 +67,7 @@ def main():
             '<span>● Temporada 2026/27 disponível</span>'
             '<span>Dados ESPN + boletim oficial NBA</span>'
             '<span>Horários de Brasília</span>'
-            '<span>Ambiente de testes</span>'
+            '<span>Linhas BetMGM / manual</span>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -91,11 +91,9 @@ def main():
             """,
             unsafe_allow_html=True,
         )
-        st.info(
-            "🧪 Branch de validação ESPN completa: agenda, roster, game logs, H2H, "
-            "defesa/percentis, matchup por posição, depth chart e lesões usam ESPN. "
-            "Temporada 2026/27 ativa para testes com amostra inicial; "
-            "rotação via depth chart e minutos internos quando não há projeção externa."
+        st.caption(
+            "Dados de jogo: ESPN · Lesões: boletim oficial NBA · "
+            "Linhas: BetMGM quando disponíveis, com opção manual."
         )
 
     today = get_brasilia_today()
@@ -221,7 +219,7 @@ def main():
             st.session_state.pop("agenda_games", None)
             st.session_state.pop("agenda_date_key", None)
             st.error("A NBA demorou ou falhou ao responder na consulta dos jogos. Tente novamente em alguns segundos.")
-            st.exception(exc)
+            st.caption(f"Detalhe técnico: {type(exc).__name__}")
             return
 
         st.session_state["agenda_games"] = games
