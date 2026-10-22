@@ -21,7 +21,7 @@ from processamento import (
     get_metric_allowed_column
 )
 from api_nba import get_player_log
-from pdf_reader import parse_injury_report_timestamp_from_url
+from pdf_reader import parse_injury_report_timestamp_from_url, fetch_latest_injury_report_result
 
 from datetime import timedelta
 
@@ -836,6 +836,30 @@ def render_team_section_v2(
                     enriched_team_df[[col for col in view_cols if col in enriched_team_df]],
                     use_container_width=True, hide_index=True,
                 )
+                if st.button(
+                    "Diagnosticar localização, download e leitura do PDF NBA",
+                    key=f"injury_pdf_diag::{team_name}",
+                ):
+                    status = fetch_latest_injury_report_result()
+                    st.markdown(f"**Etapa:** {status['stage']}")
+                    st.caption(status["detail"])
+                    st.caption(
+                        f"Bytes recebidos: {status['pdf_bytes']} • "
+                        f"Linhas extraídas: {status['text_lines']} • "
+                        f"Registros identificados: {status['parsed_rows']} • "
+                        f"Times encontrados: {status['teams']}"
+                    )
+                    if status["pdf_url"]:
+                        st.markdown(f"[Abrir PDF identificado]({status['pdf_url']})")
+                    frame = status["frame"]
+                    if frame is not None and not frame.empty:
+                        slim = frame[[
+                            col for col in (
+                                "MATCHUP", "TEAM_NAME_IR", "TEAM_ID_IR",
+                                "PLAYER_NAME_IR", "INJ_STATUS", "TEAM_REPORT_STATUS"
+                            ) if col in frame
+                        ]].copy()
+                        st.dataframe(slim.head(40), use_container_width=True, hide_index=True)
         with lineup_tab:
             render_lineup_report_tab(enriched_team_df, team_name)
 
