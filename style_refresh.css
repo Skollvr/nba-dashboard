@@ -219,6 +219,11 @@
 .nova-pred-aside strong {
   display:block; color:#f0f7fd !important; font-size:.88rem; font-weight:830; margin-top:3px;
 }
+.nova-quote-hint {
+  margin-top:5px; max-width:185px; margin-left:auto;
+  color:#abc2d8 !important; font-size:.63rem;
+  font-weight:670; line-height:1.3;
+}
 .nova-data-warning { color:#ecc38d !important; font-weight:760; font-size:.75rem; }
 .nova-stat-grid {
   display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
@@ -314,6 +319,7 @@
   .nova-portrait { width:54px!important; height:54px!important; }
   .nova-player-name { font-size:.9rem; }
   .nova-pred-aside { text-align:left; }
+  .nova-quote-hint { margin-left:0; }
   .nova-card-bottom { gap:5px; }
 }
 
