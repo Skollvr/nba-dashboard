@@ -1912,6 +1912,8 @@ def get_matchup_context(
     season: str,
     include_market: bool,
     season_scope: str = "Regular Season",
+    include_stake: bool = False,
+    bookmaker_priority: str = "betmgm",
     roster_season: str | None = None,
     target_date: date | None = None,
     progress_callback=None,
@@ -2012,48 +2014,77 @@ def get_matchup_context(
     away_df["IS_HOME"] = False
     home_df["IS_HOME"] = True
 
-    odds_df = pd.DataFrame()
-    market_status = "Consulta BetMGM desativada — linha manual"
-    if include_market:
+    # Both toggles are independent. One SportsGameOdds request can retrieve
+    # both houses, with per-metric quotes selected according to user priority.
+    enabled_books = tuple(
+        book for book, enabled in (
+            ("betmgm", include_market), ("stake", include_stake)
+        ) if enabled
+    )
+    book_frames = {"betmgm": pd.DataFrame(), "stake": pd.DataFrame()}
+    market_status_parts = []
+    if enabled_books:
         if not get_odds_api_key():
-            market_status = "BetMGM indisponível: chave SportsGameOdds não configurada"
+            market_status_parts.append(
+                "SportsGameOdds: chave não configurada; consultar linhas manualmente"
+            )
         else:
-            report("Consultando linhas BetMGM...")
+            report("Consultando odds: " + ", ".join(enabled_books) + "...")
             try:
-                odds_events = fetch_nba_odds_events(target_date=target_date)
-                selected_odds_event = find_matching_odds_event(
+                odds_events = fetch_nba_odds_events(
+                    target_date=target_date, bookmaker_ids=enabled_books
+                )
+                odds_event = find_matching_odds_event(
                     odds_events,
                     home_team_name=home_team_name,
                     away_team_name=away_team_name,
                 )
-                if selected_odds_event is None:
-                    market_status = "BetMGM: não foi encontrado mercado ativo para este confronto"
+                if odds_event is None:
+                    market_status_parts.append("Nenhum evento correspondente encontrado")
                 else:
-                    odds_df = extract_betmgm_player_props(selected_odds_event)
-                    if odds_df.empty:
-                        market_status = "BetMGM: confronto encontrado, sem props de jogadores disponíveis"
-                    else:
-                        market_status = "BetMGM: cotações recebidas para este confronto"
+                    for book in enabled_books:
+                        frame = extract_betmgm_player_props(
+                            odds_event, bookmaker_id=book
+                        )
+                        book_frames[book] = frame
+                        market_status_parts.append(
+                            f"{'Stake' if book == 'stake' else 'BetMGM'}: "
+                            f"{len(frame)} jogador(es) com props"
+                            if not frame.empty else
+                            f"{'Stake' if book == 'stake' else 'BetMGM'}: "
+                            "nenhuma prop disponível (cobertura/plano a confirmar)"
+                        )
             except Exception as exc:
-                # Do not expose API tokens. Preserve the ESPN analysis even
-                # when odds authentication, permissions or quota fail.
                 cause = exc.__cause__ or exc
-                http_code = getattr(getattr(cause, "response", None), "status_code", None)
+                http_code = getattr(
+                    getattr(cause, "response", None), "status_code", None
+                )
                 if http_code == 401:
-                    market_status = "BetMGM: chave da SportsGameOdds inválida (401)"
+                    market_status_parts.append("SportsGameOdds: chave inválida (401)")
                 elif http_code == 403:
-                    market_status = "BetMGM: plano/chave sem acesso a essas odds (403)"
-                elif http_code == 429:
-                    market_status = "BetMGM: limite de requisições da API (429)"
-                else:
-                    market_status = (
-                        f"BetMGM: falha de consulta ({type(cause).__name__})"
+                    market_status_parts.append(
+                        "SportsGameOdds: acesso ao bookmaker não permitido no plano (403)"
                     )
-                odds_df = pd.DataFrame()
+                elif http_code == 429:
+                    market_status_parts.append("SportsGameOdds: limite de uso (429)")
+                else:
+                    market_status_parts.append(
+                        f"SportsGameOdds: falha ({type(cause).__name__})"
+                    )
+    else:
+        market_status_parts.append("BetMGM e Stake desativadas — modo manual")
 
     report("Finalizando projeções e cards...")
-    away_df = merge_betmgm_odds(away_df, odds_df)
-    home_df = merge_betmgm_odds(home_df, odds_df)
+    for book in ("betmgm", "stake"):
+        away_df = merge_betmgm_odds(
+            away_df, book_frames[book], bookmaker_id=book
+        )
+        home_df = merge_betmgm_odds(
+            home_df, book_frames[book], bookmaker_id=book
+        )
+    away_df = select_bookmaker_lines(away_df, enabled_books, bookmaker_priority)
+    home_df = select_bookmaker_lines(home_df, enabled_books, bookmaker_priority)
+    market_status = " • ".join(market_status_parts)
     away_df["ODDS_FETCH_STATUS"] = market_status
     home_df["ODDS_FETCH_STATUS"] = market_status
     return away_df, home_df
