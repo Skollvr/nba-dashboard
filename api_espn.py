@@ -954,6 +954,48 @@ def _parse_espn_player_gamelog_payload(
     )
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def diagnose_espn_shooting_gamelog(
+    player_id: int,
+    season: str,
+    season_scope: str = "Regular Season",
+) -> pd.DataFrame:
+    """Small, on-demand source diagnostic for ESPN shooting labels and values.
+
+    Public boxscore data only; shows at most four events. Useful if ESPN changes
+    its payload schema again, without storing or exposing the full response.
+    """
+    year = _season_end_year(season)
+    type_id = _scope_to_espn_type(season_scope)
+    params: dict[str, Any] = {"season": year}
+    if type_id is not None:
+        params["seasontype"] = type_id
+    payload = _request_json(
+        ESPN_PLAYER_GAMELOG_URL.format(player_id=int(player_id)),
+        params=params,
+    )
+    rows: list[dict[str, Any]] = []
+    for event in _iter_gamelog_events(payload, type_id)[:4]:
+        stats = event.get("stats") or event.get("values") or []
+        if not isinstance(stats, list):
+            continue
+        names = _event_stat_names(payload, event, stats)
+        parsed = parse_espn_shooting_stats(dict(zip(names, stats)))
+        pts = _to_float(_first_stat(dict(zip(names, stats)), "PTS", "points"))
+        recovery = _recover_verified_shooting_vector(stats, pts)
+        rows.append({
+            "Jogo ESPN": str(event.get("_event_id") or event.get("id") or ""),
+            "Data": str(event.get("gameDate") or event.get("date") or "")[:10],
+            "Cabeçalhos": " | ".join(str(v) for v in names),
+            "Valores": " | ".join(str(v) for v in stats),
+            "FGA por nome": parsed[0],
+            "FGA por vetor verificado": recovery[0] if recovery else None,
+            "3PA": parsed[2],
+            "Problemas": ", ".join(parsed[3]),
+        })
+    return pd.DataFrame(rows)
+
+
 @st.cache_data(ttl=54000, show_spinner=False)
 def get_espn_player_log(
     player_id: int,
