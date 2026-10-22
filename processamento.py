@@ -1943,9 +1943,20 @@ def get_matchup_context(
                     else:
                         market_status = "BetMGM: cotações recebidas para este confronto"
             except Exception as exc:
-                # Never break ESPN projection loading when the odds service
-                # rejects the key, rate limits, or is temporarily unavailable.
-                market_status = f"BetMGM: falha de consulta ({type(exc).__name__})"
+                # Do not expose API tokens. Preserve the ESPN analysis even
+                # when odds authentication, permissions or quota fail.
+                cause = exc.__cause__ or exc
+                http_code = getattr(getattr(cause, "response", None), "status_code", None)
+                if http_code == 401:
+                    market_status = "BetMGM: chave da SportsGameOdds inválida (401)"
+                elif http_code == 403:
+                    market_status = "BetMGM: plano/chave sem acesso a essas odds (403)"
+                elif http_code == 429:
+                    market_status = "BetMGM: limite de requisições da API (429)"
+                else:
+                    market_status = (
+                        f"BetMGM: falha de consulta ({type(cause).__name__})"
+                    )
                 odds_df = pd.DataFrame()
 
     report("Finalizando projeções e cards...")
