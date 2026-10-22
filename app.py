@@ -390,10 +390,24 @@ def main():
                 for df in (away_df, home_df)
                 if df is not None and not df.empty and col in df.columns
             )
-            st.caption(
-                f"{book}: {available} jogador(es) com linha {line_metric}"
-                + (" • Fonte prioritária" if bookmaker_priority == book.lower() else "")
-            )
+            failures = [
+                part.strip() for part in fetch_status.split(" • ")
+                if part.strip().startswith(f"{book}: HTTP ")
+                or part.strip().startswith(f"{book}: não foi possível")
+            ]
+            if failures:
+                st.warning(
+                    f"{failures[0]} • Cobertura não verificada; "
+                    "isso não significa que não existam linhas."
+                )
+            else:
+                st.caption(
+                    f"{book}: {available} jogador(es) com linha {line_metric}"
+                    + (
+                        " • Fonte prioritária"
+                        if bookmaker_priority == book.lower() else ""
+                    )
+                )
 
     line_rows = []
 
