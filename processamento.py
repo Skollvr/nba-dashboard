@@ -512,7 +512,9 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
 
     market_info = get_market_line_for_metric(row, metric)
     market_line = pd.to_numeric(market_info.get("line"), errors="coerce")
-    use_market = bool(use_market_line and pd.notna(market_line))
+    use_market = bool(
+        use_market_line and pd.notna(market_line) and float(market_line) > 0
+    )
 
     manual_col = f"MANUAL_LINE_{metric}"
     manual_line = pd.to_numeric(row.get(manual_col), errors="coerce")
