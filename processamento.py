@@ -1261,7 +1261,7 @@ def enrich_team_with_context(
     enriched.loc[no_current_sample & ~inactive, [
         "PROJ_MIN_V1", "PROJ_MIN_INTERNAL",
     ]] = np.nan
-    enriched.loc[no_current_sample & ~inactive, "MINUTES_SOURCE"] = "Sem amostra 2026/27"
+    enriched.loc[no_current_sample & ~inactive, "MINUTES_SOURCE"] = f"Sem amostra {season}"
 
     metric_map = {
         "PTS": ("SEASON_PTS", "L10_PTS", "L5_PTS"),
