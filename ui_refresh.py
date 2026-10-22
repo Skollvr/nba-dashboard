@@ -96,7 +96,7 @@ def render_player_card_refresh(
     gp = int(gp_raw) if pd.notna(gp_raw) else 0
     sample = (
         f"{gp} jogo{'s' if gp != 1 else ''} nesta temporada"
-        if gp else "Sem jogos em 2026/27"
+        if gp else "Sem jogos nesta temporada"
     )
     player_raw = pd.to_numeric(row.get("PLAYER_ID"), errors="coerce")
     player_id = int(player_raw) if pd.notna(player_raw) else 0
