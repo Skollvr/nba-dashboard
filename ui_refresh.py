@@ -120,12 +120,13 @@ def render_player_card_refresh(
     is_valid = bool(pd.notna(projection))
     is_active = is_valid and bool(ctx.get("has_active_line", False))
     label = (
-        f"Linha {_number(ctx.get('line_value'))} · {line_metric}"
+        f"{ctx.get('line_source', 'Linha')} · {_number(ctx.get('line_value'))} {line_metric}"
         if is_active else f"Projeção {line_metric}"
     )
     subtitle = (
         f'Edge {_signed(ctx.get("edge"))}'
-        if is_active else "Sem linha" if is_valid else "Amostra insuficiente"
+        if is_active else "LINHA INDISPONÍVEL · GERAR MANUAL"
+        if is_valid else "Amostra insuficiente"
     )
     matchup = str(row.get(f"MATCHUP_LABEL_{line_metric}_V1", "Neutro"))
     matchup_kind = (
@@ -216,10 +217,12 @@ def render_focus_summary_refresh(
             "main",
         ),
         (
-            f"Linha de aposta · {metric}",
-            _number(line_context.get("line_value")) if active else "Sem linha",
+            f"{line_context.get('line_source', 'Linha')} · {metric}" if active
+            else f"Linha de aposta · {metric}",
+            _number(line_context.get("line_value"))
+            if active else "Linha indisponível",
             f"Edge {_signed(line_context.get('edge'))} · Hit L10 {hit}"
-            if active else "Informe uma linha individual para comparar",
+            if active else "Abra Gerar linha manual para comparar",
             "",
         ),
         (
