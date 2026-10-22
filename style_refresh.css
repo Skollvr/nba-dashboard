@@ -532,3 +532,65 @@
   .nova-detail-compare { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .nova-tip-metrics { gap:4px; }
 }
+
+
+/* Panorama: independent overview, three clear leader cards and ranking */
+.summary-card {
+  background:linear-gradient(145deg,#152337,#101d2e) !important;
+  border:1px solid #30425b !important;
+  border-radius:14px !important;
+  min-height:155px;
+  padding:15px !important;
+}
+.summary-card .summary-label {
+  color:#82dec9 !important; font-weight:820 !important;
+  font-size:.67rem !important; letter-spacing:.11em;
+  margin-bottom:.55rem;
+}
+.summary-card .summary-value {
+  color:#f3f8ff !important; font-size:1.28rem !important;
+  font-weight:850 !important; letter-spacing:-.025em; line-height:1.2;
+}
+.summary-card .summary-meta {
+  color:#a7bbd3 !important; font-size:.73rem !important;
+  line-height:1.4;
+}
+.summary-card .detail-mini-grid {
+  margin-top:11px !important;
+}
+.summary-card .detail-mini {
+  background:#0c1726 !important;
+  border:1px solid #263b53 !important;
+  border-radius:9px;
+}
+.summary-card .detail-mini-highlight {
+  background:#192e3d !important; border-color:#385f5d !important;
+}
+.summary-card .detail-mini-value { font-size:1.02rem !important; }
+.nova-tip .nova-tip-strength { overflow-wrap:anywhere; }
+.nova-focus-player-heading {
+  display:flex; align-items:center; gap:14px; min-width:0;
+  background:linear-gradient(135deg,#18293c,#111d2e);
+  border:1px solid #2d435b;
+  border-left:4px solid var(--nova-team,#53bda7);
+  padding:14px 17px; border-radius:13px;
+  margin:10px 0 11px;
+}
+.nova-focus-player-heading strong {
+  color:#f2f8ff !important; font-weight:870; font-size:1.36rem;
+  letter-spacing:-.035em; line-height:1.2;
+}
+.nova-focus-player-heading small {
+  color:#a8bed3 !important; font-weight:620; display:block;
+  margin-top:6px; font-size:.8rem;
+}
+.nova-focus-player-heading img {
+  width:46px; height:46px; max-width:46px !important;
+  object-fit:contain;
+}
+@media(max-width:768px) {
+  .nova-focus-player-heading { padding:11px; gap:9px; }
+  .nova-focus-player-heading strong { font-size:1.08rem; }
+  .nova-focus-player-heading img { width:39px;height:39px;max-width:39px!important; }
+  .summary-card { min-height:137px; }
+}
