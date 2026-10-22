@@ -195,6 +195,50 @@ def test_valid_zero_attempts_are_kept():
 
 
 
+
+def test_recovers_unknown_espn_fg_header_only_when_score_verifies():
+    payload = {
+        "labels": ["MIN", "UNKNOWN_FG_FIELD", "3PT", "FT", "REB", "AST", "STL", "BLK", "PTS"],
+        "events": [{
+            "id": "safe-recovery",
+            "date": "2026-01-21T00:00:00Z",
+            "stats": ["36", "12-24", "4-10", "4-4", "8", "7", "1", "0", "32"],
+        }],
+    }
+    logs = _parse_espn_player_gamelog_payload(payload, 900)
+    assert logs.iloc[0]["FGA"] == 24
+    assert logs.iloc[0]["FG3A"] == 10
+    assert logs.iloc[0]["FG3M"] == 4
+    assert logs.iloc[0]["SHOOTING_ISSUES"] == ""
+
+
+def test_rejects_unverifiable_fg_vector_with_wrong_points():
+    payload = {
+        "labels": ["MIN", "UNKNOWN_FG_FIELD", "3PT", "FT", "REB", "AST", "STL", "BLK", "PTS"],
+        "events": [{
+            "id": "unsafe-recovery",
+            "date": "2026-01-21T00:00:00Z",
+            "stats": ["36", "12-24", "4-10", "4-4", "8", "7", "1", "0", "33"],
+        }],
+    }
+    logs = _parse_espn_player_gamelog_payload(payload, 900)
+    assert pd.isna(logs.iloc[0]["FGA"])
+    assert logs.iloc[0]["FG3A"] == 10
+
+
+def test_recovers_fg_attempts_from_percentage_header_containing_pairs():
+    payload = {
+        "labels": ["MIN", "FG%", "3PT", "FT", "REB", "AST", "STL", "BLK", "PTS"],
+        "events": [{
+            "id": "fg-percent-label",
+            "date": "2026-01-21T00:00:00Z",
+            "stats": ["36", "12-24", "4-10", "4-4", "8", "7", "1", "0", "32"],
+        }],
+    }
+    logs = _parse_espn_player_gamelog_payload(payload, 900)
+    assert logs.iloc[0]["FGA"] == 24
+
+
 def test_missing_field_goal_attempts_remain_nan_with_known_three_attempts():
     # Regression: previously fillna(0) created a fake 0-FGA game.
     payload = {
