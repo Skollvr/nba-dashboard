@@ -1731,7 +1731,14 @@ def render_best_game_tips(
         )
 
     if combined.empty:
-        st.info("Ainda não há jogadores com amostra suficiente para avaliar as melhores linhas.")
+        message = "Ainda não há jogadores com amostra suficiente para avaliar as melhores linhas."
+        if st.session_state.get("dashboard_visual_mode") == "Renovado":
+            st.markdown(
+                f'<div class="nova-empty-panel">{escape_html(message)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info(message)
         return
 
     metrics = list(LINE_METRIC_OPTIONS) if use_market_line else [line_metric]
@@ -1755,14 +1762,18 @@ def render_best_game_tips(
                 candidates.append(candidate)
 
     if not candidates:
-        if use_market_line:
-            st.info(
-                "Nenhuma linha disponível atingiu os critérios mínimos para destaque neste confronto."
+        message = (
+            "Nenhuma linha disponível atingiu os critérios mínimos para destaque neste confronto."
+            if use_market_line
+            else f"Preencha linhas individuais de {line_metric} para comparar as melhores oportunidades."
+        )
+        if st.session_state.get("dashboard_visual_mode") == "Renovado":
+            st.markdown(
+                f'<div class="nova-empty-panel">{escape_html(message)}</div>',
+                unsafe_allow_html=True,
             )
         else:
-            st.info(
-                f"Preencha linhas individuais de {line_metric} para que o app compare as melhores oportunidades."
-            )
+            st.info(message)
         return
 
     high_pool = [c for c in candidates if c["TIER"] >= 2]
