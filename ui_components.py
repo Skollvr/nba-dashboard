@@ -844,13 +844,39 @@ def render_team_section_v2(
             ir_tab, lineup_tab = st.tabs(["Lesões ESPN", "Rotação ESPN"])
             with ir_tab:
                 render_injury_report_tab(enriched_team_df, team_name)
+                with st.expander("Diagnóstico da resposta ESPN — lesões", expanded=False):
+                    if injury_df is None or injury_df.empty:
+                        st.warning(
+                            "A ESPN não retornou uma lista de lesões validável. "
+                            "Status de jogadores deve permanecer não confirmado."
+                        )
+                    else:
+                        actual = injury_df[
+                            injury_df.get("PLAYER_KEY_IR", pd.Series(
+                                "", index=injury_df.index
+                            )).fillna("").astype(str).str.strip().ne("")
+                        ].copy()
+                        st.caption(
+                            f"Registros identificáveis no retorno ESPN: {len(actual)}. "
+                            "A lista abaixo mostra o que o parser realmente recebeu."
+                        )
+                        if actual.empty:
+                            st.warning(
+                                "Somente marcadores de consulta, sem jogadores lesionados identificáveis."
+                            )
+                        else:
+                            columns = [
+                                "PLAYER_NAME_IR", "INJ_STATUS", "INJ_REASON", "TEAM_ID_IR"
+                            ]
+                            actual = actual[[c for c in columns if c in actual.columns]]
+                            st.dataframe(actual, use_container_width=True, hide_index=True)
             with lineup_tab:
                 render_lineup_report_tab(enriched_team_df, team_name)
 
 
 def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
-        '<div class="section-note">Status de lesões publicado pela ESPN para o elenco atual. '
+        '<div class="section-note">Status de lesões consultado na ESPN para o elenco atual. '
         'Out/Doubtful são tratados como indisponíveis pelo modelo; Questionable permanece visível '
         'com ajuste de contexto.</div>',
         unsafe_allow_html=True,
@@ -860,7 +886,7 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
         st.info("Dados de lesões ESPN ainda não integrados nesta execução.")
         return
 
-    st.caption("Fonte: ESPN • atualização pré-jogo disponível no botão da barra lateral")
+    st.caption("Fonte: ESPN • Available significa apenas que o jogador não consta da lista de lesões encontrada. Não é confirmação oficial de escalação.")
 
     if "INJ_MATCHUP_FOUND" in team_df.columns and not bool(team_df["INJ_MATCHUP_FOUND"].any()):
         st.warning(
@@ -872,7 +898,7 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     report_df = report_df.rename(
         columns={
             "PLAYER": "Jogador",
-            "INJ_STATUS": "Status oficial",
+            "INJ_STATUS": "Status ESPN",
             "INJ_REASON": "Motivo",
         }
     )
@@ -936,7 +962,7 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
                 "Proj MIN média",
                 format_number(proj_min_mean),
                 "Fonte",
-                "NBA / interno",
+                "ESPN / interno",
             ),
             unsafe_allow_html=True,
         )
