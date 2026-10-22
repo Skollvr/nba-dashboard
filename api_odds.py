@@ -1,4 +1,6 @@
 import os
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 import requests
 import unicodedata
 import pandas as pd
@@ -44,31 +46,95 @@ def american_to_decimal(american_odds) -> Optional[float]:
     return None
 
 def get_odds_api_key() -> str:
-    return os.getenv("SPORTSGAMEODDS_API_KEY", "").strip()
+    """Read SportsGameOdds credentials from Cloud secrets or environment.
+
+    Never print the key to users or diagnostic messages.
+    """
+    env_key = os.getenv("SPORTSGAMEODDS_API_KEY", "").strip()
+    if env_key:
+        return env_key
+    try:
+        return str(st.secrets.get("SPORTSGAMEODDS_API_KEY", "")).strip()
+    except Exception:
+        return ""
+
 
 # ==========================================
 # 3. BUSCA DOS EVENTOS DA API
 # ==========================================
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_nba_odds_events() -> list[dict]:
+def _brasilia_utc_window(selected_date: date) -> tuple[str, str]:
+    """Events can cross midnight UTC while still belonging to a BRT game day."""
+    start = datetime.combine(selected_date, time.min, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    end = start + timedelta(days=1)
+    return (
+        start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+    )
+
+
+@st.cache_data(ttl=240, show_spinner=False)
+def fetch_nba_odds_events(target_date: date | None = None) -> list[dict]:
+    """Fetch only BetMGM NBA events, following API v2 cursor pagination.
+
+    No key means no market data, never inferred betting lines. A failed
+    authenticated request raises so the UI can identify it as a source error.
+    """
     api_key = get_odds_api_key()
     if not api_key:
         return []
 
-    def _fetch():
-        response = requests.get(
-            f"{ODDS_API_BASE_URL}/events/?leagueID=NBA&oddsAvailable=true",
-            headers={"x-api-key": api_key},
-            timeout=45,
-        )
-        response.raise_for_status()
-        return response
+    params = {
+        "leagueID": "NBA",
+        "bookmakerID": ODDS_BOOKMAKER,
+        "oddsAvailable": "true",
+        "limit": 100,
+        "includeAltLines": "false",
+    }
+    if target_date is not None:
+        after, before = _brasilia_utc_window(target_date)
+        params.update({"startsAfter": after, "startsBefore": before})
 
-    response = run_api_call_with_retry(_fetch, endpoint_name="SportsGameOdds Events")
-    payload = response.json()
-    if not payload.get("success"):
-        return []
-    return payload.get("data", []) or []
+    events: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_cursors: set[str] = set()
+    cursor: str | None = None
+    for _ in range(8):  # safety bound, normally one page per NBA game day
+        page_params = dict(params)
+        if cursor:
+            page_params["cursor"] = cursor
+
+        def _fetch():
+            response = requests.get(
+                f"{ODDS_API_BASE_URL}/events/",
+                params=page_params,
+                headers={"x-api-key": api_key},
+                timeout=(5, 20),
+            )
+            response.raise_for_status()
+            return response
+
+        response = run_api_call_with_retry(
+            _fetch, endpoint_name="SportsGameOdds BetMGM"
+        )
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("success") is not True:
+            raise ValueError("SportsGameOdds retornou uma resposta inválida.")
+        for event in payload.get("data") or []:
+            if not isinstance(event, dict):
+                continue
+            event_id = str(event.get("eventID") or "")
+            if event_id and event_id in seen_ids:
+                continue
+            if event_id:
+                seen_ids.add(event_id)
+            events.append(event)
+        next_cursor = str(payload.get("nextCursor") or "")
+        if not next_cursor or next_cursor in seen_cursors:
+            break
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    return events
+
 
 def find_matching_odds_event(events: list[dict], home_team_name: str, away_team_name: str) -> Optional[dict]:
     target_home = normalize_text(home_team_name)
@@ -108,57 +174,75 @@ def find_matching_odds_event(events: list[dict], home_team_name: str, away_team_
 # 4. EXTRAÇÃO DOS PROPS DA BETMGM
 # ==========================================
 def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
+    """Read player props from the BetMGM bookmaker record, not consensus odds."""
     if not event:
         return pd.DataFrame()
 
-    players = event.get("players", {}) or {}
-    odds_payload = event.get("odds", {}) or {}
+    players = event.get("players") or {}
+    odds_payload = event.get("odds") or {}
+    if not isinstance(odds_payload, dict):
+        return pd.DataFrame()
     rows: dict[str, dict] = {}
 
-    for _, item in odds_payload.items():
+    for item in odds_payload.values():
         if not isinstance(item, dict):
             continue
-        if item.get("periodID") != "game" or item.get("betTypeID") != "ou":
+        if str(item.get("periodID") or "").lower() != "game":
             continue
-
-        stat_id = item.get("statID")
-        metric = ODDS_STAT_MAP.get(stat_id)
+        if str(item.get("betTypeID") or "").lower() != "ou":
+            continue
+        metric = ODDS_STAT_MAP.get(str(item.get("statID") or ""))
+        side = str(item.get("sideID") or "").lower()
         player_id = item.get("playerID")
-        if not metric or not player_id:
+        if not player_id or not metric or side not in {"over", "under"}:
+            continue
+        book = (item.get("byBookmaker") or {}).get(ODDS_BOOKMAKER)
+        if not isinstance(book, dict) or book.get("available") is not True:
+            continue
+        # bookOverUnder is a consensus line, not necessarily BetMGM's.
+        raw_line = book.get("overUnder")
+        line = pd.to_numeric(raw_line, errors="coerce")
+        if pd.isna(line) or float(line) <= 0:
             continue
 
-        bookmaker_data = (item.get("byBookmaker") or {}).get(ODDS_BOOKMAKER)
-        if not bookmaker_data or not bookmaker_data.get("available"):
+        player_info = (
+            players.get(str(player_id), players.get(player_id, {}))
+            if isinstance(players, dict) else {}
+        )
+        if not isinstance(player_info, dict):
+            player_info = {}
+        name = (
+            (str(player_info.get("firstName") or "") + " "
+             + str(player_info.get("lastName") or "")).strip()
+            or str(player_info.get("name") or "").strip()
+        )
+        if not name:
             continue
-
-        player_info = players.get(player_id, {}) if isinstance(players, dict) else {}
-        first_name = player_info.get("firstName", "")
-        last_name = player_info.get("lastName", "")
-        player_name = f"{first_name} {last_name}".strip() or player_info.get("name") or item.get("marketName", "")
-        line_value = item.get("bookOverUnder") or bookmaker_data.get("overUnder")
-        side = item.get("sideID")
-        key = normalize_person_name(player_name)
+        key = normalize_person_name(name)
+        if not key:
+            continue
 
         if key not in rows:
             rows[key] = {
-                "PLAYER_NAME_ODDS": player_name,
+                "PLAYER_NAME_ODDS": name,
                 "PLAYER_KEY_ODDS": key,
             }
-            for _, cols in ODDS_METRIC_COLUMNS.items():
-                rows[key][cols[0]] = None
-                rows[key][cols[1]] = None
-                rows[key][cols[2]] = None
-                rows[key][cols[3]] = None
+            for cols in ODDS_METRIC_COLUMNS.values():
+                for col in cols:
+                    rows[key][col] = None
 
         line_col, over_col, under_col, updated_col = ODDS_METRIC_COLUMNS[metric]
-        rows[key][line_col] = pd.to_numeric(line_value, errors="coerce")
-        rows[key][updated_col] = bookmaker_data.get("lastUpdatedAt", "")
-
-        decimal_value = american_to_decimal(bookmaker_data.get("odds"))
-        if side == "over":
-            rows[key][over_col] = decimal_value
-        elif side == "under":
-            rows[key][under_col] = decimal_value
+        prev = pd.to_numeric(rows[key].get(line_col), errors="coerce")
+        if pd.notna(prev) and float(prev) != float(line):
+            # Never merge OVER odds from one line with UNDER from another.
+            # Prefer the first coherent main line.
+            continue
+        rows[key][line_col] = float(line)
+        updated = str(book.get("lastUpdatedAt") or "")
+        if not rows[key][updated_col] or updated > str(rows[key][updated_col]):
+            rows[key][updated_col] = updated
+        decimal_value = american_to_decimal(book.get("odds"))
+        rows[key][over_col if side == "over" else under_col] = decimal_value
 
     return pd.DataFrame(rows.values())
 
