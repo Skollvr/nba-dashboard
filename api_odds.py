@@ -73,19 +73,26 @@ def _brasilia_utc_window(selected_date: date) -> tuple[str, str]:
 
 
 @st.cache_data(ttl=240, show_spinner=False)
-def fetch_nba_odds_events(target_date: date | None = None) -> list[dict]:
-    """Fetch only BetMGM NBA events, following API v2 cursor pagination.
+def fetch_nba_odds_events(
+    target_date: date | None = None,
+    bookmaker_ids: tuple[str, ...] = ("betmgm",),
+) -> list[dict]:
+    """Fetch chosen NBA bookmakers with API v2 cursor pagination.
 
     No key means no market data, never inferred betting lines. A failed
     authenticated request raises so the UI can identify it as a source error.
     """
     api_key = get_odds_api_key()
-    if not api_key:
+    if not api_key or not bookmaker_ids:
         return []
+    if not set(bookmaker_ids).issubset({"betmgm", "stake"}):
+        raise ValueError("Bookmaker inválida para o dashboard.")
 
     params = {
         "leagueID": "NBA",
-        "bookmakerID": ODDS_BOOKMAKER,
+        "bookmakerID": ",".join(
+            book for book in ("betmgm", "stake") if book in bookmaker_ids
+        ),
         "oddsAvailable": "true",
         "limit": 100,
         "includeAltLines": "false",
@@ -114,7 +121,7 @@ def fetch_nba_odds_events(target_date: date | None = None) -> list[dict]:
             return response
 
         response = run_api_call_with_retry(
-            _fetch, endpoint_name="SportsGameOdds BetMGM"
+            _fetch, endpoint_name="SportsGameOdds NBA"
         )
         payload = response.json()
         if not isinstance(payload, dict) or payload.get("success") is not True:
@@ -201,10 +208,10 @@ def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
             or side not in {"over", "under"}
         ):
             continue
-        book = (item.get("byBookmaker") or {}).get(ODDS_BOOKMAKER)
+        book = (item.get("byBookmaker") or {}).get(bookmaker_id)
         if not isinstance(book, dict) or book.get("available") is not True:
             continue
-        # bookOverUnder is a consensus line, not necessarily BetMGM's.
+        # bookOverUnder is a consensus line; use the selected house instead.
         raw_line = book.get("overUnder")
         line = pd.to_numeric(raw_line, errors="coerce")
         if pd.isna(line) or float(line) <= 0:
@@ -244,9 +251,12 @@ def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
             }
             for cols in ODDS_METRIC_COLUMNS.values():
                 for col in cols:
-                    rows[key][col] = None
+                    rows[key][col.replace("BETMGM_", f"{prefix}_")] = None
 
-        line_col, over_col, under_col, updated_col = ODDS_METRIC_COLUMNS[metric]
+        line_col, over_col, under_col, updated_col = (
+            name.replace("BETMGM_", f"{prefix}_")
+            for name in ODDS_METRIC_COLUMNS[metric]
+        )
         prev = pd.to_numeric(rows[key].get(line_col), errors="coerce")
         if pd.notna(prev) and float(prev) != float(line):
             # Never merge OVER odds from one line with UNDER from another.
