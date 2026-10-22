@@ -64,7 +64,8 @@ def test_pdf_team_filter_and_names_match_current_roster():
     parsed = parse_official_injury_report_lines(_pdf_rows(), PDF_URL)
     with patch("injury_sources.fetch_latest_injury_report_df", return_value=parsed):
         result = get_preferred_injury_report(
-            (CLE, PHI), "CLE@PHI", target_date=date(2026, 10, 22)
+            (CLE, PHI), "CLE@PHI", target_date=date(2026, 10, 22),
+            today=date(2026, 10, 22)
         )
     assert len(result[result["TEAM_ID_IR"].eq(PHI)]) == 4
     team_df = pd.DataFrame([
@@ -92,7 +93,8 @@ def test_not_yet_submitted_does_not_become_available():
     assert not chi.iloc[0]["QUERY_OK"]
     with patch("injury_sources.fetch_latest_injury_report_df", return_value=parsed):
         got = get_preferred_injury_report(
-            (CHI,), "CHI@MIL", target_date=date(2026, 10, 23)
+            (CHI,), "CHI@MIL", target_date=date(2026, 10, 23),
+            today=date(2026, 10, 22)
         )
     merged = merge_injury_report(
         pd.DataFrame([{"PLAYER": "Sample Player", "PLAYER_ID": 99}]),
