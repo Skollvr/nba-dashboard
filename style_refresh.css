@@ -1,0 +1,317 @@
+/* NBA Dashboard — Visual renovado (ativado SOMENTE pelo seletor).
+   Mantém style.css clássico intacto; não altera lógica de projeções. */
+:root {
+  --nova-bg: #070d16;
+  --nova-panel: #0e1827;
+  --nova-panel-hi: #132035;
+  --nova-line: rgba(151,174,211,.15);
+  --nova-text: #f3f7ff;
+  --nova-muted: #9facc1;
+  --nova-accent: #75d8c4;
+  --nova-violet: #9b91f5;
+}
+
+.stApp {
+  background: radial-gradient(ellipse 75% 33% at 55% -10%, #1b2a43 0%, transparent 80%),
+              linear-gradient(180deg, #09101c 0%, #070d16 52%, #080d16 100%) !important;
+  color: var(--nova-text);
+}
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #111d2e 0%, #0b1421 62%, #0c1421 100%) !important;
+  border-right: 1px solid var(--nova-line) !important;
+}
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] label p { color: #c5d0e2 !important; }
+[data-testid="stSidebar"] [data-testid="stHeading"] { letter-spacing: -.02em; }
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"] {
+  border-color: var(--nova-line);
+}
+.block-container {
+  max-width: 1550px !important;
+  padding-top: 1.2rem !important;
+  padding-bottom: 3rem !important;
+  padding-left: clamp(1rem, 2.5vw, 2.8rem) !important;
+  padding-right: clamp(1rem, 2.5vw, 2.8rem) !important;
+}
+/* Respect the chosen theme, including Streamlit-generated widgets. */
+.stApp .stButton > button[kind="primary"], 
+.stApp [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+  background: #73d8c4 !important;
+  border: 1px solid #73d8c4 !important;
+  color: #07131d !important;
+  box-shadow: 0 4px 17px rgba(115,216,196,.16) !important;
+  font-weight: 760 !important;
+}
+.stApp .stButton > button[kind="primary"]:hover {
+  background: #a6eedc !important;
+  border-color: #a6eedc !important;
+  box-shadow: 0 5px 24px rgba(115,216,196,.26) !important;
+}
+.stApp .stButton > button:not([kind="primary"]) {
+  background: #151f30 !important;
+  border: 1px solid #344158 !important;
+  border-radius: 10px !important;
+  color: #dbe6f6 !important;
+  box-shadow: none !important;
+}
+.stApp [data-testid="stSegmentedControl"] button[aria-pressed="true"] {
+  background: #183d3c !important;
+  color: #b9f5e9 !important;
+  border-color: #42786e !important;
+}
+.stApp [data-testid="stExpander"],
+.stApp [data-testid="stVerticalBlockBorderWrapper"] > div[style*="border"] {
+  background: rgba(17,27,43,.55) !important;
+  border-color: var(--nova-line) !important;
+  border-radius: 14px !important;
+}
+.stApp div[data-testid="stHorizontalBlock"] button:focus,
+.stApp div[data-testid="stHorizontalBlock"] button:active {
+  box-shadow: 0 0 0 2px rgba(115,216,196,.3) !important;
+  color: #f4f8ff !important;
+}
+.stApp h1, .stApp h2, .stApp h3 { letter-spacing: -.035em; }
+.stApp [data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
+.stApp [data-testid="stMetric"] {
+  background: #111b2b; border: 1px solid var(--nova-line);
+  padding: 12px; border-radius: 12px;
+}
+.stApp [data-testid="stAlert"] {
+  border-radius: 12px !important;
+}
+
+/* Title/section identity */
+.nova-brand { display:flex; align-items:center; gap:14px; margin: .45rem 0 .85rem; }
+.nova-brand-mark {
+  flex:0 0 44px; height:44px; display:grid; place-items:center;
+  border-radius:13px; background:linear-gradient(140deg,#75ddc4,#6b91ef);
+  font-size:24px; box-shadow: 0 7px 28px rgba(85,163,184,.2);
+}
+.nova-brand-kicker {
+  color:var(--nova-accent) !important; font-weight:750; letter-spacing:.17em;
+  font-size:.66rem; text-transform:uppercase; margin-bottom:2px;
+}
+.nova-brand-title {
+  font-weight:900; letter-spacing:-.05em; color:var(--nova-text) !important;
+  font-size: clamp(1.5rem,2.6vw,2.2rem); line-height:1.07;
+}
+.nova-brand-sub { color:var(--nova-muted) !important; font-size:.82rem; margin:3px 0 0; }
+.nova-strip {
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  margin:0 0 1.0rem;
+}
+.nova-strip span {
+  background:rgba(115,216,196,.06); border:1px solid var(--nova-line);
+  color:#b5c6d9 !important; padding:5px 9px; border-radius:7px;
+  font-size:.69rem; font-weight:700; letter-spacing:.025em;
+}
+.nova-strip span:first-child {
+  color:#a9eadb !important; border-color:rgba(115,216,196,.33);
+}
+.nova-section-head {
+  margin: .9rem 0 .8rem; display:flex; align-items:center;
+  justify-content:space-between; flex-wrap:wrap; gap:8px;
+}
+.nova-section-head h3 {
+  color:#f5f8ff !important; font-size:1.16rem; font-weight:830;
+  letter-spacing:-.027em; margin:0;
+}
+.nova-section-head small {
+  color:var(--nova-muted) !important; font-size:.75rem;
+}
+.nova-team-meta { margin:0 0 .85rem; display:flex; gap:6px; flex-wrap:wrap; }
+
+/* Matchup banner */
+.nova-matchup {
+  position:relative; overflow:hidden; border-radius:19px;
+  border:1px solid rgba(152,172,202,.21);
+  background:linear-gradient(120deg,rgba(19,30,48,.97),rgba(13,23,37,.96) 48%,rgba(19,30,48,.97));
+  padding:20px clamp(14px,3vw,30px); margin: .55rem 0 1.25rem;
+}
+.nova-matchup:after {
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(90deg,var(--team-away),transparent 24%,transparent 76%,var(--team-home));
+  opacity:.13;
+}
+.nova-matchup-kicker {
+  color:#96a9c1 !important; text-align:center; font-size:.65rem;
+  font-weight:760; letter-spacing:.18em; text-transform:uppercase; margin:0 0 14px;
+}
+.nova-matchup-main {
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(126px,.53fr) minmax(0,1fr);
+  align-items:center; gap:13px; position:relative; z-index:1;
+}
+.nova-matchup-team { display:flex; align-items:center; gap:13px; min-width:0; }
+.nova-matchup-team.home { justify-content:flex-end; flex-direction:row-reverse; text-align:right; }
+.nova-matchup-logo {
+  display:block; flex:0 0 74px; width:74px; height:74px; object-fit:contain;
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,.23));
+}
+.nova-matchup-name {
+  color:#f6f9ff !important; font-weight:850; font-size:clamp(.96rem,1.5vw,1.5rem);
+  line-height:1.08; letter-spacing:-.03em; overflow-wrap:anywhere;
+}
+.nova-matchup-meta { color:#9baac0 !important; font-size:.72rem; margin-top:6px; }
+.nova-matchup-center { text-align:center; }
+.nova-versus {
+  color:#8092aa !important; font-weight:800; letter-spacing:.2em;
+  font-size:.7rem; margin-bottom:9px;
+}
+.nova-gametime {
+  display:inline-block; color:#d7e9f8 !important; background:#19273b;
+  border:1px solid #324660; border-radius:10px; padding:8px 10px;
+  font-weight:760; font-size:.75rem; line-height:1.35;
+}
+
+/* Player cards. CSS namespaced; classic untouched. */
+.nova-player {
+  --team: #7dd3ca; --team-soft: #7999b9;
+  background:linear-gradient(160deg,#141f30 0%,#101a2a 52%,#0d1727 100%);
+  border:1px solid #2a384d;
+  border-radius:18px; margin:0 0 14px; padding:0;
+  overflow:hidden; position:relative; min-width:0;
+  box-shadow:0 8px 23px rgba(0,0,0,.12);
+}
+.nova-player:before {
+  content:""; display:block; width:100%; height:3px;
+  background:linear-gradient(90deg,var(--team) 0%, var(--team-soft) 65%, transparent 100%);
+}
+.nova-player-top {
+  display:grid; grid-template-columns:75px minmax(0,1fr) 43px;
+  align-items:center; gap:11px; padding:14px 15px 9px;
+}
+.nova-portrait {
+  width:74px; height:74px; display:block; object-fit:contain;
+  object-position:center bottom; background:radial-gradient(ellipse at 50% 100%,rgba(166,189,220,.16),transparent 70%);
+  border:1px solid #34445b; border-radius:13px;
+}
+.nova-player-name {
+  color:#f9fbff !important; font-size:clamp(.93rem,1.2vw,1.15rem);
+  font-weight:880; line-height:1.17; letter-spacing:-.035em;
+}
+.nova-player-team {
+  color:#aabbd0 !important; font-size:.71rem; margin-top:5px;
+  text-transform:uppercase; letter-spacing:.04em; font-weight:700;
+}
+.nova-player-team strong { color:var(--team) !important; }
+.nova-small-logo { width:38px; height:38px; object-fit:contain; display:block; }
+.nova-sample {
+  display:inline-flex; align-items:center; gap:4px; background:#1c2a3c;
+  border:1px solid #32445b; border-radius:7px; padding:4px 7px;
+  color:#bcd0e3 !important; font-size:.67rem; margin-top:7px;
+}
+.nova-pred {
+  margin:0 14px 12px; padding:13px 14px;
+  border:1px solid rgba(148,177,220,.17);
+  border-radius:13px;
+  background:linear-gradient(120deg,rgba(34,51,75,.95),rgba(22,34,54,.9));
+  display:flex; gap:10px; justify-content:space-between; align-items:center;
+  flex-wrap:wrap;
+}
+.nova-pred-label { color:#a9bad0 !important; font-weight:780; font-size:.67rem; letter-spacing:.09em; text-transform:uppercase; }
+.nova-pred-value {
+  color:#f5f8ff !important; font-size:clamp(1.55rem,2.1vw,1.95rem);
+  font-weight:920; line-height:1.06; letter-spacing:-.055em; margin-top:3px;
+}
+.nova-pred-aside { text-align:right; }
+.nova-pred-aside .nova-small { color:#9eb1c7 !important; font-size:.7rem; }
+.nova-pred-aside strong {
+  display:block; color:#f0f7fd !important; font-size:.88rem; font-weight:830; margin-top:3px;
+}
+.nova-data-warning { color:#ecc38d !important; font-weight:760; font-size:.75rem; }
+.nova-stat-grid {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:1px; margin:0 14px; background:#2c3c50;
+  border:1px solid #2c3c50; border-radius:12px; overflow:hidden;
+}
+.nova-stat {
+  text-align:center; background:#111d2d; padding:11px 5px;
+}
+.nova-stat-label {
+  color:#8fa7c0 !important; font-size:.65rem; font-weight:780;
+  letter-spacing:.09em; text-transform:uppercase;
+}
+.nova-stat-value {
+  color:#f7f9ff !important; font-size:1.3rem; font-weight:870;
+  letter-spacing:-.045em; margin-top:4px;
+}
+.nova-stat-small { color:#8ea4bb !important; font-size:.66rem; margin-top:2px; }
+.nova-card-bottom {
+  padding:12px 14px 13px; display:flex; flex-wrap:wrap;
+  align-items:center; gap:6px; justify-content:space-between;
+}
+.nova-chips { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+.nova-chip {
+  color:#cbd8e9 !important; display:inline-flex; align-items:center; gap:4px;
+  background:#1a2a3d; border:1px solid #30445d;
+  border-radius:7px; padding:5px 8px; font-size:.68rem; font-weight:720; line-height:1.22;
+}
+.nova-chip.positive { background:#10382f; border-color:#2e725b; color:#a8efd4 !important; }
+.nova-chip.negative { background:#3a2029; border-color:#714053; color:#ffb9c5 !important; }
+.nova-chip.warning { background:#3a3020; border-color:#706044; color:#f2d9a1 !important; }
+.nova-card-footer {
+  padding:0 15px 14px; color:#8fa5c0 !important; font-size:.7rem;
+}
+.nova-card-footer strong { color:#cbdaee !important; }
+
+/* Matchup & existing detail sections remain familiar, but cleaner. */
+.player-headline-card { border-radius:14px; background:linear-gradient(140deg,#283452,#182338) !important; border-color:#415375 !important; padding:1.05rem 1.2rem; }
+.player-headline-value { font-weight:900; letter-spacing:-.04em; font-size:1.65rem; line-height:1.15; }
+.player-headline-label { color:#b5caff; }
+.focus-shell, .detail-box, .summary-card, .ranking-shell {
+  background:linear-gradient(150deg,#121d2d,#0f1929) !important;
+  border:1px solid #2b3b50 !important; border-radius:14px;
+}
+.focus-shell { padding:1.1rem 1.25rem; }
+.detail-mini { background:#0c1523 !important; border-color:#27374e !important; }
+.detail-mini-highlight { background:#1c2b40 !important; border-color:#4b5c78 !important; }
+.ranking-row { border-bottom-color:#253447; }
+.ranking-rank { background:#254a48; color:#bcf6e9; }
+.hero-pill, .info-pill { border-radius:8px; }
+.stApp .stTabs [data-baseweb="tab-list"] { gap: .9rem; border-bottom:1px solid #2c3a50; }
+.stApp .stTabs [data-baseweb="tab"] {
+  border-radius:8px 8px 0 0; font-weight:780;
+}
+.stApp .stTabs [aria-selected="true"] { color:#9fe8dc !important; }
+.stApp .stExpander { border-radius:12px !important; }
+
+@media(max-width: 1050px) {
+  .nova-matchup-logo { width:58px; height:58px; flex-basis:58px; }
+  .nova-matchup { padding:17px; }
+  .nova-player-top { grid-template-columns:62px minmax(0,1fr) 35px; }
+  .nova-portrait { width:61px; height:61px; }
+  .nova-small-logo { width:31px; height:31px; }
+}
+@media(max-width: 768px) {
+  .block-container { padding: 1.0rem .85rem 2rem !important; }
+  .nova-matchup-main { grid-template-columns:minmax(0,1fr) 94px minmax(0,1fr); gap:5px; }
+  .nova-matchup { padding:12px 9px; }
+  .nova-matchup-kicker { margin-bottom:10px; }
+  .nova-matchup-team { flex-direction:column; justify-content:center; gap:5px; text-align:center; }
+  .nova-matchup-team.home { flex-direction:column; text-align:center; }
+  .nova-matchup-name { font-size:.86rem; line-height:1.16; }
+  .nova-matchup-logo { width:56px!important; height:56px!important; flex:0 0 56px; max-width:initial!important; }
+  .nova-matchup-meta { font-size:.65rem; }
+  .nova-gametime { font-size:.65rem; padding:6px 4px; border-radius:6px; }
+  .nova-player { margin-bottom:10px; }
+  .nova-player-top { grid-template-columns:64px minmax(0,1fr) 33px; }
+  .nova-portrait { width:62px!important; height:62px!important; max-width:none!important; }
+  .nova-small-logo { width:30px!important; height:30px!important; max-width:none!important; }
+  .nova-player-name { font-size:1rem; }
+  .nova-pred { margin:0 10px 10px; }
+  .nova-stat-grid { margin:0 10px; }
+  .nova-pred-value { font-size:1.55rem; }
+  .nova-stat-value { font-size:1.12rem; }
+  .nova-section-head { margin:.7rem 0; }
+  .nova-card-bottom { padding:10px; }
+  .nova-card-footer { padding:0 10px 12px; }
+  /* The classic sheet forces all images <=60px. Revert for this design. */
+  .stApp img:not(.nova-small-logo):not(.nova-portrait):not(.nova-matchup-logo) { max-width:100%!important; }
+}
+@media(max-width:380px) {
+  .nova-player-top { grid-template-columns:55px minmax(0,1fr) 30px; gap:7px; }
+  .nova-portrait { width:54px!important; height:54px!important; }
+  .nova-player-name { font-size:.9rem; }
+  .nova-pred-aside { text-align:left; }
+  .nova-card-bottom { gap:5px; }
+}
