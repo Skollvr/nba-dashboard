@@ -28,4 +28,5 @@ jobs:
             tests/test_espn_player_gamelog.py \
             tests/test_projection_validation.py \
             tests/test_matchup_calibration.py \
-            tests/test_analysis_season.py
+            tests/test_analysis_season.py \
+            tests/test_espn_brasilia_pregame.py
