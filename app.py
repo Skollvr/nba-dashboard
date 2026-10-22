@@ -37,45 +37,13 @@ def _reset_selected_date_to_today() -> None:
     st.session_state["selected_game_date"] = get_brasilia_today()
 
 
-def get_previous_season_string(season: str) -> str:
-    start_year = int(str(season).split("-", 1)[0])
-    previous_start = start_year - 1
-    previous_end = str(start_year)[-2:]
-    return f"{previous_start}-{previous_end}"
-
-
 def get_analysis_season(selected_date: date, today: date) -> str:
+    """Use the selected game's own NBA season, including the 2026/27 opener.
+
+    2025/26 must never be silently substituted for 2026/27. Small samples are
+    visible and labeled as preliminary instead of switching seasons.
     """
-    Escolhe a temporada estatística sem introduzir informação futura.
-
-    Regras:
-    - jogos de temporadas históricas usam a própria temporada;
-    - jogos da temporada corrente até 15/11 usam a temporada anterior como
-      referência, mesmo quando revisitados mais tarde;
-    - enquanto a data real ainda estiver no período inicial (até 15/11), jogos
-      futuros da temporada corrente também usam a temporada anterior;
-    - depois disso, datas posteriores a 15/11 usam a temporada corrente.
-    """
-    game_season = get_season_string(selected_date)
-    current_season = get_season_string(today)
-
-    if game_season != current_season:
-        return game_season
-
-    selected_is_early = (
-        selected_date.month == 10
-        or (selected_date.month == 11 and selected_date.day <= 15)
-    )
-    today_is_early = (
-        today.month == 10
-        or (today.month == 11 and today.day <= 15)
-    )
-
-    if selected_is_early or today_is_early:
-        return get_previous_season_string(game_season)
-
-    return game_season
-
+    return get_season_string(selected_date)
 
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
@@ -100,8 +68,8 @@ def main():
     st.info(
         "🧪 Branch de validação ESPN completa: agenda, roster, game logs, H2H, "
         "defesa/percentis, matchup por posição, depth chart e lesões usam ESPN. "
-        "Os minutos projetados continuam com o modelo interno quando a ESPN não "
-        "publica uma projeção explícita."
+        "Temporada 2026/27 ativa para testes com amostra inicial; "
+        "rotação via depth chart e minutos internos quando não há projeção externa."
     )
 
     today = get_brasilia_today()
@@ -152,8 +120,14 @@ def main():
 
         chart_mode = st.pills("Gráfico", CHART_OPTIONS, default="Compacto")
         cards_per_row = st.pills("Cards/Linha", [1, 2], default=2)
-        min_games = st.slider("Min Jogos", 0, 82, 5)
-        min_minutes = st.slider("Min Minutos", 0, 40, 15)
+        # During the 2026/27 opening weeks most players have <5 games:
+        # do not hide them by default while we validate ESPN's new-season feed.
+        early_2627_test = (
+            get_season_string(today) == "2026-27"
+            and today < date(2026, 11, 16)
+        )
+        min_games = st.slider("Min Jogos", 0, 82, 0 if early_2627_test else 5)
+        min_minutes = st.slider("Min Minutos", 0, 40, 0 if early_2627_test else 15)
         role_filter = st.pills("Jogadores", ROLE_OPTIONS, default="Todos")
         line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PRA")
         line_value = None
@@ -198,17 +172,10 @@ def main():
     analysis_season = get_analysis_season(selected_date, today)
     selected_date_key = selected_date.isoformat()
 
-    using_early_season_base = analysis_season != season
-    if using_early_season_base:
-        st.caption(
-            f"Temporada detectada: {season} • Base estatística temporária: {analysis_season} "
-            f"• Recorte: {season_scope_label}"
-        )
-    else:
-        st.caption(
-            f"Temporada detectada: {season} • Base estatística: {analysis_season} "
-            f"• Recorte: {season_scope_label}"
-        )
+    st.caption(
+        f"Temporada do jogo: {season} • Base estatística ESPN: {analysis_season} "
+        f"• Recorte: {season_scope_label} • Somente jogos anteriores à data escolhida (Brasília)"
+    )
 
     if search_games:
         st.session_state.pop("loaded_matchup_key", None)
@@ -307,13 +274,7 @@ def main():
     away_gp = _team_gp(away_df)
     home_gp = _team_gp(home_df)
 
-    if using_early_season_base:
-        st.info(
-            f"Modo início de temporada: o jogo pertence a {season}, mas a base estatística temporária "
-            f"é {analysis_season}. Essa referência fica ativa até 15/11 para evitar projeções baseadas "
-            "em uma amostra muito pequena da temporada nova."
-        )
-    elif away_gp >= min_model_games and home_gp >= min_model_games:
+    if away_gp >= min_model_games and home_gp >= min_model_games:
         st.success(
             f"Amostra mínima atingida: {selected_game['away_team_name']} {away_gp} jogos • "
             f"{selected_game['home_team_name']} {home_gp} jogos. "
@@ -324,8 +285,8 @@ def main():
             f"Amostra inicial da temporada — referência mínima: {min_model_games} jogos por time. "
             f"{selected_game['away_team_name']}: {away_gp}/{min_model_games} • "
             f"{selected_game['home_team_name']}: {home_gp}/{min_model_games}. "
-            "As projeções ficam disponíveis para desenvolvimento e teste, mas não devem ser tratadas "
-            "como amostra consolidada."
+            f"Base exclusiva {analysis_season}, sem recorrer a 2025/26. "
+            "As projeções com amostra reduzida são experimentais, não adequadas ainda para apostas."
         )
 
     lineup_test_df = pd.concat(
