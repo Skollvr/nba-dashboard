@@ -7,9 +7,7 @@ from config import (
 )
 from api_nba import get_games_for_date
 from api_lineups import clear_lineup_cache
-from espn_context import clear_espn_pregame_cache, get_espn_roster_player_logs
-from api_espn import diagnose_espn_shooting_gamelog
-from projection_validation import rolling_projection_backtest
+from espn_context import clear_espn_pregame_cache
 from api_odds import get_odds_api_key, clear_odds_cache
 from pdf_reader import get_season_string, clear_injury_cache
 from processamento import get_matchup_context
@@ -161,7 +159,15 @@ def main():
         line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PTS")
         line_value = None
         api_key_available = bool(get_odds_api_key())
-        use_market_line = st.toggle("Usar BetMGM", value=api_key_available, disabled=not api_key_available)
+        use_market_line = st.toggle(
+            "Priorizar BetMGM", value=True,
+            help="Busca automaticamente a BetMGM. Se não existir cotação, permite linha manual por jogador.",
+        )
+        if not api_key_available and use_market_line:
+            st.caption(
+                "BetMGM não configurada: adicione SPORTSGAMEODDS_API_KEY aos "
+                "Secrets do Streamlit Cloud. Linha manual continua disponível."
+            )
         season_scope_label = st.pills(
             "Recorte estatístico",
             ["Temporada Regular", "Playoffs", "Play-In", "Tudo"],
@@ -336,209 +342,46 @@ def main():
                 "Confira a fonte antes de interpretar GP 0 como ausência de jogos."
             )
 
-    lineup_test_df = pd.concat(
-        [df for df in [away_df, home_df] if df is not None and not df.empty],
-        ignore_index=True,
+    # Technical ESPN validation stays in processing/tests. Only surface
+    # information that affects decisions; remove old diagnostics and backtests.
+    defense_available = any(
+        df is not None and not df.empty
+        and "OPP_DEF_SAMPLE_GP" in df
+        and pd.to_numeric(df["OPP_DEF_SAMPLE_GP"], errors="coerce").fillna(0).gt(0).any()
+        for df in (away_df, home_df)
     )
-    if not lineup_test_df.empty:
-        source_series = lineup_test_df.get(
-            "LINEUP_SOURCE",
-            pd.Series(["Modelo interno"] * len(lineup_test_df)),
-        ).fillna("Modelo interno").astype(str)
-        espn_depth_count = int(source_series.eq("ESPN Depth Chart").sum())
-        external_min_count = int(
-            pd.to_numeric(
-                lineup_test_df.get(
-                    "PROJECTED_MINUTES_EXTERNAL",
-                    pd.Series([float("nan")] * len(lineup_test_df)),
-                ),
-                errors="coerce",
-            ).notna().sum()
+    if not defense_available:
+        st.warning(
+            "Sem amostra defensiva confiável para este confronto; o modelo "
+            "mantém o matchup neutro até receber dados."
         )
 
-        if espn_depth_count > 0:
-            starter_count = int(
-                lineup_test_df.get(
-                    "LINEUP_STATUS",
-                    pd.Series([""] * len(lineup_test_df)),
-                ).astype(str).eq("Titular projetado").sum()
-            )
-            st.info(
-                f"Rotação ESPN reconhecida para {espn_depth_count} jogador(es) • "
-                f"{starter_count} titular(es) projetado(s) pelo depth chart. "
-                f"Minutos externos explícitos: {external_min_count}; quando ausentes, "
-                "o modelo interno de minutos continua sendo usado."
-            )
-        else:
-            st.caption(
-                "Depth chart ESPN não trouxe uma rotação utilizável para este jogo; "
-                "o app manteve a estimativa interna por minutos."
-            )
-
-    defense_diag_df = pd.concat(
-        [df for df in [away_df, home_df] if df is not None and not df.empty],
-        ignore_index=True,
-    )
-    if not defense_diag_df.empty:
-        def_sources = defense_diag_df.get(
-            "DEFENSE_SOURCE",
-            pd.Series([""] * len(defense_diag_df)),
-        ).fillna("").astype(str)
-        def_samples = pd.to_numeric(
-            defense_diag_df.get(
-                "OPP_DEF_SAMPLE_GP",
-                pd.Series([0] * len(defense_diag_df)),
-            ),
-            errors="coerce",
-        ).fillna(0)
-        team_counts = pd.to_numeric(
-            defense_diag_df.get(
-                "TEAM_DEF_TEAM_COUNT",
-                pd.Series([0] * len(defense_diag_df)),
-            ),
-            errors="coerce",
-        ).fillna(0)
-
-        if def_samples.max() > 0:
-            source_label = next(
-                (value for value in def_sources.tolist() if value and "indisponível" not in value),
-                "ESPN",
-            )
-            st.caption(
-                f"Defesa ESPN ativa • {int(team_counts.max()) or 30} times no ranking • "
-                f"amostra do adversário: até {int(def_samples.max())} jogos • {source_label}."
-            )
-        else:
-            st.warning(
-                "O contexto defensivo ESPN não formou amostra para este confronto; "
-                "matchup defensivo permanece neutro nesta execução."
-            )
-
-    # Audit the sample coverage of shooting attempts, not just its averages.
-    if not lineup_test_df.empty and {
-        "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP", "SEASON_GP",
-    }.issubset(lineup_test_df.columns):
-        inspected = lineup_test_df.copy()
-        inspected["SEASON_GP"] = pd.to_numeric(
-            inspected["SEASON_GP"], errors="coerce"
-        ).fillna(0)
-        inspected["SEASON_FGA_VALID_GP"] = pd.to_numeric(
-            inspected["SEASON_FGA_VALID_GP"], errors="coerce"
-        ).fillna(0)
-        inspected["SEASON_3PA_VALID_GP"] = pd.to_numeric(
-            inspected["SEASON_3PA_VALID_GP"], errors="coerce"
-        ).fillna(0)
-        incomplete = inspected[
-            (inspected["SEASON_GP"] > 0)
-            & (
-                (inspected["SEASON_FGA_VALID_GP"] < 0.8 * inspected["SEASON_GP"])
-                | (inspected["SEASON_3PA_VALID_GP"] < 0.8 * inspected["SEASON_GP"])
-            )
-        ].copy()
-        if not incomplete.empty:
-            st.warning(
-                f"Auditoria ESPN: {len(incomplete)} jogador(es) têm menos de "
-                "80% dos jogos com FGA/3PA válidos. Projeções de arremesso "
-                "com amostra insuficiente são ocultadas e não geram Edge."
-            )
-            with st.expander("Ver amostras incompletas de FGA/3PA"):
-                st.dataframe(
-                    incomplete[[
-                        "PLAYER", "SEASON_GP", "SEASON_FGA_VALID_GP",
-                        "SEASON_3PA_VALID_GP",
-                    ]].rename(columns={
-                        "PLAYER": "Jogador",
-                        "SEASON_GP": "GP",
-                        "SEASON_FGA_VALID_GP": "FGA válidos",
-                        "SEASON_3PA_VALID_GP": "3PA válidos",
-                    }),
-                    use_container_width=True, hide_index=True,
-                )
-
-    with st.expander("Diagnóstico técnico ESPN — FGA", expanded=False):
-        st.caption(
-            "Consulta os nomes das colunas e os arremessos presentes no retorno "
-            "original da ESPN. Útil apenas se FGA continuar indisponível. "
-            "Os valores são públicos e limitados a quatro jogos."
-        )
-        if not lineup_test_df.empty and {"PLAYER_ID", "PLAYER"}.issubset(lineup_test_df.columns):
-            choices = (
-                lineup_test_df[["PLAYER_ID", "PLAYER"]]
-                .dropna()
-                .drop_duplicates("PLAYER_ID")
-                .sort_values("PLAYER")
-            )
-            options = {
-                f"{row.PLAYER} ({int(row.PLAYER_ID)})": int(row.PLAYER_ID)
-                for row in choices.itertuples(index=False)
-            }
-            selected_player = st.selectbox(
-                "Jogador para diagnosticar", list(options), key=f"diag-player::{selected_game_key}"
-            )
-            if st.button("Ver retorno ESPN", key=f"diag-run::{selected_game_key}"):
-                try:
-                    diagnostic = diagnose_espn_shooting_gamelog(
-                        options[selected_player], analysis_season, season_scope
-                    )
-                    if diagnostic.empty:
-                        st.warning("ESPN não retornou jogos para este jogador e temporada.")
-                    else:
-                        st.dataframe(diagnostic, use_container_width=True, hide_index=True)
-                except Exception as exc:
-                    st.warning(f"Não foi possível consultar o diagnóstico ESPN: {type(exc).__name__}")
-
-    with st.expander("Backtest temporal — minutos + forma (diagnóstico)", expanded=False):
-        st.caption(
-            "Avalia previsões para jogos passados usando SOMENTE jogos anteriores "
-            "do mesmo jogador. Compara a base de minutos/forma V1 à média L10. "
-            "Não inclui matchup, defesa, H2H, status de lesão ou roster histórico; "
-            "não é validação completa da projeção contextual V1."
-        )
-        report_key = f"backtest::{selected_game_key}"
-        if st.button("Calcular backtest dos jogadores deste confronto", key=f"run::{report_key}"):
-            with st.spinner("Validando previsões cronológicas com logs ESPN..."):
-                history_frames = []
-                for team_id in (
-                    int(selected_game["VISITOR_TEAM_ID"]),
-                    int(selected_game["HOME_TEAM_ID"]),
-                ):
-                    try:
-                        frame = get_espn_roster_player_logs(
-                            team_id, analysis_season,
-                            season_scope=season_scope,
-                            as_of_date=selected_date.isoformat(),
-                        )
-                        if frame is not None and not frame.empty:
-                            history_frames.append(frame)
-                    except Exception:
-                        continue
-                history = (
-                    pd.concat(history_frames, ignore_index=True)
-                    if history_frames else pd.DataFrame()
-                )
-                st.session_state[report_key] = rolling_projection_backtest(history)
-        report = st.session_state.get(report_key)
-        if isinstance(report, pd.DataFrame):
-            if report.empty:
-                st.info("Amostra insuficiente para backtest (mínimo de 10 jogos anteriores por jogador).")
-            else:
-                st.dataframe(report, use_container_width=True, hide_index=True)
-                if "FGA" not in report["Métrica"].tolist():
-                    st.warning(
-                        "FGA não foi avaliado: a amostra de tentativas totais "
-                        "não passou na validação estatística. Não é um MAE igual a zero."
-                    )
-                st.caption(
-                    "MAE = erro absoluto médio (menor é melhor). Viés positivo "
-                    "significa superestimar. Ganho MAE positivo favorece o modelo "
-                    "temporal sobre a média L10. Resultados não representam lucro "
-                    "nem probabilidade de acerto em apostas."
-                )
-
-    # Linhas manuais são individuais por jogador. Isso evita comparar todo o
-    # roster contra uma única linha global. Se BetMGM estiver ativo e houver
-    # linha de mercado para o jogador, ela continua tendo prioridade.
+    # Automatic BetMGM has priority; manual per-player values remain available.
+    # No model-derived or estimated betting line is ever invented.
     manual_col = f"MANUAL_LINE_{line_metric}"
+    market_col = f"BETMGM_{line_metric}_LINE"
+    if use_market_line:
+        fetch_status = (
+            str(away_df["ODDS_FETCH_STATUS"].iloc[0])
+            if away_df is not None and not away_df.empty
+            and "ODDS_FETCH_STATUS" in away_df.columns
+            else "BetMGM: fonte não confirmou o retorno"
+        )
+        available_market = sum(
+            int(
+                pd.to_numeric(
+                    df.get(market_col, pd.Series(dtype=float)),
+                    errors="coerce",
+                ).gt(0).sum()
+            )
+            for df in (away_df, home_df)
+            if df is not None and not df.empty
+        )
+        st.caption(
+            f"{fetch_status} • {available_market} jogador(es) com linha "
+            f"BetMGM de {line_metric}. As demais linhas podem ser inseridas manualmente."
+        )
+
     line_rows = []
 
     for team_df, team_name in [
@@ -558,31 +401,47 @@ def main():
                     "_PLAYER_ID": int(player_id),
                     "Jogador": str(player_row.get("PLAYER", "")),
                     "Time": str(team_name),
-                    "Linha": float("nan"),
+                    "BetMGM": pd.to_numeric(
+                        player_row.get(market_col), errors="coerce"
+                    ) if use_market_line else float("nan"),
+                    "Linha manual": float("nan"),
                 }
             )
 
     if line_rows:
         manual_lines_df = pd.DataFrame(line_rows)
 
-        with st.expander(f"Linhas manuais individuais — {line_metric}", expanded=False):
+        missing_market = int(
+            pd.to_numeric(manual_lines_df["BetMGM"], errors="coerce")
+            .le(0).sum()
+            + manual_lines_df["BetMGM"].isna().sum()
+        )
+        with st.expander(
+            f"✏️ Gerar linha manual — {line_metric} "
+            f"({missing_market} sem cotação BetMGM)" if use_market_line
+            else f"✏️ Linhas manuais — {line_metric}",
+            expanded=False,
+        ):
             st.caption(
-                "Preencha somente os jogadores que deseja analisar. "
-                "Jogadores sem linha continuam com projeções, mas ficam fora dos rankings de Edge/Consistência. "
-                "Se houver linha BetMGM ativa para o jogador, ela tem prioridade."
+                "BetMGM tem prioridade quando estiver ativada e disponível. "
+                "Se aparecer Linha indisponível, informe a linha desejada "
+                "na coluna Linha manual. Não geramos cotação fictícia."
             )
 
             edited_lines = st.data_editor(
                 manual_lines_df,
                 hide_index=True,
                 use_container_width=True,
-                disabled=["Jogador", "Time"],
+                disabled=["Jogador", "Time", "BetMGM"],
                 column_config={
                     "_PLAYER_ID": None,
                     "Jogador": st.column_config.TextColumn("Jogador"),
                     "Time": st.column_config.TextColumn("Time"),
-                    "Linha": st.column_config.NumberColumn(
-                        f"Linha {line_metric}",
+                    "BetMGM": st.column_config.NumberColumn(
+                        "Linha BetMGM", format="%.1f"
+                    ),
+                    "Linha manual": st.column_config.NumberColumn(
+                        f"Linha manual {line_metric}",
                         min_value=0.5,
                         step=0.5,
                         format="%.1f",
@@ -592,15 +451,17 @@ def main():
             )
 
         valid_lines = edited_lines.copy()
-        valid_lines["Linha"] = pd.to_numeric(valid_lines["Linha"], errors="coerce")
+        valid_lines["Linha manual"] = pd.to_numeric(
+            valid_lines["Linha manual"], errors="coerce"
+        )
         valid_lines = valid_lines[
-            valid_lines["Linha"].notna() & (valid_lines["Linha"] > 0)
+            valid_lines["Linha manual"].notna()
+            & (valid_lines["Linha manual"] > 0)
         ]
-
         manual_line_map = dict(
             zip(
                 valid_lines["_PLAYER_ID"].astype(int),
-                valid_lines["Linha"].astype(float),
+                valid_lines["Linha manual"].astype(float),
             )
         )
 
