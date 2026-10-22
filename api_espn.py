@@ -348,7 +348,8 @@ def parse_espn_shooting_stats(
     fg_value = _first_stat(
         stat_map, "FG", "FGM-A", "FGM-FGA", "FG-FGA",
         "fieldGoalsMade-fieldGoalsAttempted", "fieldGoals",
-        "fieldGoalsMade", "FGM/FGA", "FGM/FGA", "FGM-A",
+        "fieldGoalsMade", "FGM/FGA", "FG%", "FGM", "FG/A",
+        "fieldGoalPct", "fieldGoalsPct", "fieldGoalsMadeAttempted",
     )
     three_value = _first_stat(
         stat_map, "3PT", "3P", "3PM-A", "3PM-3PA", "3PM/3PA",
@@ -791,6 +792,38 @@ def _iter_gamelog_events(
     return flat_events
 
 
+def _recover_verified_shooting_vector(
+    stats: list[Any], points: float | None,
+) -> tuple[float, float, float] | None:
+    """Recover ESPN's fixed MIN/FG/3PT/FT/.../PTS vector only if verified.
+
+    ESPN sometimes changes labels/names without changing the nine basketball
+    values. Read the *values* only when they satisfy the basketball scoring
+    identity: PTS = 2*FGM + 3PM + FTM, and FGA >= 3PA. This is a
+    source-value recovery, never an invented attempt count.
+    """
+    if not isinstance(stats, list) or len(stats) < 9 or points is None:
+        return None
+    values = stats[-9:]
+    fgm, fga = _made_attempted(values[1])
+    three_made, three_attempted = _made_attempted(values[2])
+    free_made, free_attempted = _made_attempted(values[3])
+    if any(v is None for v in (
+        fgm, fga, three_made, three_attempted,
+        free_made, free_attempted,
+    )):
+        return None
+    if not (
+        0 <= fgm <= fga <= 90
+        and 0 <= three_made <= three_attempted <= fga
+        and 0 <= free_made <= free_attempted
+    ):
+        return None
+    if abs((2 * fgm + three_made + free_made) - points) > 0.01:
+        return None
+    return float(fga), float(three_made), float(three_attempted)
+
+
 def _parse_espn_player_gamelog_payload(
     payload: dict[str, Any],
     player_id: int,
@@ -815,6 +848,25 @@ def _parse_espn_player_gamelog_payload(
         reb = _to_float(_first_stat(stat_map, "reb", "rebounds", "totalRebounds"))
         ast = _to_float(_first_stat(stat_map, "ast", "assists"))
         fga, fg3m, fg3a, shooting_issues = parse_espn_shooting_stats(stat_map)
+        # Recover only from the actual ESPN stats vector when the labels
+        # are unrecognized. Verify against the recorded points and FT.
+        if fga is None or fg3m is None or fg3a is None:
+            recovered = _recover_verified_shooting_vector(stats, pts)
+            if recovered is not None:
+                candidate_fga, candidate_3pm, candidate_3pa = recovered
+                if (
+                    (fg3a is None or fg3a == candidate_3pa)
+                    and (fg3m is None or fg3m == candidate_3pm)
+                ):
+                    fga, fg3m, fg3a = recovered
+                    shooting_issues = tuple(
+                        issue for issue in shooting_issues
+                        if issue in {"FGA_out_of_range", "3PA_out_of_range",
+                                     "3PA_exceeds_FGA", "3PM_exceeds_3PA"}
+                    )
+                    # Contradictory named fields cannot be silently repaired.
+                    if shooting_issues:
+                        fga = None
 
         # ESPN can include DNP/header rows with metadata but no participation.
         if minutes is None and all(
