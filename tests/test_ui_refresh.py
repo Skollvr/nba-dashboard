@@ -4,7 +4,11 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from ui_refresh import render_player_card_refresh, render_matchup_header_refresh
+from ui_refresh import (
+    render_player_card_refresh, render_matchup_header_refresh,
+    render_focus_summary_refresh, render_focus_comparison_refresh,
+    render_tip_card_refresh,
+)
 
 
 def _player(**kw):
@@ -115,3 +119,73 @@ def test_matchup_header_has_logos_both_team_names_and_brasilia_time():
     assert "20/10 20:00 BRT" in html[0]
     assert "/1610612738/" in html[0]
     assert "/1610612765/" in html[0]
+
+
+
+def test_modern_focus_summary_uses_same_projection_and_line_context():
+    html = []
+    player = _player(
+        PROJ_PTS=22.0, PROJ_PTS_V1=21.7,
+        SEASON_PTS=22.1, L10_PTS=22.4,
+        MATCHUP_LABEL_PTS_V1="Difícil",
+        MATCHUP_SCORE_PTS_V1=-0.45,
+        OSC_PTS_CLASS="Média",
+        FORM_PTS_SIGNAL="→ Estável",
+    )
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_focus_summary_refresh(player, "PTS", _context(21.7, True))
+    assert len(html) == 1
+    assert "21.7" in html[0] and "22.4" in html[0]
+    assert "20.5" in html[0]
+    assert "Difícil" in html[0]
+
+
+def test_modern_projection_comparison_shows_base_and_contextual_delta():
+    html = []
+    player = _player(PROJ_PTS=22.0, PROJ_PTS_V1=21.7)
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_focus_comparison_refresh(player, "PTS")
+    assert "22.0" in html[0]
+    assert "21.7" in html[0]
+    assert "-0.3" in html[0]
+
+
+def test_qualified_tip_card_preserves_existing_strength_and_line():
+    html = []
+    tip = {
+        "PLAYER": "Tyrese Maxey",
+        "TEAM_NAME": "Philadelphia 76ers",
+        "METRIC": "PTS",
+        "DIRECTION": "OVER",
+        "LINE": 26.5,
+        "PROJECTION": 28.1,
+        "EDGE": 1.6,
+        "HIT_TEXT": "7/10",
+        "MATCHUP": "Favorável",
+        "PROJ_MIN": 36,
+        "LINE_SOURCE": "Manual",
+        "STRENGTH": "DESTAQUE FORTE",
+    }
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_tip_card_refresh("MELHOR LINHA DO CONFRONTO", tip)
+    assert "Tyrese Maxey" in html[0]
+    assert "26.5" in html[0] and "28.1" in html[0]
+    assert "+1.6" in html[0]
+    assert "7/10" in html[0]
+    assert "DESTAQUE FORTE" in html[0]
+
+
+def test_default_pts_and_separate_panorama_remain_selected():
+    from pathlib import Path
+    app_text = Path("app.py").read_text(encoding="utf-8")
+    assert 'st.pills("Métrica", LINE_METRIC_OPTIONS, default="PTS")' in app_text
+    assert 'st.tabs(["🏀 Jogadores", "📊 Panorama do confronto"])' in app_text
+    assert 'key="dashboard_visual_mode"' in app_text
+
+
+def test_dark_primary_buttons_have_dark_text_for_descendants():
+    from pathlib import Path
+    css = Path("style_refresh.css").read_text(encoding="utf-8")
+    assert '#52bfad' in css
+    assert 'button[kind="primary"] p' in css
+    assert 'color: #07141b !important' in css
