@@ -210,25 +210,80 @@ def get_espn_injuries_standard(
         }
 
     entries: list[dict[str, Any]] = []
+    # A successful HTTP response is not proof of an up-to-date injury report.
+    # Only a feed containing identifiable injury entries may establish that
+    # unlisted players are not on the ESPN injury list.
     successful_team_ids: set[int] = set()
+    needs_league_fallback: set[int] = set()
 
     if team_ids:
         for official_id in team_ids:
+            team_id = int(official_id)
             try:
-                espn_id = _espn_team_id_for_official(int(official_id))
+                espn_id = _espn_team_id_for_official(team_id)
                 payload = _request_json(
                     ESPN_TEAM_INJURIES_URL.format(team_id=espn_id)
                 )
             except Exception:
+                needs_league_fallback.add(team_id)
                 continue
 
-            successful_team_ids.add(int(official_id))
-            for entry in payload.get("injuries") or []:
+            team_entries = payload.get("injuries") if isinstance(payload, dict) else None
+            if not isinstance(team_entries, list) or not team_entries:
+                needs_league_fallback.add(team_id)
+                continue
+
+            valid = [
+                entry for entry in team_entries
+                if isinstance(entry, dict)
+                and isinstance(entry.get("athlete"), dict)
+                and (
+                    entry["athlete"].get("id")
+                    or entry["athlete"].get("displayName")
+                    or entry["athlete"].get("fullName")
+                )
+            ]
+            if not valid:
+                needs_league_fallback.add(team_id)
+                continue
+
+            successful_team_ids.add(team_id)
+            for entry in valid:
+                item = dict(entry)
+                item["_OFFICIAL_TEAM_ID"] = team_id
+                entries.append(item)
+
+        if needs_league_fallback:
+            # Cross-check the league-wide ESPN injury list for teams whose
+            # per-team endpoint was empty or unusable. If both feeds are empty,
+            # availability stays unknown, never automatically Available.
+            try:
+                league_payload = _request_json(ESPN_INJURIES_URL)
+            except Exception:
+                league_payload = {}
+            league_entries = league_payload.get("injuries") if isinstance(league_payload, dict) else None
+            for entry in league_entries if isinstance(league_entries, list) else []:
                 if not isinstance(entry, dict):
+                    continue
+                athlete = entry.get("athlete") or {}
+                if not isinstance(athlete, dict) or not (
+                    athlete.get("id") or athlete.get("displayName") or athlete.get("fullName")
+                ):
+                    continue
+                team = entry.get("team") or {}
+                if not isinstance(team, dict):
+                    continue
+                official_id = espn_to_official.get(str(team.get("id") or ""))
+                if official_id is None:
+                    official_id = OFFICIAL_TEAM_ID_BY_ABBR.get(
+                        str(team.get("abbreviation") or "").upper()
+                    )
+                if official_id not in needs_league_fallback:
                     continue
                 item = dict(entry)
                 item["_OFFICIAL_TEAM_ID"] = int(official_id)
                 entries.append(item)
+                successful_team_ids.add(int(official_id))
     else:
         try:
             payload = _request_json(ESPN_INJURIES_URL)
@@ -313,8 +368,8 @@ def get_espn_injuries_standard(
             "QUERY_OK": True,
         })
 
-    # Sentinel rows distinguish "query succeeded and no injuries" from a failed
-    # request, so the processing layer never marks a failed team as Available.
+    # Sentinel rows mark teams with at least one *verifiable injury entry*.
+    # Empty responses or failed requests do NOT establish player availability.
     for official_id in sorted(successful_team_ids):
         rows.append({
             "PLAYER_ID_IR": None,
