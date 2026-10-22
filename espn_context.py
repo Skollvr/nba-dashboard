@@ -31,6 +31,7 @@ from api_espn import (
     normalize_espn_team_abbr,
     parse_espn_minutes,
     parse_espn_shooting_stats,
+    _first_stat,
     _request_json,
     get_espn_game_summary,
     get_espn_player_log,
@@ -322,9 +323,10 @@ def get_espn_injuries_standard(
 
 
 def _stat_map(stat_block: dict[str, Any], athlete_row: dict[str, Any]) -> dict[str, Any]:
+    """Keep original ESPN labels; FG and FG% must remain distinct."""
     keys = stat_block.get("keys") or stat_block.get("names") or stat_block.get("labels") or []
     values = athlete_row.get("stats") or []
-    return {re.sub(r"[^a-z0-9]", "", str(k).lower()): v for k, v in zip(keys, values)}
+    return {str(k): v for k, v in zip(keys, values)}
 
 
 def _num(value: Any) -> float | None:
@@ -344,11 +346,7 @@ def _made_attempted(value: Any) -> tuple[float | None, float | None]:
 
 
 def _first(stats: dict[str, Any], *aliases: str) -> Any:
-    for alias in aliases:
-        key = re.sub(r"[^a-z0-9]", "", alias.lower())
-        if key in stats:
-            return stats[key]
-    return None
+    return _first_stat(stats, *aliases)
 
 
 def _extract_game_rows(payload: dict[str, Any], game_id: str, game_date: Any) -> pd.DataFrame:
