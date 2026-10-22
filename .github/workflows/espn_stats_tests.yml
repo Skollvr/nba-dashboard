@@ -31,4 +31,5 @@ jobs:
             tests/test_analysis_season.py \
             tests/test_espn_brasilia_pregame.py \
             tests/test_espn_injuries_fallback.py \
-            tests/test_nba_official_injury_pdf.py
+            tests/test_nba_official_injury_pdf.py \
+            tests/test_nba_pdf_recovery.py
