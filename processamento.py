@@ -15,6 +15,7 @@ from api_espn import (
     aggregate_espn_player_stats,
     get_espn_team_roster,
 )
+from injury_sources import get_preferred_injury_report
 from espn_context import (
     get_espn_injuries_standard,
     get_espn_league_position_baseline,
@@ -1864,15 +1865,17 @@ def get_matchup_context(
     away_df = merge_daily_lineups(away_df, away_rotation, away_team_id)
     home_df = merge_daily_lineups(home_df, home_rotation, home_team_id)
 
-    report("Consultando lesões ESPN...")
+    game_matchup = f"{TEAM_ABBR_LOOKUP.get(int(away_team_id), '')}@{TEAM_ABBR_LOOKUP.get(int(home_team_id), '')}"
+    report("Consultando boletim oficial de lesões NBA (PDF); ESPN como fallback...")
     try:
-        injury_df = get_espn_injuries_standard(
-            (int(away_team_id), int(home_team_id))
+        injury_df = get_preferred_injury_report(
+            (int(away_team_id), int(home_team_id)),
+            game_matchup,
+            target_date=target_date,
         )
     except Exception:
         injury_df = pd.DataFrame()
 
-    game_matchup = f"{TEAM_ABBR_LOOKUP.get(int(away_team_id), '')}@{TEAM_ABBR_LOOKUP.get(int(home_team_id), '')}"
 
     away_df = merge_injury_report(
         away_df,
@@ -1949,6 +1952,8 @@ def merge_injury_report(
     enriched["INJ_STATUS"] = "—"
     enriched["INJ_REASON"] = ""
     enriched["INJ_REPORT_URL"] = ""
+    enriched["INJ_SOURCE"] = "Não confirmado"
+    enriched["TEAM_REPORT_STATUS"] = "Boletim indisponível"
     enriched["IS_UNAVAILABLE"] = False
     enriched["INJ_MATCHUP_FOUND"] = False
 
@@ -1959,6 +1964,25 @@ def merge_injury_report(
     if "TEAM_ID_IR" in work_ir.columns:
         team_ids = pd.to_numeric(work_ir["TEAM_ID_IR"], errors="coerce")
         work_ir = work_ir[(team_ids == int(team_id)) | team_ids.isna()].copy()
+
+    if not work_ir.empty:
+        source_values = work_ir.get("INJ_SOURCE", pd.Series(dtype=str))
+        source_values = source_values.dropna().astype(str)
+        source_values = source_values[source_values.str.strip().ne("")]
+        if not source_values.empty:
+            enriched["INJ_SOURCE"] = source_values.iloc[0]
+
+        status_values = work_ir.get("TEAM_REPORT_STATUS", pd.Series(dtype=str))
+        status_values = status_values.dropna().astype(str)
+        status_values = status_values[status_values.str.strip().ne("")]
+        if not status_values.empty:
+            enriched["TEAM_REPORT_STATUS"] = status_values.iloc[0]
+
+        url_values = work_ir.get("INJ_REPORT_URL", pd.Series(dtype=str))
+        url_values = url_values.dropna().astype(str)
+        url_values = url_values[url_values.str.startswith("https://")]
+        if not url_values.empty:
+            enriched["INJ_REPORT_URL"] = url_values.iloc[0]
 
     query_ok = (
         bool(work_ir.get("QUERY_OK", pd.Series(dtype=bool)).fillna(False).astype(bool).any())
@@ -2021,18 +2045,17 @@ def get_matchup_injury_context(
     away_df: pd.DataFrame,
     home_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-    """Compatibility helper now backed by ESPN instead of the NBA PDF."""
-    try:
-        injury_df = get_espn_injuries_standard(
-            (int(away_team_id), int(home_team_id))
-        )
-    except Exception:
-        injury_df = pd.DataFrame()
-
+    """Compatibility helper backed by NBA Official PDF with ESPN fallback."""
     game_matchup = (
         f"{TEAM_ABBR_LOOKUP[int(away_team_id)]}@"
         f"{TEAM_ABBR_LOOKUP[int(home_team_id)]}"
     )
+    try:
+        injury_df = get_preferred_injury_report(
+            (int(away_team_id), int(home_team_id)), game_matchup
+        )
+    except Exception:
+        injury_df = pd.DataFrame()
     away_injury_df = merge_injury_report(
         away_df,
         injury_df,
