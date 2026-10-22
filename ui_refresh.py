@@ -119,15 +119,32 @@ def render_player_card_refresh(
     projection = pd.to_numeric(ctx.get("projection"), errors="coerce")
     is_valid = bool(pd.notna(projection))
     is_active = is_valid and bool(ctx.get("has_active_line", False))
-    label = (
-        f"{ctx.get('line_source', 'Linha')} · {_number(ctx.get('line_value'))} {line_metric}"
-        if is_active else f"Projeção {line_metric}"
+    # The bookmaker may publish a line before the player has a single game
+    # in the selected season. Show it without inventing a projection or Edge.
+    raw_quote = ctx.get(
+        "quoted_line",
+        ctx.get("line_value") if is_active else None,
     )
-    subtitle = (
+    quote = pd.to_numeric(raw_quote, errors="coerce")
+    has_quote = bool(pd.notna(quote) and float(quote) > 0)
+    quote_source = str(
+        ctx.get("quoted_source")
+        or (ctx.get("line_source") if is_active else "")
+        or "Linha"
+    )
+    label = f"Projeção {line_metric}"
+    quote_label = (
+        f"Linha {quote_source}" if has_quote else "Linha indisponível"
+    )
+    quote_value = (
+        f"{_number(quote)} {line_metric}" if has_quote else "Gerar manual"
+    )
+    quote_note = (
         f'Edge {_signed(ctx.get("edge"))}'
-        if is_active else "LINHA INDISPONÍVEL · GERAR MANUAL"
-        if is_valid else "Amostra insuficiente"
+        if is_active else "Sem Edge · amostra insuficiente"
+        if not is_valid else "Sem linha para calcular Edge"
     )
+
     matchup = str(row.get(f"MATCHUP_LABEL_{line_metric}_V1", "Neutro"))
     matchup_kind = (
         "positive" if matchup in {"Favorável", "Muito favorável"}
@@ -170,8 +187,10 @@ def render_player_card_refresh(
         f'<div class="nova-pred-label">{_e(label)}</div>'
         f'<div class="nova-pred-value">{_number(projection)}</div>'
         '</div><div class="nova-pred-aside">'
-        f'<div class="nova-small">{"EDGE / LINHA" if is_active else "LINHA ATIVA"}</div>'
-        f'<strong>{_e(subtitle)}</strong></div></div>'
+        f'<div class="nova-small">{_e(quote_label)}</div>'
+        f'<strong>{_e(quote_value)}</strong>'
+        f'<div class="nova-quote-hint">{_e(quote_note)}</div>'
+        '</div></div>'
         '<div class="nova-stat-grid">'
         f'{_stat("PTS", "L10_PTS")}'
         f'{_stat("REB", "L10_REB")}'
@@ -203,6 +222,14 @@ def render_focus_summary_refresh(
     season_key = "SEASON_PRA" if metric == "PRA" else f"SEASON_{metric}"
     l10_key = "L10_PRA" if metric == "PRA" else f"L10_{metric}"
     active = bool(line_context.get("has_active_line", False))
+    quoted_line = pd.to_numeric(
+        line_context.get("quoted_line", line_context.get("line_value") if active else None),
+        errors="coerce",
+    )
+    has_quote = bool(pd.notna(quoted_line) and float(quoted_line) > 0)
+    quote_source = str(line_context.get("quoted_source") or (
+        line_context.get("line_source") if active else "Linha"
+    ))
     metric_match = row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro")
     osc = row.get(f"OSC_{metric}_CLASS", row.get("OSC_CLASS", "—"))
     form = row.get(f"FORM_{metric}_SIGNAL", row.get("FORM_SIGNAL", "—"))
@@ -217,12 +244,12 @@ def render_focus_summary_refresh(
             "main",
         ),
         (
-            f"{line_context.get('line_source', 'Linha')} · {metric}" if active
+            f"Linha {quote_source} · {metric}" if has_quote
             else f"Linha de aposta · {metric}",
-            _number(line_context.get("line_value"))
-            if active else "Linha indisponível",
+            _number(quoted_line) if has_quote else "Indisponível",
             f"Edge {_signed(line_context.get('edge'))} · Hit L10 {hit}"
-            if active else "Abra Gerar linha manual para comparar",
+            if active else "Cotação existente; projeção ainda indisponível"
+            if has_quote else "Abra Gerar linha manual para comparar",
             "",
         ),
         (
