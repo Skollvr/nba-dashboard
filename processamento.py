@@ -28,7 +28,8 @@ from espn_context import (
 # 3. API de Odds
 from api_odds import (
     normalize_text, normalize_person_name, fetch_nba_odds_events,
-    find_matching_odds_event, extract_betmgm_player_props, get_odds_api_key
+    find_matching_odds_event, extract_betmgm_player_props, get_odds_api_key,
+    SportsGameOddsHTTPError,
 )
 
 # ---------------------------------------------------------
@@ -2030,47 +2031,59 @@ def get_matchup_context(
             )
         else:
             report("Consultando odds: " + ", ".join(enabled_books) + "...")
-            try:
-                odds_events = fetch_nba_odds_events(
-                    target_date=target_date, bookmaker_ids=enabled_books
-                )
-                odds_event = find_matching_odds_event(
-                    odds_events,
-                    home_team_name=home_team_name,
-                    away_team_name=away_team_name,
-                )
-                if odds_event is None:
-                    market_status_parts.append("Nenhum evento correspondente encontrado")
-                else:
-                    for book in enabled_books:
-                        frame = extract_betmgm_player_props(
-                            odds_event, bookmaker_id=book
-                        )
-                        book_frames[book] = frame
+            # Treat each sportsbook as an isolated data source. A forbidden
+            # Stake request must not erase an otherwise working BetMGM market.
+            for book in enabled_books:
+                label = "Stake" if book == "stake" else "BetMGM"
+                try:
+                    odds_events = fetch_nba_odds_events(
+                        target_date=target_date,
+                        bookmaker_ids=(book,),
+                    )
+                    odds_event = find_matching_odds_event(
+                        odds_events,
+                        home_team_name=home_team_name,
+                        away_team_name=away_team_name,
+                    )
+                    if odds_event is None:
                         market_status_parts.append(
-                            f"{'Stake' if book == 'stake' else 'BetMGM'}: "
-                            f"{len(frame)} jogador(es) com props"
-                            if not frame.empty else
-                            f"{'Stake' if book == 'stake' else 'BetMGM'}: "
-                            "nenhuma prop disponível (cobertura/plano a confirmar)"
+                            f"{label}: evento/mercado não encontrado"
                         )
-            except Exception as exc:
-                cause = exc.__cause__ or exc
-                http_code = getattr(
-                    getattr(cause, "response", None), "status_code", None
-                )
-                if http_code == 401:
-                    market_status_parts.append("SportsGameOdds: chave inválida (401)")
-                elif http_code == 403:
-                    market_status_parts.append(
-                        "SportsGameOdds: acesso ao bookmaker não permitido no plano (403)"
+                        continue
+
+                    frame = extract_betmgm_player_props(
+                        odds_event, bookmaker_id=book
                     )
-                elif http_code == 429:
-                    market_status_parts.append("SportsGameOdds: limite de uso (429)")
-                else:
+                    book_frames[book] = frame
+                    if frame.empty:
+                        market_status_parts.append(
+                            f"{label}: evento encontrado, sem props disponíveis"
+                        )
+                    else:
+                        market_status_parts.append(
+                            f"{label}: {len(frame)} jogador(es) com props"
+                        )
+                except SportsGameOddsHTTPError as exc:
+                    code = exc.status_code
+                    problem = {
+                        400: "parâmetros rejeitados pela API",
+                        401: "chave inválida ou não autorizada",
+                        403: "acesso não autorizado (confira assinatura e permissões)",
+                        404: "endpoint não encontrado",
+                        422: "dados da consulta rejeitados",
+                        429: "limite de consultas atingido",
+                        500: "erro interno do provedor",
+                        502: "falha de conexão no provedor",
+                        503: "serviço temporariamente indisponível",
+                        504: "tempo esgotado no provedor",
+                    }.get(code, "requisição rejeitada pelo provedor")
+                    suffix = str(code) if code is not None else "desconhecido"
+                    market_status_parts.append(f"{label}: HTTP {suffix} — {problem}")
+                except Exception as exc:
                     market_status_parts.append(
-                        f"SportsGameOdds: falha ({type(cause).__name__})"
+                        f"{label}: não foi possível consultar ({type(exc).__name__})"
                     )
+
     else:
         market_status_parts.append("BetMGM e Stake desativadas — modo manual")
 
