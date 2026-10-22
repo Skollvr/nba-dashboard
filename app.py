@@ -124,6 +124,7 @@ def main():
         # do not hide them by default while we validate ESPN's new-season feed.
         early_2627_test = (
             get_season_string(today) == "2026-27"
+            and get_season_string(selected_date) == "2026-27"
             and today < date(2026, 11, 16)
         )
         min_games = st.slider("Min Jogos", 0, 82, 0 if early_2627_test else 5)
@@ -285,9 +286,27 @@ def main():
             f"Amostra inicial da temporada — referência mínima: {min_model_games} jogos por time. "
             f"{selected_game['away_team_name']}: {away_gp}/{min_model_games} • "
             f"{selected_game['home_team_name']}: {home_gp}/{min_model_games}. "
-            f"Base exclusiva {analysis_season}, sem recorrer a 2025/26. "
+            f"Base exclusiva {analysis_season}, sem misturar outras temporadas. "
             "As projeções com amostra reduzida são experimentais, não adequadas ainda para apostas."
         )
+
+    # A completed game with no player logs is a source failure, not a true
+    # zero-game roster. Surface it before any projection is interpreted.
+    for team_df, team_gp, team_name in (
+        (away_df, away_gp, selected_game["away_team_name"]),
+        (home_df, home_gp, selected_game["home_team_name"]),
+    ):
+        if team_df is None or team_df.empty:
+            continue
+        player_gp = pd.to_numeric(
+            team_df.get("SEASON_GP", 0), errors="coerce"
+        ).fillna(0)
+        if team_gp > 0 and not player_gp.gt(0).any():
+            st.warning(
+                f"{team_name}: a ESPN identifica {team_gp} jogo(s) da temporada, "
+                "mas não retornou game logs aproveitáveis para o roster atual. "
+                "Confira a fonte antes de interpretar GP 0 como ausência de jogos."
+            )
 
     lineup_test_df = pd.concat(
         [df for df in [away_df, home_df] if df is not None and not df.empty],
