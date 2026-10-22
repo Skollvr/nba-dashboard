@@ -71,7 +71,7 @@ def test_missing_stat_is_not_shown_as_fake_zero_and_injury_is_visible():
         render_player_card_refresh(
             _player(SEASON_GP=0, INJ_STATUS="Out"), "PTS", None, False
         )
-    assert "Amostra insuficiente" in html[0]
+    assert "Sem Edge · amostra insuficiente" in html[0]
     assert 'class="nova-pred-value">—</div>' in html[0]
     assert '<span class="nova-chip negative">Out</span>' in html[0]
     assert "Sem jogos nesta temporada" in html[0]
