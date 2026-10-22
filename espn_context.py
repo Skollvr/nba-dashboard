@@ -262,7 +262,7 @@ def get_espn_injuries_standard(
             except Exception:
                 league_payload = {}
             league_entries = league_payload.get("injuries") if isinstance(league_payload, dict) else None
-            for entry in league_entries if isinstance(league_entries, list) else []:
+            for entry in (league_entries if isinstance(league_entries, list) else []):
                 if not isinstance(entry, dict):
                     continue
                 athlete = entry.get("athlete") or {}
