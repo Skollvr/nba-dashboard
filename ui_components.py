@@ -180,8 +180,9 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
             st.caption(
                 f"Pos {position} • GP {int(row['SEASON_GP'])} • "
                 f"MIN temp {format_number(row['SEASON_MIN'])} • "
-                f"MIN proj {format_number(row.get('PROJ_MIN_V1', 0.0))} "
-                f"({row.get('MINUTES_SOURCE', 'Modelo interno')})"
+                f"MIN proj {format_number(row.get('PROJ_MIN_V1', float('nan')))} "
+                f"({row.get('MINUTES_SOURCE', 'Modelo interno')}) • "
+                f"{row.get('SAMPLE_STATUS', '')}"
             )
             st.markdown(
                 render_player_headline_html(row, line_metric, line_value, use_market_line),
@@ -332,7 +333,8 @@ def render_player_focus_panel(
             f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • '
             f'MIN temp {format_number(row["SEASON_MIN"])} • '
             f'MIN proj {format_number(row.get("PROJ_MIN_V1", 0.0))} '
-            f'({row.get("MINUTES_SOURCE", "Modelo interno")}) • Time {row["TEAM_NAME"]}</div>',
+            f'({row.get("MINUTES_SOURCE", "Modelo interno")}) • '
+            f'{row.get("SAMPLE_STATUS", "")} • Time {row["TEAM_NAME"]}</div>',
             unsafe_allow_html=True,
         )
             
@@ -950,6 +952,8 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
         "ROLE",
         "PROJ_MIN_V1",
         "MINUTES_SOURCE",
+        "SAMPLE_STATUS",
+        "SEASON_GP",
         "SEASON_MIN",
         "L10_MIN_MED",
         "INJ_STATUS",
@@ -970,6 +974,8 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
             "ROLE": "Status lineup",
             "PROJ_MIN_V1": "MIN proj",
             "MINUTES_SOURCE": "Fonte MIN",
+            "SAMPLE_STATUS": "Amostra",
+            "SEASON_GP": "GP 26/27",
             "SEASON_MIN": "MIN temp",
             "L10_MIN_MED": "Mediana MIN L10",
             "INJ_STATUS": "Status",
@@ -990,6 +996,8 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
             "ROLE": "Status lineup",
             "PROJ_MIN_V1": "MIN proj",
             "MINUTES_SOURCE": "Fonte MIN",
+            "SAMPLE_STATUS": "Amostra",
+            "SEASON_GP": "GP 26/27",
             "SEASON_MIN": "MIN temp",
             "L10_MIN_MED": "Mediana MIN L10",
             "INJ_STATUS": "Status",
