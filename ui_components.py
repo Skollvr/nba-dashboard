@@ -1,6 +1,10 @@
 import streamlit as st
 from html import escape as escape_html
-from ui_refresh import render_player_card_refresh, render_matchup_header_refresh
+from ui_refresh import (
+    render_player_card_refresh, render_matchup_header_refresh,
+    render_focus_summary_refresh, render_focus_comparison_refresh,
+    render_tip_card_refresh,
+)
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -383,28 +387,51 @@ def render_player_focus_panel(
                 "Médias, projeção e matchup continuam disponíveis."
             )
 
-    render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
-
-    overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
+    modern_focus = st.session_state.get("dashboard_visual_mode") == "Renovado"
+    if modern_focus:
+        st.markdown(
+            '<div class="nova-workspace-label">'
+            'Painel de análise do jogador'
+            '<span>Projeção, forma, eficiência e histórico no mesmo lugar</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        render_focus_summary_refresh(row, visual_metric, visual_line_context)
+        overview_tab, detail_tab, visual_tab, market_tab = st.tabs(
+            ["Visão geral", "Estatísticas", "Raio-X", "Mercado e H2H"]
+        )
+    else:
+        render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
+        overview_tab, detail_tab, visual_tab, market_tab = st.tabs(
+            ["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"]
+        )
 
     with overview_tab:
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Forma recente e projeção</div>',
+                unsafe_allow_html=True,
+            )
         render_player_support_tiles(row, visual_metric, line_value, use_market_line)
-        
-        proj_std = float(row.get(get_metric_projection_column(visual_metric), 0.0))
-        proj_v1 = float(row.get(f"PROJ_{visual_metric}_V1", proj_std))
-        proj_delta = proj_v1 - proj_std
 
-        c_std, c_v1, c_delta = st.columns(3)
+        if modern_focus:
+            render_focus_comparison_refresh(row, visual_metric)
+            st.markdown(
+                '<div class="nova-section-lead">Como chegamos à projeção</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            proj_std = float(row.get(get_metric_projection_column(visual_metric), 0.0))
+            proj_v1 = float(row.get(f"PROJ_{visual_metric}_V1", proj_std))
+            proj_delta = proj_v1 - proj_std
+            c_std, c_v1, c_delta = st.columns(3)
+            with c_std:
+                st.metric(f"PROJ padrão {visual_metric}", format_number(proj_std))
+            with c_v1:
+                st.metric(f"PROJ V1 {visual_metric}", format_number(proj_v1))
+            with c_delta:
+                st.metric("Δ V1", format_signed_number(proj_delta))
 
-        with c_std:
-            st.metric(f"PROJ padrão {visual_metric}", format_number(proj_std))
-
-        with c_v1:
-            st.metric(f"PROJ V1 {visual_metric}", format_number(proj_v1))
-
-        with c_delta:
-            st.metric("Δ V1", format_signed_number(proj_delta))   
-            
         st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
         st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
         st.markdown(
@@ -413,6 +440,16 @@ def render_player_focus_panel(
     )
 
     with detail_tab:
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Médias da temporada e recortes recentes</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="nova-workspace-sub">Compare a temporada com os últimos '
+                '5 e 10 jogos. O painel continua identificando amostras pequenas.</div>',
+                unsafe_allow_html=True,
+            )
         first_cols = st.columns(2)
         second_cols = st.columns(2)
 
@@ -451,9 +488,24 @@ def render_player_focus_panel(
                         unsafe_allow_html=True,
                     )
 
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Leitura de matchup</div>',
+                unsafe_allow_html=True,
+            )
         st.markdown(render_matchup_detail_box_html(row, visual_metric), unsafe_allow_html=True)
 
     with visual_tab:
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Desempenho jogo a jogo</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="nova-workspace-sub">Explore produção e minutos. '
+                'Over/under só aparece quando existe linha válida.</div>',
+                unsafe_allow_html=True,
+            )
         render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric, season_scope=season_scope)
 
         if not has_active_line:
@@ -663,7 +715,19 @@ def render_player_focus_panel(
         
     # --- ABA DE MERCADO DINÂMICA (FORMATO 22,5 CORRIGIDO) ---
     with market_tab:
-        st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Histórico contra o adversário</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="nova-market-hint"><strong>Mercado e H2H</strong> · '
+                'Compare o jogador contra este adversário. Dados de OVER/UNDER '
+                'exigem uma linha ativa; ausência de linha não significa recomendação.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
 
         if not has_active_line:
             st.info(
@@ -1559,6 +1623,10 @@ def _build_tip_candidate(
 
 
 def _render_tip_card(title: str, tip: dict | None) -> None:
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        render_tip_card_refresh(title, tip)
+        return
+
     with st.container(border=True):
         st.markdown(f"#### {title}")
 
@@ -1609,12 +1677,25 @@ def render_best_game_tips(
         "Todos",
     )
 
-    st.subheader("Melhores linhas do confronto")
-    st.caption(
-        "Classificação baseada na convergência entre projeção, Edge relativo, "
-        "histórico direcional, oscilação, matchup, forma e estabilidade de minutos. "
-        "Os selos não representam probabilidade matemática de acerto."
-    )
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        st.markdown(
+            '<div class="nova-section-head"><h3>Melhores linhas do confronto</h3>'
+            '<small>Sinais qualificados · sem probabilidade artificial</small></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="nova-workspace-sub">Destaques baseados em Edge, '
+            'forma, consistência, matchup e minutos. '
+            'Apenas jogadores que atendem aos critérios aparecem.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.subheader("Melhores linhas do confronto")
+        st.caption(
+            "Classificação baseada na convergência entre projeção, Edge relativo, "
+            "histórico direcional, oscilação, matchup, forma e estabilidade de minutos. "
+            "Os selos não representam probabilidade matemática de acerto."
+        )
 
     if combined.empty:
         st.info("Ainda não há jogadores com amostra suficiente para avaliar as melhores linhas.")
@@ -1789,11 +1870,23 @@ def render_game_rankings(
         ascending=[False, True, False],
     ).head(5)
 
-    st.subheader(f"Ranking do confronto — {line_metric}")
-    st.caption(
-        "Edge ordenado pela força absoluta da diferença. "
-        "Consistência considera a direção do sinal: OVER acima da linha e UNDER abaixo da linha."
-    )
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        st.markdown(
+            f'<div class="nova-section-head"><h3>Ranking do confronto · '
+            f'{escape_html(line_metric)}</h3><small>Top 5 · projeção e consistência</small></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="nova-workspace-sub">Ordenação por projeção, Edge '
+            'ou frequência direcional. As duas últimas dependem de linha ativa.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.subheader(f"Ranking do confronto — {line_metric}")
+        st.caption(
+            "Edge ordenado pela força absoluta da diferença. "
+            "Consistência considera a direção do sinal: OVER acima da linha e UNDER abaixo da linha."
+        )
 
     tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
 
