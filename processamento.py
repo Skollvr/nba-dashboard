@@ -479,11 +479,22 @@ def build_context_adj_v1(row: pd.Series) -> float:
 
 def get_market_line_for_metric(row: pd.Series, metric: str) -> dict:
     line_col, over_col, under_col, updated_col = get_metric_market_columns(metric)
+    # New multi-book selection; old single BetMGM frames remain compatible.
+    selected_col = f"MARKET_{metric}_LINE"
+    if selected_col in row.index:
+        return {
+            "line": row.get(selected_col),
+            "over_dec": row.get(f"MARKET_{metric}_OVER_DEC"),
+            "under_dec": row.get(f"MARKET_{metric}_UNDER_DEC"),
+            "updated_at": row.get(f"MARKET_{metric}_UPDATED_AT"),
+            "source": row.get(f"MARKET_{metric}_SOURCE") or "Mercado",
+        }
     return {
         "line": row.get(line_col),
         "over_dec": row.get(over_col),
         "under_dec": row.get(under_col),
         "updated_at": row.get(updated_col),
+        "source": "BetMGM",
     }
 
 # ---------------------------------------------------------
@@ -531,7 +542,7 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
     )
     if has_market_quote:
         quoted_line = float(market_line)
-        quoted_source = "BetMGM"
+        quoted_source = market_info.get("source") or "BetMGM"
     elif has_manual_line:
         quoted_line = float(manual_line)
         quoted_source = "Manual"
@@ -550,7 +561,7 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
 
     if use_market:
         active_line = float(market_line)
-        source_name = "BetMGM"
+        source_name = market_info.get("source") or "BetMGM"
         icon = "🎯"
     elif has_manual_line:
         active_line = float(manual_line)
@@ -1512,34 +1523,88 @@ def enrich_team_with_context(
 
     
 
-def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFrame:
-    if team_df.empty: return team_df
+def merge_betmgm_odds(
+    team_df: pd.DataFrame, odds_df: pd.DataFrame, bookmaker_id: str = "betmgm",
+) -> pd.DataFrame:
+    """Merge one bookmaker's props, preserving the other bookmaker columns."""
+    if team_df.empty:
+        return team_df
+    if bookmaker_id not in {"betmgm", "stake"}:
+        raise ValueError("Casa não suportada.")
+    prefix = bookmaker_id.upper() + "_"
     enriched = team_df.copy()
-    all_odds_cols = [col for cols in ODDS_METRIC_COLUMNS.values() for col in cols]
-
+    all_odds_cols = [
+        col.replace("BETMGM_", prefix)
+        for columns in ODDS_METRIC_COLUMNS.values() for col in columns
+    ]
     if odds_df.empty:
         for col in all_odds_cols:
-            if col not in enriched.columns: enriched[col] = None
+            if col not in enriched.columns:
+                enriched[col] = None
         return enriched
 
-    enriched["_PLAYER_KEY_MERGE"] = enriched["PLAYER_KEY"].fillna("").astype(str).apply(normalize_person_name)
+    enriched["_PLAYER_KEY_MERGE"] = (
+        enriched["PLAYER_KEY"].fillna("").astype(str).apply(normalize_person_name)
+    )
     odds_work = odds_df.copy()
-    odds_work["_PLAYER_KEY_MERGE"] = odds_work["PLAYER_KEY_ODDS"].fillna("").astype(str).apply(normalize_person_name)
-
-    odds_keep_cols = ["_PLAYER_KEY_MERGE", "PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"] + [col for col in all_odds_cols if col in odds_work.columns]
-    odds_work = odds_work[[c for c in odds_keep_cols if c in odds_work.columns]].copy()
-
-    existing_betmgm_cols = [col for col in all_odds_cols if col in enriched.columns]
-    if existing_betmgm_cols: enriched = enriched.drop(columns=existing_betmgm_cols)
-
-    merged = enriched.merge(odds_work, on="_PLAYER_KEY_MERGE", how="left")
-    drop_cols = [c for c in ["_PLAYER_KEY_MERGE", "PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"] if c in merged.columns]
-    if drop_cols: merged = merged.drop(columns=drop_cols)
-
+    odds_work["_PLAYER_KEY_MERGE"] = (
+        odds_work["PLAYER_KEY_ODDS"].fillna("").astype(str).apply(normalize_person_name)
+    )
+    keep = ["_PLAYER_KEY_MERGE"] + [
+        col for col in all_odds_cols if col in odds_work.columns
+    ]
+    odds_work = odds_work[keep].drop_duplicates("_PLAYER_KEY_MERGE", keep="first")
+    enriched = enriched.drop(
+        columns=[col for col in all_odds_cols if col in enriched.columns]
+    )
+    merged = enriched.merge(odds_work, on="_PLAYER_KEY_MERGE", how="left").drop(
+        columns="_PLAYER_KEY_MERGE"
+    )
     for col in all_odds_cols:
-        if col not in merged.columns: merged[col] = None
-
+        if col not in merged.columns:
+            merged[col] = None
     return merged
+
+
+def select_bookmaker_lines(
+    team_df: pd.DataFrame, bookmaker_ids: tuple[str, ...],
+    priority: str = "betmgm",
+) -> pd.DataFrame:
+    """Choose a line per player/metric, retain both raw book quotes for comparison."""
+    if team_df.empty:
+        return team_df
+    out = team_df.copy()
+    order = [priority] + [
+        name for name in bookmaker_ids if name != priority
+    ]
+    order = [name for name in order if name in bookmaker_ids]
+    for metric in ODDS_METRIC_COLUMNS:
+        chosen = pd.Series(float("nan"), index=out.index, dtype="float64")
+        source = pd.Series("", index=out.index, dtype="object")
+        for field, suffix in [
+            ("OVER_DEC", "OVER_DEC"), ("UNDER_DEC", "UNDER_DEC"),
+        ]:
+            out[f"MARKET_{metric}_{field}"] = float("nan")
+        out[f"MARKET_{metric}_UPDATED_AT"] = ""
+        for book in order:
+            prefix = book.upper()
+            values = pd.to_numeric(
+                out.get(f"{prefix}_{metric}_LINE"), errors="coerce"
+            )
+            valid = values.notna() & (values > 0) & chosen.isna()
+            chosen.loc[valid] = values.loc[valid]
+            source.loc[valid] = "Stake" if book == "stake" else "BetMGM"
+            for field in ("OVER_DEC", "UNDER_DEC"):
+                original = f"{prefix}_{metric}_{field}"
+                out.loc[valid, f"MARKET_{metric}_{field}"] = pd.to_numeric(
+                    out.loc[valid, original], errors="coerce"
+                )
+            out.loc[valid, f"MARKET_{metric}_UPDATED_AT"] = (
+                out.loc[valid, f"{prefix}_{metric}_UPDATED_AT"].fillna("")
+            )
+        out[f"MARKET_{metric}_LINE"] = chosen
+        out[f"MARKET_{metric}_SOURCE"] = source
+    return out
 
 @st.cache_data(ttl=54000, show_spinner=False)
 def build_team_table(
