@@ -180,8 +180,13 @@ def find_matching_odds_event(events: list[dict], home_team_name: str, away_team_
 # ==========================================
 # 4. EXTRAÇÃO DOS PROPS DA BETMGM
 # ==========================================
-def extract_betmgm_player_props(event: Optional[dict]) -> pd.DataFrame:
-    """Read player props from the BetMGM bookmaker record, not consensus odds."""
+def extract_betmgm_player_props(
+    event: Optional[dict], bookmaker_id: str = "betmgm",
+) -> pd.DataFrame:
+    """Read only the chosen bookmaker's player props, not consensus odds."""
+    if bookmaker_id not in {"betmgm", "stake"}:
+        raise ValueError("Casa não suportada.")
+    prefix = bookmaker_id.upper()
     if not event:
         return pd.DataFrame()
 
