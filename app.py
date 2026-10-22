@@ -47,37 +47,65 @@ def get_analysis_season(selected_date: date, today: date) -> str:
 
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
+    st.sidebar.radio(
+        "Visual do dashboard",
+        options=["Renovado", "Clássico"],
+        horizontal=True,
+        key="dashboard_visual_mode",
+        help="Troque o visual sem perder o confronto, os filtros ou os dados.",
+    )
     inject_css()
 
-    st.markdown('<div class="main-title">NBA Props Dashboard</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="subtitle">Escolha o jogo, defina a métrica e compare projeção, consistência e linha ativa por jogador.</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        """
-        <div class="hero-pills">
-            <span class="hero-pill">Projeções</span>
-            <span class="hero-pill">Linha manual / BetMGM</span>
-            <span class="hero-pill">Leitura rápida mobile</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.info(
-        "🧪 Branch de validação ESPN completa: agenda, roster, game logs, H2H, "
-        "defesa/percentis, matchup por posição, depth chart e lesões usam ESPN. "
-        "Temporada 2026/27 ativa para testes com amostra inicial; "
-        "rotação via depth chart e minutos internos quando não há projeção externa."
-    )
+    if st.session_state["dashboard_visual_mode"] == "Renovado":
+        st.markdown(
+            '<div class="nova-brand">'
+            '<div class="nova-brand-mark">🏀</div>'
+            '<div><div class="nova-brand-kicker">NBA · ANÁLISE DE JOGADORES</div>'
+            '<div class="nova-brand-title">NBA Props Dashboard</div>'
+            '<div class="nova-brand-sub">'
+            'Projeções, contexto e dados da temporada num só lugar.'
+            '</div></div></div>'
+            '<div class="nova-strip">'
+            '<span>● Temporada 2026/27</span>'
+            '<span>Dados ESPN + boletim oficial NBA</span>'
+            '<span>Horários de Brasília</span>'
+            '<span>Ambiente de testes</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Amostra inicial da temporada: projeções experimentais. "
+            "Estatísticas e critérios de análise permanecem iguais ao visual clássico."
+        )
+    else:
+        st.markdown('<div class="main-title">NBA Props Dashboard</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="subtitle">Escolha o jogo, defina a métrica e compare projeção, consistência e linha ativa por jogador.</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            """
+            <div class="hero-pills">
+                <span class="hero-pill">Projeções</span>
+                <span class="hero-pill">Linha manual / BetMGM</span>
+                <span class="hero-pill">Leitura rápida mobile</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.info(
+            "🧪 Branch de validação ESPN completa: agenda, roster, game logs, H2H, "
+            "defesa/percentis, matchup por posição, depth chart e lesões usam ESPN. "
+            "Temporada 2026/27 ativa para testes com amostra inicial; "
+            "rotação via depth chart e minutos internos quando não há projeção externa."
+        )
 
     today = get_brasilia_today()
     if "selected_game_date" not in st.session_state:
         st.session_state["selected_game_date"] = today
 
     with st.sidebar:
-        st.header("Configurações")
+        st.header("Configurações" if st.session_state["dashboard_visual_mode"] == "Clássico" else "Painel de controle")
 
         st.subheader("Jogos")
         selected_date = st.date_input(
