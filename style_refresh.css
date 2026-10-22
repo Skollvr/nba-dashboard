@@ -36,16 +36,17 @@
 /* Respect the chosen theme, including Streamlit-generated widgets. */
 .stApp .stButton > button[kind="primary"], 
 .stApp [data-testid="stSidebar"] .stButton > button[kind="primary"] {
-  background: #73d8c4 !important;
-  border: 1px solid #73d8c4 !important;
-  color: #07131d !important;
-  box-shadow: 0 4px 17px rgba(115,216,196,.16) !important;
+  background: #52bfad !important;
+  border: 1px solid #52bfad !important;
+  color: #07141b !important;
+  box-shadow: 0 4px 17px rgba(82,191,173,.14) !important;
   font-weight: 760 !important;
 }
 .stApp .stButton > button[kind="primary"]:hover {
-  background: #a6eedc !important;
-  border-color: #a6eedc !important;
-  box-shadow: 0 5px 24px rgba(115,216,196,.26) !important;
+  background: #63ceba !important;
+  border-color: #63ceba !important;
+  color: #07141b !important;
+  box-shadow: 0 5px 24px rgba(82,191,173,.25) !important;
 }
 .stApp .stButton > button:not([kind="primary"]) {
   background: #151f30 !important;
@@ -314,4 +315,220 @@
   .nova-player-name { font-size:.9rem; }
   .nova-pred-aside { text-align:left; }
   .nova-card-bottom { gap:5px; }
+}
+
+
+/* Primary buttons: Streamlit renders the label inside a paragraph. The
+   classic stylesheet globally paints p/span light, so explicitly fix descendants
+   rather than increasing lightness of the whole button. */
+.stApp .stButton > button[kind="primary"] p,
+.stApp .stButton > button[kind="primary"] span,
+.stApp .stButton > button[kind="primary"] strong,
+.stApp .stButton > button[kind="primary"]:hover p,
+.stApp .stButton > button[kind="primary"]:focus p,
+.stApp .stButton > button[kind="primary"]:active p {
+  color: #07141b !important;
+  font-weight: 825 !important;
+  text-shadow: none !important;
+}
+.stApp .stButton > button[kind="primary"]:focus,
+.stApp .stButton > button[kind="primary"]:active {
+  color: #07141b !important;
+  background: #52bfad !important;
+  border-color: #52bfad !important;
+  box-shadow: 0 0 0 3px rgba(82,191,173,.27) !important;
+}
+
+/* High-contrast detail workspace */
+.nova-workspace-label {
+  display:flex; gap:10px; align-items:center; margin: 1.1rem 0 .7rem;
+  padding:10px 13px; border-radius:10px;
+  background:linear-gradient(95deg,#19283b 0%,#111c2d 75%);
+  border-left:3px solid #56c7b8;
+  color:#e3edf9 !important;
+  font-size:.79rem; font-weight:785;
+}
+.nova-workspace-label span {
+  color:#a9bacf !important; font-size:.72rem; font-weight:500;
+}
+.nova-workspace-sub {
+  color:#a8b6c8 !important; font-size:.8rem; margin:-.1rem 0 .75rem;
+  line-height:1.5;
+}
+.nova-focus-hero {
+  display:grid; grid-template-columns: repeat(4,minmax(0,1fr));
+  gap:9px; margin:.8rem 0 1.1rem;
+}
+.nova-focus-kpi {
+  background:linear-gradient(155deg,#19283b,#111e30);
+  border:1px solid #314259; border-radius:13px;
+  padding:12px 13px; min-width:0;
+}
+.nova-focus-kpi.main {
+  background:linear-gradient(135deg,#1b4646,#17313e);
+  border-color:#34796d;
+}
+.nova-focus-kpi-label {
+  color:#a7b9cd !important; font-size:.67rem; text-transform:uppercase;
+  letter-spacing:.06em; font-weight:750;
+}
+.nova-focus-kpi-value {
+  color:#edf7ff !important; font-weight:860; font-size:clamp(1.12rem,1.55vw,1.62rem);
+  letter-spacing:-.04em; line-height:1.2; margin-top:6px;
+}
+.nova-focus-kpi-sub {
+  color:#99b1c7 !important; font-size:.7rem; margin-top:4px;
+  line-height:1.35;
+}
+.nova-section-lead {
+  color:#f3f8ff !important; font-weight:820; font-size:1.02rem;
+  margin:1.0rem 0 .7rem; letter-spacing:-.025em;
+}
+.nova-market-hint {
+  background:#172b3e; border:1px solid #2d4c68;
+  padding:11px 14px; border-radius:12px;
+  color:#bad0e6 !important; font-size:.82rem; line-height:1.5;
+  margin:.3rem 0 1rem;
+}
+.nova-market-hint strong { color:#d9eefa !important; }
+.nova-detail-compare {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px; margin:0 0 1rem;
+}
+.nova-compare-item {
+  background:#142135; border:1px solid #2d4158; border-radius:12px; padding:12px 15px;
+}
+.nova-compare-item.proj {
+  background:linear-gradient(135deg,#173e3b,#132a39);
+  border-color:#42756c;
+}
+.nova-compare-label {
+  color:#adc0d6 !important; font-size:.68rem; text-transform:uppercase;
+  letter-spacing:.07em; font-weight:750;
+}
+.nova-compare-value {
+  color:#f0f8ff !important; font-weight:840; font-size:1.55rem;
+  margin-top:5px; line-height:1.1;
+}
+
+/* Nested tabs: clear active state and touch targets */
+.stApp [data-testid="stTabs"] [data-baseweb="tab-list"] {
+  gap:4px !important;
+  background:#111d2b;
+  border:1px solid #27384e;
+  border-radius:12px;
+  padding:5px;
+  margin:6px 0 14px;
+  flex-wrap:wrap;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab"] {
+  background:transparent;
+  border-radius:8px !important;
+  min-height:39px;
+  padding:9px 13px;
+  color:#a6b9d1 !important;
+  font-size:.82rem;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab"] p {
+  color:inherit !important;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+  background:#244c48 !important;
+  border:1px solid #467e73 !important;
+  color:#d3fff3 !important;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] p {
+  color:#d3fff3 !important;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab-highlight"],
+.stApp [data-testid="stTabs"] [data-baseweb="tab-border"] {
+  background:transparent !important;
+}
+
+/* Ranking and best-line presentation */
+.nova-tip-grid {
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px; margin:.85rem 0;
+}
+.nova-tip {
+  border:1px solid #325063; border-radius:15px; padding:16px;
+  background:linear-gradient(140deg,#16283a,#111d2d);
+  min-width:0;
+}
+.nova-tip.top {
+  background:linear-gradient(140deg,#173b37,#17283b);
+  border-color:#397b6c;
+}
+.nova-tip-top {
+  display:flex; align-items:center; justify-content:space-between;
+  gap:8px; flex-wrap:wrap; margin-bottom:10px;
+}
+.nova-tip-label {
+  font-size:.67rem; font-weight:825; text-transform:uppercase;
+  letter-spacing:.11em; color:#b4d4df !important;
+}
+.nova-tip-strength {
+  border:1px solid #4f836e; background:#1e413d;
+  padding:4px 7px; border-radius:6px;
+  color:#b9e8d3 !important; font-size:.65rem; font-weight:800;
+}
+.nova-tip-player {
+  font-size:1.17rem; font-weight:870; letter-spacing:-.03em;
+  color:#f0f8ff !important; margin:0 0 5px;
+}
+.nova-tip-details { color:#a9bdd1 !important; font-size:.74rem; line-height:1.4; }
+.nova-tip-metrics {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:6px; margin:12px 0 8px;
+}
+.nova-tip-metric {
+  border:1px solid #35475f; background:#102031;
+  border-radius:9px; padding:9px; text-align:center;
+}
+.nova-tip-metric small {
+  color:#9aafc4 !important; font-size:.62rem; font-weight:750;
+  text-transform:uppercase; letter-spacing:.08em;
+}
+.nova-tip-metric strong {
+  display:block; color:#eff8ff !important; font-size:1.15rem;
+  font-weight:830; margin-top:5px;
+}
+.nova-empty-panel {
+  background:#162637; border:1px dashed #3a5770;
+  color:#b7cce1 !important; border-radius:12px;
+  padding:14px 16px; line-height:1.45; font-size:.82rem;
+  margin:10px 0 13px;
+}
+.ranking-shell {
+  background:#101e2e !important;
+  border:1px solid #30445e !important;
+  border-radius:14px;
+  padding:5px 14px !important;
+}
+.ranking-row { padding:13px 2px !important; gap:12px !important; }
+.ranking-row:nth-child(even) { background:rgba(117,216,196,.025); }
+.ranking-rank { background:#28514d !important; color:#bceee0 !important; }
+.ranking-stat-value { font-size:1.02rem !important; }
+.ranking-player { color:#f4f8fd !important; font-size:.94rem; }
+.ranking-sub { color:#a5b6cb !important; }
+.ranking-good .ranking-stat-value { color:#79dcc0 !important; }
+.ranking-bad .ranking-stat-value { color:#f3aab8 !important; }
+@media(max-width:850px){
+  .nova-focus-hero { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .nova-tip-grid { grid-template-columns:1fr; }
+}
+@media(max-width:768px){
+  .nova-detail-compare { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .nova-focus-kpi { padding:10px; }
+  .nova-focus-kpi-value { font-size:1.17rem; }
+  .nova-compare-item { padding:10px 9px; }
+  .nova-compare-value { font-size:1.18rem; }
+  .stApp [data-testid="stTabs"] [data-baseweb="tab"] {
+    min-height:38px; padding:8px 9px; font-size:.75rem;
+  }
+  .ranking-row { gap:5px !important; }
+}
+@media(max-width:420px){
+  .nova-detail-compare { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .nova-tip-metrics { gap:4px; }
 }
