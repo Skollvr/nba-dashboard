@@ -6,6 +6,8 @@ import pandas as pd
 from config import TEAM_LOOKUP
 from pdf_reader import (
     parse_official_injury_report_lines,
+    extract_pdf_text_lines,
+    _page_text_is_reversed,
     parse_injury_report_timestamp_from_url,
 )
 from injury_sources import get_preferred_injury_report
@@ -109,3 +111,79 @@ def test_pdf_url_exposes_brasilia_report_time():
     values = parse_injury_report_timestamp_from_url(PDF_URL)
     assert "22/10" in values["report_label_brt"]
     assert "11:30" in values["report_label_et"]
+
+
+
+def test_detects_reversed_nba_pdf_row_sequence_by_game_chronology():
+    # pypdf(layout) sometimes reads the official table from bottom to top.
+    descending = [
+        "10/23/2026 04:00 (ET) CHI@MIL Chicago Bulls NOT YET SUBMITTED",
+        "09:30 (ET) DEN@OKC Oklahoma City Thunder Topic, Nikola Out",
+        "07:00 (ET) CLE@PHI Philadelphia 76ers Barlow, Dominick Out",
+        "10/22/2026 07:00 (ET) CLE@PHI Cleveland Cavaliers Allen, Jarrett Questionable",
+        "Game Date Game Time Matchup Team Player Name Current Status Reason",
+    ]
+    assert _page_text_is_reversed(descending) is True
+    assert _page_text_is_reversed(list(reversed(descending))) is False
+
+
+def test_extraction_reverses_each_pdf_page_not_full_document():
+    page_one = [
+        "Game Date Game Time Matchup Team Player Name Current Status Reason",
+        "10/22/2026 07:00 (ET) CLE@PHI Cleveland Cavaliers Allen, Jarrett Questionable",
+        "Philadelphia 76ers Barlow, Dominick Out",
+        "Fall, Tacko Out",
+        "Hukporti, Ariel Out",
+        "Wade, Dean Questionable",
+        "09:30 (ET) DEN@OKC Denver Nuggets Jones, Spencer Questionable",
+        "Oklahoma City Thunder Topic, Nikola Out",
+        "10/23/2026 04:00 (ET) CHI@MIL Chicago Bulls NOT YET SUBMITTED",
+    ]
+    page_two = [
+        "Milwaukee Bucks NOT YET SUBMITTED",
+        "07:00 (ET) ATL@CHA Atlanta Hawks NOT YET SUBMITTED",
+        "Charlotte Hornets NOT YET SUBMITTED",
+        "10:00 (ET) LAC@LAL LA Clippers NOT YET SUBMITTED",
+    ]
+
+    class MockPage:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def extract_text(self, extraction_mode=None):
+            return "\\n".join(reversed(self.rows))
+
+    class MockReader:
+        def __init__(self, contents):
+            self.pages = [MockPage(page_one), MockPage(page_two)]
+
+    with patch("pdf_reader.PdfReader", MockReader):
+        extracted = extract_pdf_text_lines(b"%PDF fixture")
+    parsed = parse_official_injury_report_lines(extracted, PDF_URL)
+
+    phi = parsed[parsed["TEAM_ID_IR"].eq(PHI)].set_index("PLAYER_NAME_IR")
+    assert len(phi) == 4
+    assert set(phi.index) == {
+        "Barlow, Dominick", "Fall, Tacko", "Hukporti, Ariel", "Wade, Dean",
+    }
+    assert all(phi["MATCHUP"] == "CLE@PHI")
+    assert parsed.loc[
+        parsed["TEAM_NAME_IR"].eq("Oklahoma City Thunder"), "MATCHUP"
+    ].eq("DEN@OKC").all()
+
+
+def test_parser_discards_explicit_cross_team_rows_instead_of_mislabeling():
+    wrong = [
+        "10/22/2026 09:30 (ET) DEN@OKC Denver Nuggets Jones, Spencer Questionable",
+        "Philadelphia 76ers Barlow, Dominick Out",
+        "Fall, Tacko Out",
+        "10/22/2026 07:00 (ET) CLE@PHI Philadelphia 76ers Wade, Dean Questionable",
+    ]
+    parsed = parse_official_injury_report_lines(wrong, PDF_URL)
+    assert "Barlow, Dominick" not in parsed.get(
+        "PLAYER_NAME_IR", pd.Series(dtype=str)
+    ).tolist()
+    assert "Fall, Tacko" not in parsed.get(
+        "PLAYER_NAME_IR", pd.Series(dtype=str)
+    ).tolist()
+    assert "Wade, Dean" in parsed["PLAYER_NAME_IR"].tolist()
