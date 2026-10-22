@@ -2,6 +2,7 @@ from datetime import date
 
 from app import get_analysis_season
 from pdf_reader import get_season_string
+from api_espn import _season_end_year, _scope_to_espn_type
 
 
 def test_opening_night_uses_2026_27_with_no_previous_season_fallback():
@@ -27,3 +28,9 @@ def test_historical_game_uses_its_own_season():
 def test_season_boundary_in_october():
     assert get_season_string(date(2026, 9, 30)) == "2025-26"
     assert get_season_string(date(2026, 10, 20)) == "2026-27"
+
+
+
+def test_espn_requests_actual_2026_27_regular_season():
+    assert _season_end_year("2026-27") == 2027
+    assert _scope_to_espn_type("Regular Season") == 2
