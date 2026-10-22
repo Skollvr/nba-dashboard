@@ -2,6 +2,7 @@ import os
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 import requests
+import time
 import unicodedata
 import pandas as pd
 import streamlit as st
@@ -12,7 +13,6 @@ from config import (
     ODDS_API_BASE_URL, ODDS_BOOKMAKER, ODDS_STAT_MAP, ODDS_METRIC_COLUMNS
 )
 # E também usamos o "retry" que acabamos de criar no api_nba.py!
-from api_nba import run_api_call_with_retry
 
 # ==========================================
 # 1. FUNÇÕES AUXILIARES DE TEXTO
@@ -57,6 +57,47 @@ def get_odds_api_key() -> str:
         return str(st.secrets.get("SPORTSGAMEODDS_API_KEY", "")).strip()
     except Exception:
         return ""
+
+
+class SportsGameOddsHTTPError(Exception):
+    """Safe HTTP status from odds provider; never includes URL or API key."""
+
+    def __init__(self, status_code: int | None):
+        self.status_code = status_code
+        super().__init__(f"HTTP {status_code if status_code is not None else 'desconhecido'}")
+
+
+def _request_events_page(params: dict, api_key: str):
+    """Do not retry 4xx authorization/validation errors (except rate limits)."""
+    for attempt in range(2):
+        try:
+            response = requests.get(
+                f"{ODDS_API_BASE_URL}/events/",
+                params=params,
+                headers={"x-api-key": api_key},
+                timeout=(5, 20),
+            )
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                # Capture it before the retry helper discards the response.
+                # Unlike str(exc), the status won't contain the secret-bearing URL.
+                code = getattr(response, "status_code", None)
+                if code is None:
+                    code = getattr(getattr(exc, "response", None), "status_code", None)
+                if code in (429, 500, 502, 503, 504) and attempt == 0:
+                    time.sleep(1)
+                    continue
+                raise SportsGameOddsHTTPError(code) from None
+            return response
+        except SportsGameOddsHTTPError:
+            raise
+        except requests.RequestException:
+            if attempt == 0:
+                time.sleep(1)
+                continue
+            raise RuntimeError("Não foi possível conectar à SportsGameOdds.") from None
+    raise RuntimeError("Consulta de odds não foi concluída.")
 
 
 # ==========================================
@@ -110,19 +151,7 @@ def fetch_nba_odds_events(
         if cursor:
             page_params["cursor"] = cursor
 
-        def _fetch():
-            response = requests.get(
-                f"{ODDS_API_BASE_URL}/events/",
-                params=page_params,
-                headers={"x-api-key": api_key},
-                timeout=(5, 20),
-            )
-            response.raise_for_status()
-            return response
-
-        response = run_api_call_with_retry(
-            _fetch, endpoint_name="SportsGameOdds NBA"
-        )
+        response = _request_events_page(page_params, api_key)
         payload = response.json()
         if not isinstance(payload, dict) or payload.get("success") is not True:
             raise ValueError("SportsGameOdds retornou uma resposta inválida.")
