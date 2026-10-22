@@ -86,7 +86,8 @@ def test_modern_card_displays_line_and_edge_without_recalculating_them():
     ):
         render_player_card_refresh(_player(), "PTS", 20.5, False)
     assert projection.call_count == 1
-    assert "BetMGM · 20.5 PTS" in html[0]
+    assert "Linha BetMGM" in html[0]
+    assert "20.5 PTS" in html[0]
     assert "Edge +1.5" in html[0]
 
 
@@ -200,6 +201,82 @@ def test_refreshed_card_explains_unavailable_line_and_manual_entry():
         patch("ui_refresh.get_line_context", return_value=_context(22.0, False)),
     ):
         render_player_card_refresh(_player(), "PTS", None, True)
-    assert "LINHA INDISPONÍVEL" in html[0]
-    assert "GERAR MANUAL" in html[0]
+    assert "Linha indisponível" in html[0]
+    assert "Gerar manual" in html[0]
     assert "22.0" in html[0]
+
+
+
+def test_bookmaker_quote_displays_on_card_even_with_gp_zero_and_no_projection():
+    from processamento import get_line_context as true_context
+
+    sample = _player(
+        SEASON_GP=0,
+        PROJ_PTS_V1=np.nan,
+        BETMGM_PTS_LINE=29.5,
+        MANUAL_LINE_PTS=25.5,
+    )
+    html = []
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_player_card_refresh(sample, "PTS", None, True)
+    text = html[0]
+    assert "Linha BetMGM" in text
+    assert "29.5 PTS" in text
+    assert 'class="nova-pred-value">—</div>' in text
+    assert "Sem Edge · amostra insuficiente" in text
+    assert "Linha ativa" not in text and "LINHA ATIVA" not in text
+
+    context = true_context(sample, "PTS", None, use_market_line=True)
+    assert context["quoted_source"] == "BetMGM"
+    assert context["quoted_line"] == 29.5
+    assert context["has_quote"]
+    assert not context["has_active_line"]
+
+
+def test_manual_line_displays_even_without_current_season_projection():
+    sample = _player(
+        SEASON_GP=0,
+        PROJ_PTS_V1=np.nan,
+        BETMGM_PTS_LINE=np.nan,
+        MANUAL_LINE_PTS=23.5,
+    )
+    html = []
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_player_card_refresh(sample, "PTS", None, True)
+    text = html[0]
+    assert "Linha Manual" in text
+    assert "23.5 PTS" in text
+    assert "Sem Edge · amostra insuficiente" in text
+
+
+def test_no_market_quote_never_displays_fake_active_line():
+    sample = _player(
+        SEASON_GP=0,
+        PROJ_PTS_V1=np.nan,
+        BETMGM_PTS_LINE=np.nan,
+        MANUAL_LINE_PTS=np.nan,
+    )
+    html = []
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_player_card_refresh(sample, "PTS", None, True)
+    text = html[0]
+    assert "Linha indisponível" in text
+    assert "Gerar manual" in text
+    assert 'class="nova-pred-value">—</div>' in text
+
+
+def test_focus_summary_preserves_line_even_if_player_has_no_game_sample():
+    row = _player(
+        SEASON_GP=0,
+        PROJ_PTS_V1=np.nan,
+        PROJ_PTS=np.nan,
+        BETMGM_PTS_LINE=27.5,
+    )
+    from processamento import get_line_context
+    ctx = get_line_context(row, "PTS", None, use_market_line=True)
+    html = []
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_focus_summary_refresh(row, "PTS", ctx)
+    assert "Linha BetMGM" in html[0]
+    assert "27.5" in html[0]
+    assert "Cotação existente; projeção ainda indisponível" in html[0]
