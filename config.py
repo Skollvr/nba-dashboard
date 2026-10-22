@@ -67,7 +67,7 @@ SORT_OPTIONS = {
     "Jogos na temporada": "SEASON_GP",
     "Nome do jogador": "PLAYER",
 }
-ROLE_OPTIONS = ["Todos", "Titular provável", "Reserva"]
+ROLE_OPTIONS = ["Todos", "Titular confirmado", "Titular projetado", "Estimativa por minutos", "Rotação"]
 VIEW_OPTIONS = ["Cards", "Tabela"]
 CHART_OPTIONS = ["Compacto", "Completo"]
 LINE_METRIC_OPTIONS = ["PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA"]

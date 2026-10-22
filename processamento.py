@@ -1,3 +1,5 @@
+from datetime import date
+
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -8,21 +10,25 @@ from config import (
     INACTIVE_STATUSES, ODDS_METRIC_COLUMNS, ODDS_BOOKMAKER, ODDS_STAT_MAP
 )
 
-# 2. API da NBA
-from api_nba import (
-    get_team_roster, get_league_player_stats, get_team_player_logs,
-    get_position_allowed_profile, get_league_position_baseline
+# 2. Fonte principal de dados: ESPN
+from api_espn import (
+    aggregate_espn_player_stats,
+    get_espn_team_roster,
+)
+from injury_sources import get_preferred_injury_report
+from espn_context import (
+    get_espn_injuries_standard,
+    get_espn_league_position_baseline,
+    get_espn_position_allowed_profile,
+    get_espn_roster_player_logs,
+    get_espn_team_defense_percentiles,
+    get_espn_team_rotation,
 )
 
 # 3. API de Odds
 from api_odds import (
     normalize_text, normalize_person_name, fetch_nba_odds_events,
-    find_matching_odds_event, extract_betmgm_player_props
-)
-
-# 4. Leitor de PDF (Lesões)
-from pdf_reader import (
-    fetch_latest_injury_report_df, parse_injury_report_timestamp_from_url
+    find_matching_odds_event, extract_betmgm_player_props, get_odds_api_key
 )
 
 # ---------------------------------------------------------
@@ -51,6 +57,68 @@ def classify_form_signal(slope: float) -> str:
     if slope >= 1.0: return "↗ Em alta"
     if slope <= -1.0: return "↘ Em queda"
     return "→ Estável"
+
+
+def classify_relative_oscillation(std_value: float, mean_value: float) -> str:
+    """Classifica oscilação proporcional à escala do fundamento."""
+    mean_abs = abs(float(mean_value))
+    if mean_abs <= 0.05:
+        return "-"
+
+    cv = abs(float(std_value)) / mean_abs
+    if cv <= 0.22:
+        return "Baixa"
+    if cv <= 0.40:
+        return "Média"
+    return "Alta"
+
+
+def classify_metric_recent_form(metric: str, recent_values: list[float]) -> str:
+    """
+    Compara os 5 jogos mais recentes com o bloco anterior, respeitando a
+    escala de cada fundamento.
+    """
+    if len(recent_values) < 6:
+        return "→ Estável"
+
+    recent5 = np.array(recent_values[:5], dtype=float)
+    previous = np.array(recent_values[5:10], dtype=float)
+
+    if previous.size == 0:
+        return "→ Estável"
+
+    recent_mean = float(recent5.mean())
+    previous_mean = float(previous.mean())
+    diff = recent_mean - previous_mean
+
+    absolute_floor = {
+        "PTS": 1.5,
+        "REB": 0.6,
+        "AST": 0.5,
+        "PRA": 2.0,
+        "3PM": 0.3,
+        "FGA": 1.0,
+        "3PA": 0.8,
+    }.get(metric, 1.0)
+
+    threshold = max(absolute_floor, abs(previous_mean) * 0.08)
+
+    if diff >= threshold:
+        return "↗ Em alta"
+    if diff <= -threshold:
+        return "↘ Em queda"
+    return "→ Estável"
+
+
+def get_previous_season_string(season: str) -> str:
+    """Converte 2025-26 em 2024-25."""
+    try:
+        start_year = int(str(season).split("-")[0])
+    except Exception:
+        return season
+
+    prev_start = start_year - 1
+    return f"{prev_start}-{str(start_year)[-2:]}"
 
 def classify_matchup_tier_by_metric(metric: str, diff_value: float) -> str:
     thresholds = {
@@ -93,8 +161,10 @@ def classify_line_edge(edge: float) -> str:
     return "Justa"
 
 def get_matchup_chip_class(label: str) -> str:
-    if label == "Favorável": return "matchup-good"
-    if label == "Difícil": return "matchup-bad"
+    if label in {"Favorável", "Muito favorável"}:
+        return "matchup-good"
+    if label in {"Difícil", "Muito difícil"}:
+        return "matchup-bad"
     return "matchup-neutral"
 
 def classify_trend(delta_pra: float) -> str:
@@ -205,37 +275,92 @@ def safe_rate(stat_value: float, minutes_value: float) -> float:
 
 
 def blend_rate(season_pm: float, l10_pm: float, l5_pm: float) -> float:
-    return (
-        0.50 * float(season_pm)
-        + 0.30 * float(l10_pm)
-        + 0.20 * float(l5_pm)
+    """
+    Combina produção por minuto sem tratar ausência de amostra como produção zero.
+    Se L5/L10 não existirem, os pesos disponíveis são renormalizados.
+    """
+    values = [
+        (float(season_pm), 0.50),
+        (float(l10_pm), 0.30),
+        (float(l5_pm), 0.20),
+    ]
+    available = [(value, weight) for value, weight in values if value > 0]
+    if not available:
+        return 0.0
+
+    weight_sum = sum(weight for _, weight in available)
+    return sum(value * weight for value, weight in available) / weight_sum
+
+
+def estimate_two_point_attempts(
+    season_fga: float,
+    l10_fga: float,
+    l5_fga: float,
+    season_3pa: float,
+    l10_3pa: float,
+    l5_3pa: float,
+    season_min: float,
+    l10_min: float,
+    l5_min: float,
+    projected_min: float,
+) -> float:
+    """Estimate 2PA directly, not by clipping total FGA up to projected 3PA.
+
+    The data must support both categories: FGA = 2PA + 3PA on each observed
+    sample. An unknown/contradictory attempt count yields NaN rather than a
+    fabricated total.
+    """
+    observations = (
+        (season_fga, season_3pa, season_min),
+        (l10_fga, l10_3pa, l10_min),
+        (l5_fga, l5_3pa, l5_min),
     )
+    rates = []
+    for fga, three_pa, minutes in observations:
+        vals = (fga, three_pa, minutes)
+        if any(not np.isfinite(pd.to_numeric(x, errors="coerce")) for x in vals):
+            return float("nan")
+        if fga < 0 or three_pa < 0 or three_pa > fga:
+            return float("nan")
+        rates.append(safe_rate(fga - three_pa, minutes))
+    if not np.isfinite(projected_min) or projected_min < 0:
+        return float("nan")
+    return max(0.0, float(projected_min) * blend_rate(*rates))
 
 
 def project_minutes_v1(
     season_min: float,
-    l10_min: float,
-    l5_min: float,
-    role: str,
+    l10_median: float,
+    l5_median: float,
     inj_status: str = "Available",
 ) -> float:
-    proj = (
-        0.55 * float(season_min)
-        + 0.30 * float(l10_min)
-        + 0.15 * float(l5_min)
-    )
+    """
+    Fallback interno de minutos para 2026-27.
 
-    role = str(role or "")
+    Não há mais bônus/penalidade automática por "titular" ou "reserva".
+    A estimativa usa a rotação observada na própria temporada:
+      40% média da temporada
+      35% mediana dos últimos 10
+      25% mediana dos últimos 5
+
+    Pesos ausentes são renormalizados. Uma fonte externa de minutos, quando
+    validada, tem prioridade fora desta função.
+    """
+    samples = [
+        (float(season_min), 0.40),
+        (float(l10_median), 0.35),
+        (float(l5_median), 0.25),
+    ]
+    available = [(value, weight) for value, weight in samples if value > 0]
+
+    if available:
+        weight_sum = sum(weight for _, weight in available)
+        proj = sum(value * weight for value, weight in available) / weight_sum
+    else:
+        proj = 0.0
+
     inj_status = str(inj_status or "Available")
-
-    if role == "Titular provável":
-        proj += 1.0
-    elif role == "Reserva":
-        proj -= 0.8
-
-    if inj_status == "Questionable":
-        proj -= 1.5
-    elif inj_status in {"Doubtful", "Out"}:
+    if inj_status in {"Doubtful", "Out"}:
         proj = 0.0
 
     return max(0.0, proj)
@@ -272,17 +397,73 @@ def classify_matchup_score_label(score: float) -> str:
     return "Neutro"
 
 
+def classify_percentile_matchup_score(score: float) -> str:
+    """
+    Classificação final do matchup com faixa neutra mais ampla.
+
+    "Muito" fica reservado para alinhamentos realmente extremos entre defesa
+    geral, recorte por posição e H2H. A maior parte dos confrontos médios deve
+    permanecer neutra em vez de ser forçada para favorável/difícil.
+    """
+    score = float(score)
+    if score >= 0.62:
+        return "Muito favorável"
+    if score >= 0.30:
+        return "Favorável"
+    if score <= -0.62:
+        return "Muito difícil"
+    if score <= -0.30:
+        return "Difícil"
+    return "Neutro"
+
+
+def combine_matchup_score(
+    team_score: float,
+    position_score: float,
+    h2h_score: float,
+    h2h_reliability: float,
+) -> float:
+    """
+    Combina sinais sem redistribuir o peso de um H2H ausente.
+
+    A defesa geral e o recorte por posição são correlacionados. Quando não há
+    H2H confiável, o peso faltante permanece neutro em vez de ser redistribuído
+    para esses dois sinais defensivos, evitando dupla penalização.
+    """
+    team_score = clamp_value(float(team_score), -1.0, 1.0)
+    position_score = clamp_value(float(position_score), -1.0, 1.0)
+    h2h_score = clamp_value(float(h2h_score), -1.0, 1.0)
+    reliability = clamp_value(float(h2h_reliability), 0.0, 1.0)
+
+    score = (
+        0.55 * team_score
+        + 0.15 * position_score
+        + (0.30 * reliability) * h2h_score
+    )
+    return clamp_value(score, -1.0, 1.0)
+
+
+def classify_defense_percentile(percentile: float) -> str:
+    percentile = clamp_value(percentile, 0.0, 1.0)
+    if percentile >= 0.80:
+        return "Muito favorável"
+    if percentile >= 0.60:
+        return "Favorável"
+    if percentile <= 0.20:
+        return "Muito difícil"
+    if percentile <= 0.40:
+        return "Difícil"
+    return "Neutro"
+
+
 def build_context_adj_v1(row: pd.Series) -> float:
     score = 0.0
 
-    role = str(row.get("ROLE", ""))
     inj_status = str(row.get("INJ_STATUS", "Available"))
     form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
 
-    if role == "Titular provável":
-        score += 0.10
-    elif role == "Reserva":
-        score -= 0.05
+    # A classificação de lineup é descritiva e não adiciona/remova produção
+    # automaticamente. O efeito de rotação entra pelos minutos projetados.
 
     if "↗" in form_signal:
         score += 0.05
@@ -298,11 +479,22 @@ def build_context_adj_v1(row: pd.Series) -> float:
 
 def get_market_line_for_metric(row: pd.Series, metric: str) -> dict:
     line_col, over_col, under_col, updated_col = get_metric_market_columns(metric)
+    # New multi-book selection; old single BetMGM frames remain compatible.
+    selected_col = f"MARKET_{metric}_LINE"
+    if selected_col in row.index:
+        return {
+            "line": row.get(selected_col),
+            "over_dec": row.get(f"MARKET_{metric}_OVER_DEC"),
+            "under_dec": row.get(f"MARKET_{metric}_UNDER_DEC"),
+            "updated_at": row.get(f"MARKET_{metric}_UPDATED_AT"),
+            "source": row.get(f"MARKET_{metric}_SOURCE") or "Mercado",
+        }
     return {
         "line": row.get(line_col),
         "over_dec": row.get(over_col),
         "under_dec": row.get(under_col),
         "updated_at": row.get(updated_col),
+        "source": "BetMGM",
     }
 
 # ---------------------------------------------------------
@@ -318,40 +510,146 @@ def calculate_projection(season_value: float, l10_value: float, l5_value: float,
     )
     return max(0.0, projection)
 
-def get_line_context(row: pd.Series, metric: str, line_value: float, use_market_line: bool = False) -> dict:
+def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_market_line: bool = False) -> dict:
     projection_col = get_metric_projection_column(metric)
+    projection_v1_col = f"PROJ_{metric}_V1"
     recent_list_col = get_metric_recent_list_column(metric)
 
-    projection = float(row.get(projection_col, 0.0))
+    # Prefer the context-aware V1 projection when available. It incorporates
+    # projected minutes, recent rate, matchup and injury status.
+    projection_raw = row.get(projection_v1_col, row.get(projection_col, 0.0))
+    projection_num = pd.to_numeric(projection_raw, errors="coerce")
+    projection = float(projection_num) if pd.notna(projection_num) else float("nan")
+
     market_info = get_market_line_for_metric(row, metric)
     market_line = pd.to_numeric(market_info.get("line"), errors="coerce")
-    use_market = bool(use_market_line and pd.notna(market_line))
-    active_line = float(market_line) if use_market else float(line_value)
+    use_market = bool(
+        use_market_line and pd.notna(market_line) and float(market_line) > 0
+    )
+
+    manual_col = f"MANUAL_LINE_{metric}"
+    manual_line = pd.to_numeric(row.get(manual_col), errors="coerce")
+    fallback_line = pd.to_numeric(line_value, errors="coerce")
+
+    has_manual_line = bool(pd.notna(manual_line) and float(manual_line) > 0)
+    has_fallback_line = bool(pd.notna(fallback_line) and float(fallback_line) > 0)
+
+    # An actual sportsbook quote and a usable statistical projection are
+    # independent facts. Keep the former visible when GP=0, but NEVER
+    # calculate an Edge/Hit without a validated projection.
+    has_market_quote = bool(
+        use_market_line and pd.notna(market_line) and float(market_line) > 0
+    )
+    if has_market_quote:
+        quoted_line = float(market_line)
+        quoted_source = market_info.get("source") or "BetMGM"
+    elif has_manual_line:
+        quoted_line = float(manual_line)
+        quoted_source = "Manual"
+    elif has_fallback_line:
+        quoted_line = float(fallback_line)
+        quoted_source = "Manual"
+    else:
+        quoted_line = None
+        quoted_source = "Linha indisponível"
+
+    # Missing ESPN shooting data must not produce an OVER/UNDER opinion.
+    if pd.isna(projection_num):
+        use_market = False
+        has_manual_line = False
+        has_fallback_line = False
+
+    if use_market:
+        active_line = float(market_line)
+        source_name = market_info.get("source") or "BetMGM"
+        icon = "🎯"
+    elif has_manual_line:
+        active_line = float(manual_line)
+        source_name = "Manual"
+        icon = "✏️"
+    elif has_fallback_line:
+        # Compatibilidade com telas antigas que ainda possam enviar uma linha global.
+        active_line = float(fallback_line)
+        source_name = "Manual"
+        icon = "✏️"
+    else:
+        return {
+            "projection": projection,
+            "edge": 0.0,
+            "label": "Dados insuficientes" if pd.isna(projection_num) else "Linha indisponível",
+            "line_value": None,
+            "line_source": "Dados ESPN incompletos" if pd.isna(projection_num) else "Linha indisponível",
+            "has_market_line": False,
+            "has_active_line": False,
+            "quoted_line": quoted_line,
+            "quoted_source": quoted_source,
+            "has_quote": quoted_line is not None,
+            "over_dec": None,
+            "under_dec": None,
+            "updated_at": "",
+            "hit_l10": "-",
+            "hit_l10_html": "-",
+            "under_l10": "-",
+            "under_l10_html": "-",
+            "hit_sequence": "",
+            "under_sequence": "",
+            "icon": "",
+            "tooltip": (
+                "Sem amostra validada para esta estatística."
+                if pd.isna(projection_num)
+                else "Linha BetMGM indisponível: insira uma linha manual para analisar Edge e Hit."
+            ),
+            "hit_l5": "-",
+            "under_l5": "-",
+        }
 
     edge = projection - active_line
     recent_values = row.get(recent_list_col, [])
-    if not isinstance(recent_values, list): recent_values = []
+    if not isinstance(recent_values, list):
+        recent_values = []
 
     hit_l10 = sum(float(v) >= active_line for v in recent_values)
     hit_l5 = sum(float(v) >= active_line for v in recent_values[:5])
+    under_l10 = sum(float(v) < active_line for v in recent_values)
+    under_l5 = sum(float(v) < active_line for v in recent_values[:5])
 
-    hit_sequence = "".join(["✅" if float(v) >= active_line else "❌" for v in reversed(recent_values)])
+    hit_sequence = "".join(
+        ["✅" if float(v) >= active_line else "❌" for v in reversed(recent_values)]
+    )
+    under_sequence = "".join(
+        ["✅" if float(v) < active_line else "❌" for v in reversed(recent_values)]
+    )
 
-    source_name = "BetMGM" if use_market else "Manual"
-    icon = "🎯" if use_market else "✏️"
     tooltip = f"Calculado com linha {source_name} ({active_line})"
-    
     hit_l10_str = format_ratio_text(hit_l10, len(recent_values))
     hit_l10_html = f'<span title="{tooltip}" style="cursor:help;">{hit_l10_str} {icon}</span>'
+    under_l10_str = format_ratio_text(under_l10, len(recent_values))
+    under_l10_html = f'<span title="{tooltip}" style="cursor:help;">{under_l10_str} {icon}</span>'
 
     return {
-        "projection": projection, "edge": edge, "label": classify_line_edge(edge),
-        "line_value": active_line, "line_source": source_name, "has_market_line": use_market,
+        "projection": projection,
+        "edge": edge,
+        "label": classify_line_edge(edge),
+        "line_value": active_line,
+        "line_source": source_name,
+        "has_market_line": use_market,
+        "has_active_line": True,
+        "quoted_line": quoted_line,
+        "quoted_source": quoted_source,
+        "has_quote": quoted_line is not None,
         "over_dec": market_info.get("over_dec") if use_market else None,
         "under_dec": market_info.get("under_dec") if use_market else None,
         "updated_at": market_info.get("updated_at") if use_market else "",
-        "hit_l10": hit_l10_str, "hit_l10_html": hit_l10_html, "hit_sequence": hit_sequence,
-        "icon": icon, "tooltip": tooltip, "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
+        "hit_l10": hit_l10_str,
+        "hit_l10_html": hit_l10_html,
+        "under_l10": under_l10_str,
+        "under_l10_html": under_l10_html,
+        "hit_sequence": hit_sequence,
+        "under_sequence": under_sequence,
+        "icon": icon,
+        "tooltip": tooltip,
+        "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
+        "under_l5": format_ratio_text(under_l5, min(len(recent_values), 5)),
     }
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -360,6 +658,7 @@ def get_position_opponent_profile_v2(
     opponent_team_id: int,
     position_group: str,
     season_scope: str = "Regular Season",
+    as_of_date: str | None = None,
 ) -> dict:
     fallback = {
         "POSITION_GROUP": str(position_group),
@@ -444,21 +743,23 @@ def get_position_opponent_profile_v2(
                 "GP": total_gp,
             }
 
-        opp_raw = get_position_allowed_profile(
+        opp_raw = get_espn_position_allowed_profile(
             season,
             opponent_team_id,
             position_group,
             season_scope=season_scope,
+            as_of_date=as_of_date,
         )
 
-        league_raw = get_league_position_baseline(
+        league_raw = get_espn_league_position_baseline(
             season,
             position_group,
             season_scope=season_scope,
-        )        
+            as_of_date=as_of_date,
+        )
 
-        opp_profile = weighted_profile(opp_df_raw)
-        league_profile = weighted_profile(league_df_raw)
+        opp_profile = weighted_profile(opp_raw)
+        league_profile = weighted_profile(league_raw)
 
         diff_pts = float(opp_profile["PTS"]) - float(league_profile["PTS"])
         diff_reb = float(opp_profile["REB"]) - float(league_profile["REB"])
@@ -507,104 +808,263 @@ def get_position_opponent_profile_v2(
 # ---------------------------------------------------------
 # 4. CONSTRUÇÃO DE DADOS DOS JOGADORES (PANDAS MÁGICO)
 # ---------------------------------------------------------
-def build_form_context(team_df: pd.DataFrame, team_logs: pd.DataFrame) -> pd.DataFrame:
-    if team_df.empty: return team_df
+def build_form_context(
+    team_df: pd.DataFrame,
+    player_logs: pd.DataFrame,
+    opponent_abbr: str = "",
+    h2h_history_logs: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """
+    Enriquece o roster com forma recente, oscilação por fundamento, splits e H2H.
+
+    player_logs deve preferencialmente conter logs da liga inteira. Assim, um jogador
+    transferido continua carregando seus jogos da temporada anterior mesmo que eles
+    tenham sido disputados por outra franquia.
+    """
+    if team_df.empty:
+        return team_df
+
+    metric_source = {
+        "PRA": "PRA",
+        "PTS": "PTS",
+        "REB": "REB",
+        "AST": "AST",
+        "3PM": "FG3M",
+        "FGA": "FGA",
+        "3PA": "FG3A",
+    }
+    season_col = {
+        "PRA": "SEASON_PRA",
+        "PTS": "SEASON_PTS",
+        "REB": "SEASON_REB",
+        "AST": "SEASON_AST",
+        "3PM": "SEASON_3PM",
+        "FGA": "SEASON_FGA",
+        "3PA": "SEASON_3PA",
+    }
 
     scalar_defaults = {
-        "HIT_RATE_L10": 0.0, "HIT_RATE_L10_TEXT": "-", "PTS_HIT_RATE_L10": 0.0, "PTS_HIT_RATE_L10_TEXT": "-",
-        "REB_HIT_RATE_L10": 0.0, "REB_HIT_RATE_L10_TEXT": "-", "AST_HIT_RATE_L10": 0.0, "AST_HIT_RATE_L10_TEXT": "-",
-        "THREE_PM_HIT_RATE_L10": 0.0, "THREE_PM_HIT_RATE_L10_TEXT": "-", "FGA_HIT_RATE_L10": 0.0, "FGA_HIT_RATE_L10_TEXT": "-",
-        "THREE_PA_HIT_RATE_L10": 0.0, "THREE_PA_HIT_RATE_L10_TEXT": "-", "OSC_L10": 0.0, "OSC_CLASS": "-", "FORM_SIGNAL": "→ Estável",
-        "HOME_PRA": 0.0, "AWAY_PRA": 0.0, "HOME_PTS": 0.0, "AWAY_PTS": 0.0, "HOME_REB": 0.0, "AWAY_REB": 0.0, "HOME_AST": 0.0, "AWAY_AST": 0.0,
-        "HOME_3PM": 0.0, "AWAY_3PM": 0.0, "HOME_FGA": 0.0, "AWAY_FGA": 0.0, "HOME_3PA": 0.0, "AWAY_3PA": 0.0,
+        "HIT_RATE_L10": 0.0,
+        "HIT_RATE_L10_TEXT": "-",
+        "PTS_HIT_RATE_L10": 0.0,
+        "PTS_HIT_RATE_L10_TEXT": "-",
+        "REB_HIT_RATE_L10": 0.0,
+        "REB_HIT_RATE_L10_TEXT": "-",
+        "AST_HIT_RATE_L10": 0.0,
+        "AST_HIT_RATE_L10_TEXT": "-",
+        "THREE_PM_HIT_RATE_L10": 0.0,
+        "THREE_PM_HIT_RATE_L10_TEXT": "-",
+        "FGA_HIT_RATE_L10": 0.0,
+        "FGA_HIT_RATE_L10_TEXT": "-",
+        "THREE_PA_HIT_RATE_L10": 0.0,
+        "THREE_PA_HIT_RATE_L10_TEXT": "-",
+        "OSC_L10": 0.0,
+        "OSC_CLASS": "-",
+        "FORM_SIGNAL": "→ Estável",
+        "HOME_PRA": 0.0,
+        "AWAY_PRA": 0.0,
+        "HOME_PTS": 0.0,
+        "AWAY_PTS": 0.0,
+        "HOME_REB": 0.0,
+        "AWAY_REB": 0.0,
+        "HOME_AST": 0.0,
+        "AWAY_AST": 0.0,
+        "HOME_3PM": 0.0,
+        "AWAY_3PM": 0.0,
+        "HOME_FGA": 0.0,
+        "AWAY_FGA": 0.0,
+        "HOME_3PA": 0.0,
+        "AWAY_3PA": 0.0,
         "L10_MIN": 0.0,
         "L5_MIN": 0.0,
-    }
-    list_defaults = {
-        "RECENT_PRA_L10": [], "RECENT_PTS_L10": [], "RECENT_REB_L10": [], "RECENT_AST_L10": [],
-        "RECENT_3PM_L10": [], "RECENT_FGA_L10": [], "RECENT_3PA_L10": [],
+        "L10_MIN_MED": 0.0,
+        "L5_MIN_MED": 0.0,
+        "MIN_STD_L10": 0.0,
+        "H2H_GP": 0.0,
     }
 
-    if team_logs.empty:
+    for metric in metric_source:
+        scalar_defaults[f"OSC_{metric}_L10"] = 0.0
+        scalar_defaults[f"OSC_{metric}_CLASS"] = "-"
+        scalar_defaults[f"FORM_{metric}_SIGNAL"] = "→ Estável"
+        scalar_defaults[f"H2H_{metric}"] = 0.0
+
+    list_defaults = {
+        "RECENT_PRA_L10": [],
+        "RECENT_PTS_L10": [],
+        "RECENT_REB_L10": [],
+        "RECENT_AST_L10": [],
+        "RECENT_3PM_L10": [],
+        "RECENT_FGA_L10": [],
+        "RECENT_3PA_L10": [],
+    }
+
+    if player_logs is None or player_logs.empty:
         enriched = team_df.copy()
-        for col, default in scalar_defaults.items(): enriched[col] = default
-        for col, default in list_defaults.items(): enriched[col] = [default.copy() for _ in range(len(enriched))]
+        for col, default in scalar_defaults.items():
+            enriched[col] = default
+        for col, default in list_defaults.items():
+            enriched[col] = [default.copy() for _ in range(len(enriched))]
         return enriched
 
-    threshold_map = team_df.set_index("PLAYER_ID")[["SEASON_PRA", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]].to_dict("index")
-    metrics = []
+    logs = player_logs.copy()
+    logs["PLAYER_ID"] = pd.to_numeric(logs.get("PLAYER_ID"), errors="coerce")
 
-    for player_id, player_logs in team_logs.groupby("PLAYER_ID"):
-        recent10 = player_logs.sort_values("GAME_DATE", ascending=False).head(10).copy()
-        sample_size = len(recent10)
-        thresholds = threshold_map.get(player_id, {})
-        
-        if sample_size == 0:
-            metrics.append({"PLAYER_ID": player_id, **scalar_defaults, **list_defaults})
+    if h2h_history_logs is None or h2h_history_logs.empty:
+        h2h_logs_all = logs
+    else:
+        h2h_logs_all = h2h_history_logs.copy()
+        h2h_logs_all["PLAYER_ID"] = pd.to_numeric(
+            h2h_logs_all.get("PLAYER_ID"), errors="coerce"
+        )
+
+    threshold_map = team_df.set_index("PLAYER_ID")[
+        list(season_col.values())
+    ].to_dict("index")
+
+    metrics_rows = []
+
+    for player_id in team_df["PLAYER_ID"].tolist():
+        player_id_num = pd.to_numeric(player_id, errors="coerce")
+        if pd.isna(player_id_num):
             continue
 
-        pra_t = float(thresholds.get("SEASON_PRA", 0.0)); pts_t = float(thresholds.get("SEASON_PTS", 0.0))
-        reb_t = float(thresholds.get("SEASON_REB", 0.0)); ast_t = float(thresholds.get("SEASON_AST", 0.0))
-        t3pm_t = float(thresholds.get("SEASON_3PM", 0.0)); fga_t = float(thresholds.get("SEASON_FGA", 0.0))
-        t3pa_t = float(thresholds.get("SEASON_3PA", 0.0))
+        one = logs[logs["PLAYER_ID"] == player_id_num].copy()
+        if one.empty:
+            metrics_rows.append(
+                {"PLAYER_ID": player_id, **scalar_defaults, **list_defaults}
+            )
+            continue
 
-        hit_count_pra = int((recent10["PRA"] >= pra_t).sum()) if pra_t > 0 else 0
-        hit_count_pts = int((recent10["PTS"] >= pts_t).sum()) if pts_t > 0 else 0
-        hit_count_reb = int((recent10["REB"] >= reb_t).sum()) if reb_t > 0 else 0
-        hit_count_ast = int((recent10["AST"] >= ast_t).sum()) if ast_t > 0 else 0
-        hit_count_3pm = int((recent10["FG3M"] >= t3pm_t).sum()) if t3pm_t > 0 else 0
-        hit_count_fga = int((recent10["FGA"] >= fga_t).sum()) if fga_t > 0 else 0
-        hit_count_3pa = int((recent10["FG3A"] >= t3pa_t).sum()) if t3pa_t > 0 else 0
-
-        osc_value = float(recent10["PRA"].std(ddof=0)) if sample_size > 1 else 0.0
-        ordered = recent10.sort_values("GAME_DATE")
-        slope = float(np.polyfit(range(len(ordered)), ordered["PRA"], 1)[0]) if len(ordered) >= 3 else 0.0
-
-        home_logs = player_logs[player_logs["MATCHUP"].str.contains("vs.", regex=False, na=False)]
-        away_logs = player_logs[player_logs["MATCHUP"].str.contains("@", regex=False, na=False)]
-
+        one = one.sort_values("GAME_DATE", ascending=False)
+        recent10 = one.head(10).copy()
         recent5 = recent10.head(5).copy()
+        sample_size = len(recent10)
+        thresholds = threshold_map.get(player_id, {})
 
-        l10_min = float(recent10["MIN"].mean()) if "MIN" in recent10.columns and not recent10.empty else 0.0
-        l5_min = float(recent5["MIN"].mean()) if "MIN" in recent5.columns and not recent5.empty else 0.0
-        
-        metrics.append({
+        home_logs = one[one["MATCHUP"].str.contains("vs.", regex=False, na=False)]
+        away_logs = one[one["MATCHUP"].str.contains("@", regex=False, na=False)]
+
+        if opponent_abbr:
+            player_h2h_pool = h2h_logs_all[
+                h2h_logs_all["PLAYER_ID"] == player_id_num
+            ].copy()
+            h2h_logs = player_h2h_pool[
+                player_h2h_pool["MATCHUP"].str.contains(
+                    opponent_abbr, case=False, regex=False, na=False
+                )
+            ].sort_values("GAME_DATE", ascending=False).head(6).copy()
+        else:
+            h2h_logs = pd.DataFrame(columns=one.columns)
+
+        row = {
             "PLAYER_ID": player_id,
-            "HIT_RATE_L10": float(hit_count_pra / sample_size), "HIT_RATE_L10_TEXT": format_ratio_text(hit_count_pra, sample_size),
-            "PTS_HIT_RATE_L10": float(hit_count_pts / sample_size), "PTS_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_pts, sample_size),
-            "REB_HIT_RATE_L10": float(hit_count_reb / sample_size), "REB_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_reb, sample_size),
-            "AST_HIT_RATE_L10": float(hit_count_ast / sample_size), "AST_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_ast, sample_size),
-            "THREE_PM_HIT_RATE_L10": float(hit_count_3pm / sample_size), "THREE_PM_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_3pm, sample_size),
-            "FGA_HIT_RATE_L10": float(hit_count_fga / sample_size), "FGA_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_fga, sample_size),
-            "THREE_PA_HIT_RATE_L10": float(hit_count_3pa / sample_size), "THREE_PA_HIT_RATE_L10_TEXT": format_ratio_text(hit_count_3pa, sample_size),
-            "OSC_L10": osc_value, "OSC_CLASS": classify_oscillation(osc_value), "FORM_SIGNAL": classify_form_signal(slope),
-            "RECENT_PRA_L10": recent10["PRA"].round(1).tolist(), "RECENT_PTS_L10": recent10["PTS"].round(1).tolist(),
-            "RECENT_REB_L10": recent10["REB"].round(1).tolist(), "RECENT_AST_L10": recent10["AST"].round(1).tolist(),
-            "RECENT_3PM_L10": recent10["FG3M"].round(1).tolist(), "RECENT_FGA_L10": recent10["FGA"].round(1).tolist(),
-            "RECENT_3PA_L10": recent10["FG3A"].round(1).tolist(),
-            "HOME_PRA": float(home_logs["PRA"].mean()) if not home_logs.empty else 0.0, "AWAY_PRA": float(away_logs["PRA"].mean()) if not away_logs.empty else 0.0,
-            "HOME_PTS": float(home_logs["PTS"].mean()) if not home_logs.empty else 0.0, "AWAY_PTS": float(away_logs["PTS"].mean()) if not away_logs.empty else 0.0,
-            "HOME_REB": float(home_logs["REB"].mean()) if not home_logs.empty else 0.0, "AWAY_REB": float(away_logs["REB"].mean()) if not away_logs.empty else 0.0,
-            "HOME_AST": float(home_logs["AST"].mean()) if not home_logs.empty else 0.0, "AWAY_AST": float(away_logs["AST"].mean()) if not away_logs.empty else 0.0,
-            "HOME_3PM": float(home_logs["FG3M"].mean()) if not home_logs.empty else 0.0, "AWAY_3PM": float(away_logs["FG3M"].mean()) if not away_logs.empty else 0.0,
-            "HOME_FGA": float(home_logs["FGA"].mean()) if not home_logs.empty else 0.0, "AWAY_FGA": float(away_logs["FGA"].mean()) if not away_logs.empty else 0.0,
-            "HOME_3PA": float(home_logs["FG3A"].mean()) if not home_logs.empty else 0.0, "AWAY_3PA": float(away_logs["FG3A"].mean()) if not away_logs.empty else 0.0,
-            "L10_MIN": l10_min,
-            "L5_MIN": l5_min,
-        })
+            "L10_MIN": float(recent10["MIN"].mean()) if "MIN" in recent10.columns and not recent10.empty else 0.0,
+            "L5_MIN": float(recent5["MIN"].mean()) if "MIN" in recent5.columns and not recent5.empty else 0.0,
+            "L10_MIN_MED": float(recent10["MIN"].median()) if "MIN" in recent10.columns and not recent10.empty else 0.0,
+            "L5_MIN_MED": float(recent5["MIN"].median()) if "MIN" in recent5.columns and not recent5.empty else 0.0,
+            "MIN_STD_L10": float(recent10["MIN"].std(ddof=0)) if "MIN" in recent10.columns and len(recent10) > 1 else 0.0,
+            "H2H_GP": float(len(h2h_logs)),
+        }
 
-    metrics_df = pd.DataFrame(metrics)
+        for metric, source_col in metric_source.items():
+            recent_values = pd.to_numeric(recent10.get(source_col, pd.Series(dtype=float)), errors="coerce").dropna()
+            recent5_values = pd.to_numeric(recent5.get(source_col, pd.Series(dtype=float)), errors="coerce").dropna()
+            season_threshold = float(thresholds.get(season_col[metric], 0.0) or 0.0)
+
+            if len(recent_values) > 0 and season_threshold > 0:
+                hit_count = int((recent_values >= season_threshold).sum())
+                hit_rate = float(hit_count / len(recent_values))
+                hit_text = format_ratio_text(hit_count, len(recent_values))
+            else:
+                hit_rate = 0.0
+                hit_text = "-"
+
+            recent_list = recent_values.round(1).tolist()
+            osc = float(recent_values.std(ddof=0)) if len(recent_values) > 1 else 0.0
+            recent_mean = float(recent_values.mean()) if len(recent_values) else 0.0
+
+            row[f"OSC_{metric}_L10"] = osc
+            row[f"OSC_{metric}_CLASS"] = classify_relative_oscillation(
+                osc,
+                recent_mean,
+            )
+            row[f"FORM_{metric}_SIGNAL"] = classify_metric_recent_form(
+                metric,
+                recent_list,
+            )
+            row[f"RECENT_{metric}_L10"] = recent_list
+
+            h2h_values = pd.to_numeric(
+                h2h_logs.get(source_col, pd.Series(dtype=float)), errors="coerce"
+            ).dropna()
+
+            if len(h2h_values):
+                # Jogos mais recentes recebem mais peso sem apagar o histórico.
+                weights = np.power(0.85, np.arange(len(h2h_values), dtype=float))
+                row[f"H2H_{metric}"] = float(
+                    np.average(h2h_values.to_numpy(dtype=float), weights=weights)
+                )
+            else:
+                row[f"H2H_{metric}"] = 0.0
+
+            home_values = pd.to_numeric(
+                home_logs.get(source_col, pd.Series(dtype=float)), errors="coerce"
+            ).dropna()
+            away_values = pd.to_numeric(
+                away_logs.get(source_col, pd.Series(dtype=float)), errors="coerce"
+            ).dropna()
+            row[f"HOME_{metric}"] = float(home_values.mean()) if len(home_values) else 0.0
+            row[f"AWAY_{metric}"] = float(away_values.mean()) if len(away_values) else 0.0
+
+            if metric == "PRA":
+                row["HIT_RATE_L10"] = hit_rate
+                row["HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "PTS":
+                row["PTS_HIT_RATE_L10"] = hit_rate
+                row["PTS_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "REB":
+                row["REB_HIT_RATE_L10"] = hit_rate
+                row["REB_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "AST":
+                row["AST_HIT_RATE_L10"] = hit_rate
+                row["AST_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "3PM":
+                row["THREE_PM_HIT_RATE_L10"] = hit_rate
+                row["THREE_PM_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "FGA":
+                row["FGA_HIT_RATE_L10"] = hit_rate
+                row["FGA_HIT_RATE_L10_TEXT"] = hit_text
+            elif metric == "3PA":
+                row["THREE_PA_HIT_RATE_L10"] = hit_rate
+                row["THREE_PA_HIT_RATE_L10_TEXT"] = hit_text
+
+        # Mantém compatibilidade com componentes antigos, mas agora o valor
+        # genérico representa PRA e os cards novos usam o fundamento específico.
+        row["OSC_L10"] = row.get("OSC_PRA_L10", 0.0)
+        row["OSC_CLASS"] = row.get("OSC_PRA_CLASS", "-")
+        row["FORM_SIGNAL"] = row.get("FORM_PRA_SIGNAL", "→ Estável")
+
+        metrics_rows.append(row)
+
+    metrics_df = pd.DataFrame(metrics_rows)
     enriched = team_df.merge(metrics_df, on="PLAYER_ID", how="left")
 
     for col, default in scalar_defaults.items():
-        if isinstance(default, float): enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(default)
-        else: enriched[col] = enriched[col].fillna(default)
+        if col not in enriched.columns:
+            enriched[col] = default
+        if isinstance(default, float):
+            enriched[col] = pd.to_numeric(enriched[col], errors="coerce").fillna(default)
+        else:
+            enriched[col] = enriched[col].fillna(default)
 
     for col in list_defaults:
-        if col not in enriched.columns: enriched[col] = [[] for _ in range(len(enriched))]
+        if col not in enriched.columns:
+            enriched[col] = [[] for _ in range(len(enriched))]
         enriched[col] = enriched[col].apply(lambda x: x if isinstance(x, list) else [])
 
     return enriched
+
 
 def enrich_team_with_context(
     team_df: pd.DataFrame,
@@ -613,26 +1073,44 @@ def enrich_team_with_context(
     opponent_team_name: str,
     season: str,
     season_scope: str = "Regular Season",
+    as_of_date: str | None = None,
 ) -> pd.DataFrame:
     
     if team_df.empty: return team_df
 
-    team_logs = get_team_player_logs(
-    team_id,
-    season,
-    season_scope=season_scope,
-)
-    enriched = build_form_context(team_df, team_logs)
+    # ESPN player gamelogs preserve the player's current-season history even
+    # when he changed teams, while still keeping the app cloud-compatible.
+    try:
+        league_logs = get_espn_roster_player_logs(
+            team_id,
+            season,
+            season_scope=season_scope,
+            as_of_date=as_of_date,
+        )
+    except Exception:
+        league_logs = pd.DataFrame()
+
+    opponent_abbr = TEAM_ABBR_LOOKUP.get(int(opponent_team_id), "")
+
+    # Para a temporada atual, o modelo usa somente dados da própria temporada.
+    # Não misturamos H2H da temporada anterior, pois elencos e contextos mudam.
+    enriched = build_form_context(
+        team_df,
+        league_logs,
+        opponent_abbr=opponent_abbr,
+        h2h_history_logs=league_logs,
+    )
 
     matchup_rows = [
-    get_position_opponent_profile_v2(
-        season,
-        opponent_team_id,
-        pos,
-        season_scope=season_scope,
-    )
-    for pos in ["G", "F", "C"]
-]
+        get_position_opponent_profile_v2(
+            season,
+            opponent_team_id,
+            pos,
+            season_scope=season_scope,
+            as_of_date=as_of_date,
+        )
+        for pos in ["G", "F", "C"]
+    ]
     matchup_df = pd.DataFrame(matchup_rows)
 
     if matchup_df.empty or "POSITION_GROUP" not in matchup_df.columns:
@@ -686,6 +1164,75 @@ def enrich_team_with_context(
             else:
                 enriched[col] = enriched[col].fillna("Neutro")   
 
+    # Percentis defensivos reconstruídos dos boxscores ESPN.
+    team_defense = get_espn_team_defense_percentiles(
+        season,
+        season_scope=season_scope,
+        as_of_date=as_of_date,
+    )
+
+    opponent_defense = pd.DataFrame()
+    current_team_defense = pd.DataFrame()
+    if team_defense is not None and not team_defense.empty:
+        opponent_defense = team_defense[
+            pd.to_numeric(team_defense["TEAM_ID"], errors="coerce")
+            == int(opponent_team_id)
+        ].copy()
+        current_team_defense = team_defense[
+            pd.to_numeric(team_defense["TEAM_ID"], errors="coerce")
+            == int(team_id)
+        ].copy()
+
+    if not current_team_defense.empty:
+        current_team_gp = float(
+            pd.to_numeric(
+                current_team_defense.iloc[0].get("TEAM_GP", 0),
+                errors="coerce",
+            )
+            or 0.0
+        )
+    else:
+        current_team_gp = float(
+            pd.to_numeric(enriched.get("SEASON_GP"), errors="coerce").max()
+            if "SEASON_GP" in enriched.columns and not enriched.empty
+            else 0.0
+        )
+
+    enriched["TEAM_GP_CURRENT"] = current_team_gp
+
+    if not opponent_defense.empty:
+        opp_diag = opponent_defense.iloc[0]
+        enriched["OPP_DEF_SAMPLE_GP"] = int(
+            float(pd.to_numeric(opp_diag.get("TEAM_DEF_SAMPLE_GP", 0), errors="coerce") or 0)
+        )
+        enriched["DEFENSE_SOURCE"] = str(opp_diag.get("DEFENSE_SOURCE", "ESPN") or "ESPN")
+    else:
+        enriched["OPP_DEF_SAMPLE_GP"] = 0
+        enriched["DEFENSE_SOURCE"] = "ESPN indisponível"
+
+    for metric in ["PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA"]:
+        pct_col = f"TEAM_DEF_PCT_{metric}"
+        rank_col = f"TEAM_DEF_RANK_{metric}"
+        value_col = f"TEAM_DEF_{metric}"
+
+        if not opponent_defense.empty:
+            opp_row = opponent_defense.iloc[0]
+            pct_value = float(pd.to_numeric(opp_row.get(pct_col), errors="coerce") or 0.5)
+            rank_value = int(float(pd.to_numeric(opp_row.get(rank_col), errors="coerce") or 0))
+            defense_value = float(pd.to_numeric(opp_row.get(value_col), errors="coerce") or 0.0)
+            team_count = int(float(pd.to_numeric(opp_row.get("TEAM_DEF_TEAM_COUNT"), errors="coerce") or 30))
+        else:
+            pct_value = 0.5
+            rank_value = 0
+            defense_value = 0.0
+            team_count = 30
+
+        enriched[pct_col] = pct_value
+        enriched[rank_col] = rank_value
+        enriched[value_col] = defense_value
+        enriched["TEAM_DEF_TEAM_COUNT"] = team_count
+        enriched[f"TEAM_DEF_LABEL_{metric}"] = classify_defense_percentile(pct_value)
+
     enriched["PROJ_PTS"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PTS"], row["L10_PTS"], row["L5_PTS"], row["OPP_PTS_ALLOWED"], row["LEAGUE_PTS_BASELINE"]), axis=1)
     enriched["PROJ_REB"] = enriched.apply(lambda row: calculate_projection(row["SEASON_REB"], row["L10_REB"], row["L5_REB"], row["OPP_REB_ALLOWED"], row["LEAGUE_REB_BASELINE"]), axis=1)
     enriched["PROJ_AST"] = enriched.apply(lambda row: calculate_projection(row["SEASON_AST"], row["L10_AST"], row["L5_AST"], row["OPP_AST_ALLOWED"], row["LEAGUE_AST_BASELINE"]), axis=1)
@@ -694,16 +1241,66 @@ def enrich_team_with_context(
     enriched["PROJ_3PA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], row["OPP_3PA_ALLOWED"], row["LEAGUE_3PA_BASELINE"]), axis=1)
     enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], row["OPP_PRA_ALLOWED"], row["LEAGUE_PRA_BASELINE"]), axis=1)
 
-    enriched["PROJ_MIN_V1"] = enriched.apply(
+    enriched["PROJ_MIN_INTERNAL"] = enriched.apply(
         lambda row: project_minutes_v1(
             row.get("SEASON_MIN", 0.0),
-            row.get("L10_MIN", 0.0),
-            row.get("L5_MIN", 0.0),
-            row.get("ROLE", ""),
+            row.get("L10_MIN_MED", row.get("L10_MIN", 0.0)),
+            row.get("L5_MIN_MED", row.get("L5_MIN", 0.0)),
             row.get("INJ_STATUS", "Available"),
         ),
         axis=1,
     )
+
+    if "PROJECTED_MINUTES_EXTERNAL" not in enriched.columns:
+        enriched["PROJECTED_MINUTES_EXTERNAL"] = np.nan
+
+    enriched["PROJECTED_MINUTES_EXTERNAL"] = pd.to_numeric(
+        enriched["PROJECTED_MINUTES_EXTERNAL"],
+        errors="coerce",
+    )
+
+    enriched["PROJ_MIN_V1"] = enriched.apply(
+        lambda row: (
+            float(row.get("PROJECTED_MINUTES_EXTERNAL"))
+            if pd.notna(row.get("PROJECTED_MINUTES_EXTERNAL"))
+            and float(row.get("PROJECTED_MINUTES_EXTERNAL")) > 0
+            else float(row.get("PROJ_MIN_INTERNAL", 0.0))
+        ),
+        axis=1,
+    )
+
+    enriched["MINUTES_SOURCE"] = enriched.apply(
+        lambda row: (
+            str(row.get("LINEUP_SOURCE", "Fonte externa") or "Fonte externa")
+            if pd.notna(row.get("PROJECTED_MINUTES_EXTERNAL"))
+            and float(row.get("PROJECTED_MINUTES_EXTERNAL")) > 0
+            else "Modelo interno"
+        ),
+        axis=1,
+    )
+
+    # Injury status overrides even an explicit external minutes estimate.
+    # Depth chart is a role indication, not proof a player will play.
+    inactive = enriched.get("IS_UNAVAILABLE", pd.Series(False, index=enriched.index))
+    inactive = inactive.fillna(False).astype(bool)
+    enriched.loc[inactive, ["PROJ_MIN_V1", "PROJ_MIN_INTERNAL"]] = 0.0
+    enriched.loc[inactive, "MINUTES_SOURCE"] = "Fora — relatório de lesões"
+
+    # GP=0 cannot establish current-season production or minutes. Keep player
+    # visible for lineup tests but suppress numeric props as unavailable.
+    player_gp = pd.to_numeric(enriched["SEASON_GP"], errors="coerce").fillna(0)
+    no_current_sample = player_gp <= 0
+    enriched["SAMPLE_STATUS"] = player_gp.apply(
+        lambda games: (
+            "Sem jogos nesta temporada" if games <= 0
+            else f"Amostra inicial: {int(games)} jogo(s)" if games < 10
+            else f"Amostra: {int(games)} jogos"
+        )
+    )
+    enriched.loc[no_current_sample & ~inactive, [
+        "PROJ_MIN_V1", "PROJ_MIN_INTERNAL",
+    ]] = np.nan
+    enriched.loc[no_current_sample & ~inactive, "MINUTES_SOURCE"] = f"Sem amostra {season}"
 
     metric_map = {
         "PTS": ("SEASON_PTS", "L10_PTS", "L5_PTS"),
@@ -742,128 +1339,446 @@ def enrich_team_with_context(
             enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
         )
 
-    enriched["CONTEXT_ADJ_V1"] = enriched.apply(build_context_adj_v1, axis=1)
-
-    for metric in metric_map.keys():
+    # Matchup V4 calibrado:
+    # 55% força defensiva relativa entre os times da liga;
+    # 15% sinal posicional vs G/F/C;
+    # até 30% histórico individual H2H, reduzido quando a amostra é pequena.
+    # O peso de H2H ausente NÃO é redistribuído para defesa/posição.
+    for metric, (season_col, _, _) in metric_map.items():
         scale = get_metric_matchup_scale(metric)
-
         diff_col = get_metric_matchup_diff_column(metric)
 
-        enriched[f"DEF_ADJ_{metric}_V1"] = enriched[diff_col].apply(
-            lambda x: clamp_value(float(x) / scale if scale > 0 else 0.0, -2.0, 2.0)
-        )
-
-        enriched[f"FORM_ADJ_{metric}_V1"] = enriched.apply(
-            lambda row: clamp_value(
-                (
-                    0.60 * (
-                        (row.get(f"L10_PM_{metric}", 0.0) - row.get(f"SEASON_PM_{metric}", 0.0))
-                        / max(row.get(f"SEASON_PM_{metric}", 0.0), 0.01)
-                    )
-                    + 0.40 * (
-                        (row.get(f"L5_PM_{metric}", 0.0) - row.get(f"SEASON_PM_{metric}", 0.0))
-                        / max(row.get(f"SEASON_PM_{metric}", 0.0), 0.01)
-                    )
-                ),
+        enriched[f"DEF_SCORE_{metric}_V2"] = enriched[diff_col].apply(
+            lambda x: clamp_value(
+                float(x) / scale if scale > 0 else 0.0,
                 -1.5,
                 1.5,
+            )
+        )
+        enriched[f"DEF_LABEL_{metric}_V2"] = enriched[
+            f"DEF_SCORE_{metric}_V2"
+        ].apply(classify_matchup_score_label)
+
+        enriched[f"POSITION_SCORE_{metric}_V3"] = enriched[
+            f"DEF_SCORE_{metric}_V2"
+        ].apply(
+            lambda score: clamp_value(float(score) / 1.5, -1.0, 1.0)
+        )
+
+        enriched[f"TEAM_DEF_SCORE_{metric}_V3"] = (
+            pd.to_numeric(
+                enriched.get(f"TEAM_DEF_PCT_{metric}", 0.5),
+                errors="coerce",
+            )
+            .fillna(0.5)
+            .apply(lambda pct: clamp_value((float(pct) - 0.5) * 2.0, -1.0, 1.0))
+        )
+
+        enriched[f"H2H_RELIABILITY_{metric}_V2"] = (
+            pd.to_numeric(enriched.get("H2H_GP", 0.0), errors="coerce")
+            .fillna(0.0)
+            .apply(lambda gp: clamp_value(float(gp) / 4.0, 0.0, 1.0))
+        )
+
+        def _h2h_score(row):
+            h2h_gp = float(row.get("H2H_GP", 0.0) or 0.0)
+            season_value = float(row.get(season_col, 0.0) or 0.0)
+            h2h_value = float(row.get(f"H2H_{metric}", 0.0) or 0.0)
+
+            if h2h_gp <= 0 or season_value <= 0:
+                return 0.0
+
+            delta_pct = (h2h_value - season_value) / max(abs(season_value), 0.01)
+            return clamp_value(delta_pct / 0.12, -1.5, 1.5)
+
+        enriched[f"H2H_SCORE_{metric}_V2"] = enriched.apply(_h2h_score, axis=1)
+        enriched[f"H2H_LABEL_{metric}_V2"] = enriched.apply(
+            lambda row: (
+                classify_matchup_score_label(row.get(f"H2H_SCORE_{metric}_V2", 0.0))
+                if float(row.get("H2H_GP", 0.0) or 0.0) > 0
+                else "Sem amostra"
             ),
             axis=1,
         )
 
-        enriched[f"MATCHUP_SCORE_{metric}_V1"] = (
-            0.65 * enriched[f"DEF_ADJ_{metric}_V1"]
-            + 0.20 * enriched[f"FORM_ADJ_{metric}_V1"]
-            + 0.15 * enriched["CONTEXT_ADJ_V1"]
+        enriched[f"H2H_SCORE_{metric}_V3"] = enriched[
+            f"H2H_SCORE_{metric}_V2"
+        ].apply(
+            lambda score: clamp_value(float(score) / 1.5, -1.0, 1.0)
+        )
+
+        def _combined_matchup_score(row):
+            return combine_matchup_score(
+                team_score=float(row.get(f"TEAM_DEF_SCORE_{metric}_V3", 0.0) or 0.0),
+                position_score=float(row.get(f"POSITION_SCORE_{metric}_V3", 0.0) or 0.0),
+                h2h_score=float(row.get(f"H2H_SCORE_{metric}_V3", 0.0) or 0.0),
+                h2h_reliability=float(row.get(f"H2H_RELIABILITY_{metric}_V2", 0.0) or 0.0),
+            )
+
+        enriched[f"MATCHUP_SCORE_{metric}_V1"] = enriched.apply(
+            _combined_matchup_score,
+            axis=1,
+        )
+
+        # O matchup final pode mover a projeção em no máximo 6%.
+        enriched[f"MATCHUP_EFFECT_PCT_{metric}_V2"] = enriched[
+            f"MATCHUP_SCORE_{metric}_V1"
+        ].apply(
+            lambda score: clamp_value(0.06 * float(score), -0.06, 0.06)
         )
 
         enriched[f"PROJ_{metric}_V1"] = (
-        enriched[f"BASE_{metric}_V1"]
-            * (1 + 0.10 * enriched[f"MATCHUP_SCORE_{metric}_V1"])
+            enriched[f"BASE_{metric}_V1"]
+            * (1 + enriched[f"MATCHUP_EFFECT_PCT_{metric}_V2"])
         ).clip(lower=0.0)
 
-        enriched[f"MATCHUP_LABEL_{metric}_V1"] = enriched[f"MATCHUP_SCORE_{metric}_V1"].apply(
-            classify_matchup_score_label
+        enriched[f"MATCHUP_LABEL_{metric}_V1"] = enriched[
+            f"MATCHUP_SCORE_{metric}_V1"
+        ].apply(classify_percentile_matchup_score)
+
+    # PRA is a compound market. Its model projection must equal the sum of
+    # component projections (before rounding) across headline, edge and tables.
+    enriched["PROJ_PRA"] = (
+        enriched["PROJ_PTS"] + enriched["PROJ_REB"] + enriched["PROJ_AST"]
+    )
+    enriched["BASE_PRA_V1"] = (
+        enriched["BASE_PTS_V1"] + enriched["BASE_REB_V1"] + enriched["BASE_AST_V1"]
+    )
+    enriched["PROJ_PRA_V1"] = (
+        enriched["PROJ_PTS_V1"] + enriched["PROJ_REB_V1"] + enriched["PROJ_AST_V1"]
+    )
+    base_pra = enriched["BASE_PRA_V1"].replace(0.0, np.nan)
+    enriched["MATCHUP_EFFECT_PCT_PRA_V2"] = (
+        (enriched["PROJ_PRA_V1"] / base_pra) - 1.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    # Never advertise a shooting projection based on missing/invalid samples.
+    gp = pd.to_numeric(enriched["SEASON_GP"], errors="coerce").fillna(0.0)
+    for metric, sample_column in [
+        ("FGA", "SEASON_FGA_VALID_GP"),
+        ("3PA", "SEASON_3PA_VALID_GP"),
+        ("3PM", "SEASON_3PM_VALID_GP"),
+    ]:
+        valid_games = pd.to_numeric(
+            enriched.get(sample_column, 0), errors="coerce"
+        ).fillna(0.0)
+        invalid = (gp <= 0) | (valid_games < (gp * 0.80))
+        enriched[f"DATA_QUALITY_{metric}"] = ~invalid
+        enriched.loc[invalid, f"PROJ_{metric}"] = np.nan
+        enriched.loc[invalid, f"PROJ_{metric}_V1"] = np.nan
+
+    # FGA must be based on observed 2PA PLUS projected 3PA, not on
+    # max(FGA, 3PA), which previously fabricated equal values.
+    def _project_two_pa(row):
+        return estimate_two_point_attempts(
+            row["SEASON_FGA"], row["L10_FGA"], row["L5_FGA"],
+            row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"],
+            row["SEASON_MIN"], row["L10_MIN"], row["L5_MIN"],
+            row["PROJ_MIN_V1"],
         )
+
+    enriched["BASE_2PA_V1"] = enriched.apply(_project_two_pa, axis=1)
+    valid_fga = (
+        enriched["DATA_QUALITY_FGA"]
+        & enriched["DATA_QUALITY_3PA"]
+        & enriched["BASE_2PA_V1"].notna()
+        & enriched["PROJ_3PA_V1"].notna()
+    )
+    enriched["DATA_QUALITY_FGA"] = valid_fga
+    enriched["PROJ_2PA_V1"] = (
+        enriched["BASE_2PA_V1"]
+        * (1.0 + enriched["MATCHUP_EFFECT_PCT_FGA_V2"])
+    ).clip(lower=0.0)
+    enriched["BASE_FGA_V1"] = (
+        enriched["BASE_2PA_V1"] + enriched["BASE_3PA_V1"]
+    )
+    enriched["PROJ_FGA_V1"] = (
+        enriched["PROJ_2PA_V1"] + enriched["PROJ_3PA_V1"]
+    )
+    enriched.loc[~valid_fga, ["BASE_FGA_V1", "PROJ_FGA_V1"]] = np.nan
+    enriched.loc[~valid_fga, "PROJ_FGA"] = np.nan
+    enriched["MATCHUP_EFFECT_PCT_FGA_V2"] = (
+        enriched["PROJ_FGA_V1"]
+        / enriched["BASE_FGA_V1"].replace(0.0, np.nan)
+        - 1.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    three_valid = enriched["DATA_QUALITY_3PM"] & enriched["DATA_QUALITY_3PA"]
+    enriched.loc[three_valid, "PROJ_3PM_V1"] = np.minimum(
+        enriched.loc[three_valid, "PROJ_3PM_V1"],
+        enriched.loc[three_valid, "PROJ_3PA_V1"],
+    )
+
+    # GP=0 must never look like a genuine zero-prop prediction.
+    # This is especially important at the beginning of a new season.
+    no_sample = pd.to_numeric(
+        enriched["SEASON_GP"], errors="coerce"
+    ).fillna(0).le(0)
+    for metric in ["PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA"]:
+        enriched.loc[no_sample, f"PROJ_{metric}_V1"] = np.nan
+        enriched.loc[no_sample, f"PROJ_{metric}"] = np.nan
+        enriched.loc[no_sample, f"BASE_{metric}_V1"] = np.nan
+
     return enriched
 
     
 
-def merge_betmgm_odds(team_df: pd.DataFrame, odds_df: pd.DataFrame) -> pd.DataFrame:
-    if team_df.empty: return team_df
+def merge_betmgm_odds(
+    team_df: pd.DataFrame, odds_df: pd.DataFrame, bookmaker_id: str = "betmgm",
+) -> pd.DataFrame:
+    """Merge one bookmaker's props, preserving the other bookmaker columns."""
+    if team_df.empty:
+        return team_df
+    if bookmaker_id not in {"betmgm", "stake"}:
+        raise ValueError("Casa não suportada.")
+    prefix = bookmaker_id.upper() + "_"
     enriched = team_df.copy()
-    all_odds_cols = [col for cols in ODDS_METRIC_COLUMNS.values() for col in cols]
-
+    all_odds_cols = [
+        col.replace("BETMGM_", prefix)
+        for columns in ODDS_METRIC_COLUMNS.values() for col in columns
+    ]
     if odds_df.empty:
         for col in all_odds_cols:
-            if col not in enriched.columns: enriched[col] = None
+            if col not in enriched.columns:
+                enriched[col] = None
         return enriched
 
-    enriched["_PLAYER_KEY_MERGE"] = enriched["PLAYER_KEY"].fillna("").astype(str).apply(normalize_person_name)
+    enriched["_PLAYER_KEY_MERGE"] = (
+        enriched["PLAYER_KEY"].fillna("").astype(str).apply(normalize_person_name)
+    )
     odds_work = odds_df.copy()
-    odds_work["_PLAYER_KEY_MERGE"] = odds_work["PLAYER_KEY_ODDS"].fillna("").astype(str).apply(normalize_person_name)
-
-    odds_keep_cols = ["_PLAYER_KEY_MERGE", "PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"] + [col for col in all_odds_cols if col in odds_work.columns]
-    odds_work = odds_work[[c for c in odds_keep_cols if c in odds_work.columns]].copy()
-
-    existing_betmgm_cols = [col for col in all_odds_cols if col in enriched.columns]
-    if existing_betmgm_cols: enriched = enriched.drop(columns=existing_betmgm_cols)
-
-    merged = enriched.merge(odds_work, on="_PLAYER_KEY_MERGE", how="left")
-    drop_cols = [c for c in ["_PLAYER_KEY_MERGE", "PLAYER_KEY_ODDS", "PLAYER_NAME_ODDS"] if c in merged.columns]
-    if drop_cols: merged = merged.drop(columns=drop_cols)
-
+    odds_work["_PLAYER_KEY_MERGE"] = (
+        odds_work["PLAYER_KEY_ODDS"].fillna("").astype(str).apply(normalize_person_name)
+    )
+    keep = ["_PLAYER_KEY_MERGE"] + [
+        col for col in all_odds_cols if col in odds_work.columns
+    ]
+    odds_work = odds_work[keep].drop_duplicates("_PLAYER_KEY_MERGE", keep="first")
+    enriched = enriched.drop(
+        columns=[col for col in all_odds_cols if col in enriched.columns]
+    )
+    merged = enriched.merge(odds_work, on="_PLAYER_KEY_MERGE", how="left").drop(
+        columns="_PLAYER_KEY_MERGE"
+    )
     for col in all_odds_cols:
-        if col not in merged.columns: merged[col] = None
-
+        if col not in merged.columns:
+            merged[col] = None
     return merged
+
+
+def select_bookmaker_lines(
+    team_df: pd.DataFrame, bookmaker_ids: tuple[str, ...],
+    priority: str = "betmgm",
+) -> pd.DataFrame:
+    """Choose a line per player/metric, retain both raw book quotes for comparison."""
+    if team_df.empty:
+        return team_df
+    out = team_df.copy()
+    order = [priority] + [
+        name for name in bookmaker_ids if name != priority
+    ]
+    order = [name for name in order if name in bookmaker_ids]
+    for metric in ODDS_METRIC_COLUMNS:
+        chosen = pd.Series(float("nan"), index=out.index, dtype="float64")
+        source = pd.Series("", index=out.index, dtype="object")
+        for field, suffix in [
+            ("OVER_DEC", "OVER_DEC"), ("UNDER_DEC", "UNDER_DEC"),
+        ]:
+            out[f"MARKET_{metric}_{field}"] = float("nan")
+        out[f"MARKET_{metric}_UPDATED_AT"] = ""
+        for book in order:
+            prefix = book.upper()
+            values = pd.to_numeric(
+                out.get(f"{prefix}_{metric}_LINE"), errors="coerce"
+            )
+            valid = values.notna() & (values > 0) & chosen.isna()
+            chosen.loc[valid] = values.loc[valid]
+            source.loc[valid] = "Stake" if book == "stake" else "BetMGM"
+            for field in ("OVER_DEC", "UNDER_DEC"):
+                original = f"{prefix}_{metric}_{field}"
+                out.loc[valid, f"MARKET_{metric}_{field}"] = pd.to_numeric(
+                    out.loc[valid, original], errors="coerce"
+                )
+            out.loc[valid, f"MARKET_{metric}_UPDATED_AT"] = (
+                out.loc[valid, f"{prefix}_{metric}_UPDATED_AT"].fillna("")
+            )
+        out[f"MARKET_{metric}_LINE"] = chosen
+        out[f"MARKET_{metric}_SOURCE"] = source
+    return out
 
 @st.cache_data(ttl=54000, show_spinner=False)
 def build_team_table(
     team_id: int,
     season: str,
     season_scope: str = "Regular Season",
+    roster_season: str | None = None,
+    as_of_date: str | None = None,
 ) -> pd.DataFrame:
-    roster = get_team_roster(team_id, season)
+    """
+    Phase 1 ESPN integration.
 
-    season_stats = get_league_player_stats(
-        season,
-        last_n_games=0,
-        season_scope=season_scope,
-    )
+    Roster and player averages now come from ESPN so the same code can run in
+    Streamlit Cloud without stats.nba.com. The returned schema stays identical
+    to the existing dashboard contract.
+    """
+    roster_season = roster_season or season
 
-    last5_stats = get_league_player_stats(
-        season,
-        last_n_games=5,
-        season_scope=season_scope,
-    )
+    try:
+        roster = get_espn_team_roster(team_id, roster_season)
+    except Exception:
+        roster = pd.DataFrame()
 
-    last10_stats = get_league_player_stats(
-        season,
-        last_n_games=10,
-        season_scope=season_scope,
-    )
+    try:
+        player_logs = get_espn_roster_player_logs(
+            team_id,
+            season,
+            season_scope=season_scope,
+            as_of_date=as_of_date,
+        )
+    except Exception:
+        player_logs = pd.DataFrame()
+
+    season_stats = aggregate_espn_player_stats(player_logs, last_n_games=0)
+    last5_stats = aggregate_espn_player_stats(player_logs, last_n_games=5)
+    last10_stats = aggregate_espn_player_stats(player_logs, last_n_games=10)
 
     if roster.empty:
         return pd.DataFrame()
 
-    roster = roster[[c for c in ["PLAYER", "PLAYER_ID", "POSITION"] if c in roster.columns]].copy()
-    if "POSITION" not in roster.columns: roster["POSITION"] = ""
+    roster = roster[
+        [c for c in ["PLAYER", "PLAYER_ID", "POSITION"] if c in roster.columns]
+    ].copy()
+    if "POSITION" not in roster.columns:
+        roster["POSITION"] = ""
 
-    season_view = pd.DataFrame(columns=["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]) if season_stats.empty else season_stats.rename(columns={"GP": "SEASON_GP", "MIN": "SEASON_MIN", "PTS": "SEASON_PTS", "REB": "SEASON_REB", "AST": "SEASON_AST", "FG3M": "SEASON_3PM", "FGA": "SEASON_FGA", "FG3A": "SEASON_3PA"})
-    last5_view = pd.DataFrame(columns=["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA"]) if last5_stats.empty else last5_stats.rename(columns={"GP": "L5_GP", "MIN": "L5_MIN", "PTS": "L5_PTS", "REB": "L5_REB", "AST": "L5_AST", "FG3M": "L5_3PM", "FGA": "L5_FGA", "FG3A": "L5_3PA"})
-    last10_view = pd.DataFrame(columns=["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"]) if last10_stats.empty else last10_stats.rename(columns={"GP": "L10_GP", "MIN": "L10_MIN", "PTS": "L10_PTS", "REB": "L10_REB", "AST": "L10_AST", "FG3M": "L10_3PM", "FGA": "L10_FGA", "FG3A": "L10_3PA"})
+    season_view = (
+        pd.DataFrame(
+            columns=[
+                "PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS",
+                "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA",
+                "SEASON_3PA", "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP",
+                "SEASON_3PM_VALID_GP",
+            ]
+        )
+        if season_stats.empty
+        else season_stats.rename(
+            columns={
+                "GP": "SEASON_GP",
+                "MIN": "SEASON_MIN",
+                "PTS": "SEASON_PTS",
+                "REB": "SEASON_REB",
+                "AST": "SEASON_AST",
+                "FG3M": "SEASON_3PM",
+                "FGA": "SEASON_FGA",
+                "FG3A": "SEASON_3PA",
+                "FGA_VALID_GP": "SEASON_FGA_VALID_GP",
+                "FG3A_VALID_GP": "SEASON_3PA_VALID_GP",
+                "FG3M_VALID_GP": "SEASON_3PM_VALID_GP",
+            }
+        )
+    )
+    last5_view = (
+        pd.DataFrame(
+            columns=[
+                "PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB",
+                "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA",
+            ]
+        )
+        if last5_stats.empty
+        else last5_stats.rename(
+            columns={
+                "GP": "L5_GP",
+                "MIN": "L5_MIN",
+                "PTS": "L5_PTS",
+                "REB": "L5_REB",
+                "AST": "L5_AST",
+                "FG3M": "L5_3PM",
+                "FGA": "L5_FGA",
+                "FG3A": "L5_3PA",
+            }
+        )
+    )
+    last10_view = (
+        pd.DataFrame(
+            columns=[
+                "PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB",
+                "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA",
+            ]
+        )
+        if last10_stats.empty
+        else last10_stats.rename(
+            columns={
+                "GP": "L10_GP",
+                "MIN": "L10_MIN",
+                "PTS": "L10_PTS",
+                "REB": "L10_REB",
+                "AST": "L10_AST",
+                "FG3M": "L10_3PM",
+                "FGA": "L10_FGA",
+                "FG3A": "L10_3PA",
+            }
+        )
+    )
 
-    team_df = roster.merge(season_view[["PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA"]], on="PLAYER_ID", how="left").merge(last5_view[["PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA"]], on="PLAYER_ID", how="left").merge(last10_view[["PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"]], on="PLAYER_ID", how="left")
+    team_df = (
+        roster
+        .merge(
+            season_view[
+                [
+                    "PLAYER_ID", "SEASON_GP", "SEASON_MIN", "SEASON_PTS",
+                    "SEASON_REB", "SEASON_AST", "SEASON_3PM",
+                    "SEASON_FGA", "SEASON_3PA",
+                    "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP",
+                    "SEASON_3PM_VALID_GP",
+                ]
+            ],
+            on="PLAYER_ID",
+            how="left",
+        )
+        .merge(
+            last5_view[
+                [
+                    "PLAYER_ID", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB",
+                    "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA",
+                ]
+            ],
+            on="PLAYER_ID",
+            how="left",
+        )
+        .merge(
+            last10_view[
+                [
+                    "PLAYER_ID", "L10_GP", "L10_MIN", "L10_PTS",
+                    "L10_REB", "L10_AST", "L10_3PM", "L10_FGA",
+                    "L10_3PA",
+                ]
+            ],
+            on="PLAYER_ID",
+            how="left",
+        )
+    )
 
-    numeric_cols = ["SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB", "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA", "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM", "L5_FGA", "L5_3PA", "L10_GP", "L10_MIN", "L10_PTS", "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA"]
+    numeric_cols = [
+        "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "SEASON_REB",
+        "SEASON_AST", "SEASON_3PM", "SEASON_FGA", "SEASON_3PA",
+        "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP",
+        "SEASON_3PM_VALID_GP",
+        "L5_GP", "L5_MIN", "L5_PTS", "L5_REB", "L5_AST", "L5_3PM",
+        "L5_FGA", "L5_3PA", "L10_GP", "L10_MIN", "L10_PTS",
+        "L10_REB", "L10_AST", "L10_3PM", "L10_FGA", "L10_3PA",
+    ]
     for col in numeric_cols:
-        if col not in team_df.columns: team_df[col] = 0.0
+        if col not in team_df.columns:
+            team_df[col] = 0.0
         team_df[col] = pd.to_numeric(team_df[col], errors="coerce").fillna(0.0)
 
-    team_df["SEASON_PRA"] = team_df["SEASON_PTS"] + team_df["SEASON_REB"] + team_df["SEASON_AST"]
+    team_df["SEASON_PRA"] = (
+        team_df["SEASON_PTS"] + team_df["SEASON_REB"] + team_df["SEASON_AST"]
+    )
     team_df["L5_PRA"] = team_df["L5_PTS"] + team_df["L5_REB"] + team_df["L5_AST"]
-    team_df["L10_PRA"] = team_df["L10_PTS"] + team_df["L10_REB"] + team_df["L10_AST"]
+    team_df["L10_PRA"] = (
+        team_df["L10_PTS"] + team_df["L10_REB"] + team_df["L10_AST"]
+    )
     team_df["DELTA_PRA_L5"] = team_df["L5_PRA"] - team_df["SEASON_PRA"]
     team_df["DELTA_PRA_L10"] = team_df["L10_PRA"] - team_df["SEASON_PRA"]
 
@@ -871,13 +1786,124 @@ def build_team_table(
     team_df["POSITION_GROUP"] = team_df["POSITION"].apply(normalize_position_group)
     team_df["PLAYER_KEY"] = team_df["PLAYER"].apply(normalize_text)
 
-    team_df["ROLE"] = "Reserva"
-    starter_ids = team_df.sort_values(by=["SEASON_MIN", "SEASON_GP", "PLAYER"], ascending=[False, False, True]).head(5)["PLAYER_ID"].tolist()
-    team_df.loc[team_df["PLAYER_ID"].isin(starter_ids), "ROLE"] = "Titular provável"
+    team_df["ROLE"] = "Rotação"
+    if float(pd.to_numeric(team_df["SEASON_MIN"], errors="coerce").max() or 0.0) > 0:
+        starter_ids = team_df.sort_values(
+            by=["SEASON_MIN", "SEASON_GP", "PLAYER"],
+            ascending=[False, False, True],
+        ).head(5)["PLAYER_ID"].tolist()
+        team_df.loc[
+            team_df["PLAYER_ID"].isin(starter_ids),
+            "ROLE",
+        ] = "Estimativa por minutos"
 
-    return team_df[["PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP", "ROLE", "SEASON_GP", "SEASON_MIN", "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB", "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM", "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA", "SEASON_3PA", "L5_3PA", "L10_3PA", "SEASON_PRA", "L5_PRA", "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND"]].copy()
+    team_df["LINEUP_STATUS"] = team_df["ROLE"]
+    team_df["LINEUP_SOURCE"] = "Modelo interno"
+    team_df["PROJECTED_MINUTES_EXTERNAL"] = np.nan
+    team_df["DATA_SOURCE"] = "ESPN"
 
-@st.cache_data(ttl=54000, show_spinner=False)
+    return team_df[
+        [
+            "PLAYER_ID", "PLAYER", "PLAYER_KEY", "POSITION", "POSITION_GROUP",
+            "ROLE", "LINEUP_STATUS", "LINEUP_SOURCE",
+            "PROJECTED_MINUTES_EXTERNAL", "SEASON_GP", "SEASON_MIN",
+            "SEASON_PTS", "L5_PTS", "L10_PTS", "SEASON_REB", "L5_REB",
+            "L10_REB", "SEASON_AST", "L5_AST", "L10_AST", "SEASON_3PM",
+            "L5_3PM", "L10_3PM", "SEASON_FGA", "L5_FGA", "L10_FGA",
+            "SEASON_3PA", "L5_3PA", "L10_3PA",
+            "SEASON_FGA_VALID_GP", "SEASON_3PA_VALID_GP",
+            "SEASON_3PM_VALID_GP", "SEASON_PRA", "L5_PRA",
+            "L10_PRA", "DELTA_PRA_L5", "DELTA_PRA_L10", "TREND",
+            "DATA_SOURCE",
+        ]
+    ].copy()
+
+def merge_daily_lineups(
+    team_df: pd.DataFrame,
+    lineups_df: pd.DataFrame,
+    team_id: int,
+) -> pd.DataFrame:
+    """
+    Aplica status de lineup/minutos externos ao roster.
+
+    Se o feed não tiver dados válidos, mantém o fallback puramente descritivo:
+    Top 5 por minutos = "Estimativa por minutos"; demais = "Rotação".
+    Esse fallback não altera mais os minutos projetados.
+    """
+    if team_df is None or team_df.empty:
+        return team_df
+
+    enriched = team_df.copy()
+
+    if "LINEUP_STATUS" not in enriched.columns:
+        enriched["LINEUP_STATUS"] = enriched.get("ROLE", "Rotação")
+    if "LINEUP_SOURCE" not in enriched.columns:
+        enriched["LINEUP_SOURCE"] = "Modelo interno"
+    if "PROJECTED_MINUTES_EXTERNAL" not in enriched.columns:
+        enriched["PROJECTED_MINUTES_EXTERNAL"] = np.nan
+
+    if lineups_df is None or lineups_df.empty:
+        return enriched
+
+    work = lineups_df.copy()
+    if "TEAM_ID" in work.columns:
+        team_ids = pd.to_numeric(work["TEAM_ID"], errors="coerce")
+        team_filtered = work[(team_ids == int(team_id)) | team_ids.isna()].copy()
+        if not team_filtered.empty:
+            work = team_filtered
+
+    work["_PLAYER_KEY"] = work.get("PLAYER", "").fillna("").astype(str).apply(normalize_text)
+
+    by_id = {}
+    if "PLAYER_ID" in work.columns:
+        for _, item in work[work["PLAYER_ID"].notna()].iterrows():
+            try:
+                by_id[int(float(item["PLAYER_ID"]))] = item
+            except Exception:
+                pass
+
+    by_name = {
+        str(item.get("_PLAYER_KEY", "")): item
+        for _, item in work.iterrows()
+        if str(item.get("_PLAYER_KEY", ""))
+    }
+
+    def _match(row):
+        try:
+            pid = int(float(row.get("PLAYER_ID")))
+        except Exception:
+            pid = None
+
+        if pid is not None and pid in by_id:
+            return by_id[pid]
+
+        return by_name.get(normalize_text(row.get("PLAYER", "")))
+
+    for idx_row, player in enriched.iterrows():
+        match = _match(player)
+        if match is None:
+            continue
+
+        status = str(match.get("LINEUP_STATUS", "") or "").strip()
+        source = str(match.get("LINEUP_SOURCE", "NBA Daily Lineups") or "NBA Daily Lineups")
+        projected_minutes = pd.to_numeric(
+            match.get("PROJECTED_MINUTES_EXTERNAL"),
+            errors="coerce",
+        )
+
+        if status:
+            enriched.at[idx_row, "LINEUP_STATUS"] = status
+            if status in {"Titular confirmado", "Titular projetado", "Rotação"}:
+                enriched.at[idx_row, "ROLE"] = status
+
+        enriched.at[idx_row, "LINEUP_SOURCE"] = source
+
+        if pd.notna(projected_minutes) and float(projected_minutes) > 0:
+            enriched.at[idx_row, "PROJECTED_MINUTES_EXTERNAL"] = float(projected_minutes)
+
+    return enriched
+
+
 def get_matchup_context(
     away_team_id: int,
     home_team_id: int,
@@ -886,20 +1912,81 @@ def get_matchup_context(
     season: str,
     include_market: bool,
     season_scope: str = "Regular Season",
+    include_stake: bool = False,
+    bookmaker_priority: str = "betmgm",
+    roster_season: str | None = None,
+    target_date: date | None = None,
+    progress_callback=None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
+
+    def report(message: str) -> None:
+        if progress_callback is not None:
+            try:
+                progress_callback(message)
+            except Exception:
+                pass
+
+    report(f"Carregando elenco e médias de {away_team_name}...")
+    as_of_date = target_date.isoformat() if target_date is not None else None
 
     away_df = build_team_table(
         away_team_id,
         season,
         season_scope=season_scope,
+        roster_season=roster_season,
+        as_of_date=as_of_date,
     )
 
+    report(f"Carregando elenco e médias de {home_team_name}...")
     home_df = build_team_table(
         home_team_id,
         season,
         season_scope=season_scope,
+        roster_season=roster_season,
+        as_of_date=as_of_date,
     )
 
+    report("Consultando depth chart e rotação ESPN...")
+    try:
+        away_rotation = get_espn_team_rotation(away_team_id)
+    except Exception:
+        away_rotation = pd.DataFrame()
+    try:
+        home_rotation = get_espn_team_rotation(home_team_id)
+    except Exception:
+        home_rotation = pd.DataFrame()
+
+    away_df = merge_daily_lineups(away_df, away_rotation, away_team_id)
+    home_df = merge_daily_lineups(home_df, home_rotation, home_team_id)
+
+    game_matchup = f"{TEAM_ABBR_LOOKUP.get(int(away_team_id), '')}@{TEAM_ABBR_LOOKUP.get(int(home_team_id), '')}"
+    report("Consultando boletim oficial de lesões NBA (PDF); ESPN como fallback...")
+    try:
+        injury_df = get_preferred_injury_report(
+            (int(away_team_id), int(home_team_id)),
+            game_matchup,
+            target_date=target_date,
+        )
+    except Exception:
+        injury_df = pd.DataFrame()
+
+
+    away_df = merge_injury_report(
+        away_df,
+        injury_df,
+        away_team_name,
+        away_team_id,
+        game_matchup=game_matchup,
+    )
+    home_df = merge_injury_report(
+        home_df,
+        injury_df,
+        home_team_name,
+        home_team_id,
+        game_matchup=game_matchup,
+    )
+
+    report(f"Carregando histórico e matchup de {away_team_name}...")
     away_df = enrich_team_with_context(
         team_df=away_df,
         team_id=away_team_id,
@@ -907,8 +1994,10 @@ def get_matchup_context(
         opponent_team_name=home_team_name,
         season=season,
         season_scope=season_scope,
+        as_of_date=as_of_date,
     )
 
+    report(f"Carregando histórico e matchup de {home_team_name}...")
     home_df = enrich_team_with_context(
         team_df=home_df,
         team_id=home_team_id,
@@ -916,6 +2005,7 @@ def get_matchup_context(
         opponent_team_name=away_team_name,
         season=season,
         season_scope=season_scope,
+        as_of_date=as_of_date,
     )
 
     away_df["TEAM_NAME"] = away_team_name
@@ -924,95 +2014,230 @@ def get_matchup_context(
     away_df["IS_HOME"] = False
     home_df["IS_HOME"] = True
 
-    odds_df = pd.DataFrame()
+    # Both toggles are independent. One SportsGameOdds request can retrieve
+    # both houses, with per-metric quotes selected according to user priority.
+    enabled_books = tuple(
+        book for book, enabled in (
+            ("betmgm", include_market), ("stake", include_stake)
+        ) if enabled
+    )
+    book_frames = {"betmgm": pd.DataFrame(), "stake": pd.DataFrame()}
+    market_status_parts = []
+    if enabled_books:
+        if not get_odds_api_key():
+            market_status_parts.append(
+                "SportsGameOdds: chave não configurada; consultar linhas manualmente"
+            )
+        else:
+            report("Consultando odds: " + ", ".join(enabled_books) + "...")
+            try:
+                odds_events = fetch_nba_odds_events(
+                    target_date=target_date, bookmaker_ids=enabled_books
+                )
+                odds_event = find_matching_odds_event(
+                    odds_events,
+                    home_team_name=home_team_name,
+                    away_team_name=away_team_name,
+                )
+                if odds_event is None:
+                    market_status_parts.append("Nenhum evento correspondente encontrado")
+                else:
+                    for book in enabled_books:
+                        frame = extract_betmgm_player_props(
+                            odds_event, bookmaker_id=book
+                        )
+                        book_frames[book] = frame
+                        market_status_parts.append(
+                            f"{'Stake' if book == 'stake' else 'BetMGM'}: "
+                            f"{len(frame)} jogador(es) com props"
+                            if not frame.empty else
+                            f"{'Stake' if book == 'stake' else 'BetMGM'}: "
+                            "nenhuma prop disponível (cobertura/plano a confirmar)"
+                        )
+            except Exception as exc:
+                cause = exc.__cause__ or exc
+                http_code = getattr(
+                    getattr(cause, "response", None), "status_code", None
+                )
+                if http_code == 401:
+                    market_status_parts.append("SportsGameOdds: chave inválida (401)")
+                elif http_code == 403:
+                    market_status_parts.append(
+                        "SportsGameOdds: acesso ao bookmaker não permitido no plano (403)"
+                    )
+                elif http_code == 429:
+                    market_status_parts.append("SportsGameOdds: limite de uso (429)")
+                else:
+                    market_status_parts.append(
+                        f"SportsGameOdds: falha ({type(cause).__name__})"
+                    )
+    else:
+        market_status_parts.append("BetMGM e Stake desativadas — modo manual")
 
-    if include_market:
-        odds_events = fetch_nba_odds_events()
-        selected_odds_event = find_matching_odds_event(
-            odds_events,
-            home_team_name=home_team_name,
-            away_team_name=away_team_name,
+    report("Finalizando projeções e cards...")
+    for book in ("betmgm", "stake"):
+        away_df = merge_betmgm_odds(
+            away_df, book_frames[book], bookmaker_id=book
         )
-        odds_df = extract_betmgm_player_props(selected_odds_event)
-
-    away_df = merge_betmgm_odds(away_df, odds_df)
-    home_df = merge_betmgm_odds(home_df, odds_df)
-
+        home_df = merge_betmgm_odds(
+            home_df, book_frames[book], bookmaker_id=book
+        )
+    away_df = select_bookmaker_lines(away_df, enabled_books, bookmaker_priority)
+    home_df = select_bookmaker_lines(home_df, enabled_books, bookmaker_priority)
+    market_status = " • ".join(market_status_parts)
+    away_df["ODDS_FETCH_STATUS"] = market_status
+    home_df["ODDS_FETCH_STATUS"] = market_status
     return away_df, home_df
 
-def merge_injury_report(team_df: pd.DataFrame, injury_df: pd.DataFrame, team_name: str, team_id: int, game_matchup: str = "") -> pd.DataFrame:
-    if team_df.empty: return team_df
+def merge_injury_report(
+    team_df: pd.DataFrame,
+    injury_df: pd.DataFrame,
+    team_name: str,
+    team_id: int,
+    game_matchup: str = "",
+) -> pd.DataFrame:
+    if team_df.empty:
+        return team_df
+
     enriched = team_df.copy()
     enriched["INJ_STATUS"] = "—"
     enriched["INJ_REASON"] = ""
     enriched["INJ_REPORT_URL"] = ""
+    enriched["INJ_SOURCE"] = "Não confirmado"
+    enriched["TEAM_REPORT_STATUS"] = "Boletim indisponível"
     enriched["IS_UNAVAILABLE"] = False
     enriched["INJ_MATCHUP_FOUND"] = False
 
-    if injury_df.empty: return enriched
-
-    roster_keys = set(enriched["PLAYER_KEY"].fillna("").astype(str).tolist())
-    
-    def fuzzy_match(ir_key: str) -> str:
-        if ir_key in roster_keys: return ir_key
-        for suffix in [" iii", " ii", " iv", " v", " jr", " sr"]:
-            if ir_key.endswith(suffix):
-                clean = ir_key[:-len(suffix)].strip()
-                if clean in roster_keys: return clean
-        for rk in roster_keys:
-            if ir_key in rk or rk in ir_key: return rk
-        return ir_key
+    if injury_df is None or injury_df.empty:
+        return enriched
 
     work_ir = injury_df.copy()
-    work_ir["PLAYER_KEY_IR"] = work_ir["PLAYER_KEY_IR"].fillna("").astype(str).apply(fuzzy_match)
-    work_match = work_ir[work_ir["PLAYER_KEY_IR"].isin(roster_keys)].copy()
+    if "TEAM_ID_IR" in work_ir.columns:
+        team_ids = pd.to_numeric(work_ir["TEAM_ID_IR"], errors="coerce")
+        work_ir = work_ir[(team_ids == int(team_id)) | team_ids.isna()].copy()
 
-    if work_match.empty: return enriched
+    if not work_ir.empty:
+        source_values = work_ir.get("INJ_SOURCE", pd.Series(dtype=str))
+        source_values = source_values.dropna().astype(str)
+        source_values = source_values[source_values.str.strip().ne("")]
+        if not source_values.empty:
+            enriched["INJ_SOURCE"] = source_values.iloc[0]
 
-    work_match = work_match.drop_duplicates(subset=["PLAYER_KEY_IR"], keep="last")
+        status_values = work_ir.get("TEAM_REPORT_STATUS", pd.Series(dtype=str))
+        status_values = status_values.dropna().astype(str)
+        status_values = status_values[status_values.str.strip().ne("")]
+        if not status_values.empty:
+            enriched["TEAM_REPORT_STATUS"] = status_values.iloc[0]
+
+        url_values = work_ir.get("INJ_REPORT_URL", pd.Series(dtype=str))
+        url_values = url_values.dropna().astype(str)
+        url_values = url_values[url_values.str.startswith("https://")]
+        if not url_values.empty:
+            enriched["INJ_REPORT_URL"] = url_values.iloc[0]
+
+    query_ok = (
+        bool(work_ir.get("QUERY_OK", pd.Series(dtype=bool)).fillna(False).astype(bool).any())
+        if not work_ir.empty
+        else False
+    )
+    if not query_ok:
+        return enriched
+
+    # A successful ESPN team injury query is a list of injured players.
+    # Players from this roster absent from that list are therefore Available.
     enriched["INJ_STATUS"] = "Available"
     enriched["INJ_MATCHUP_FOUND"] = True
 
-    merge_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS", "INJ_REASON", "INJ_REPORT_URL"] if c in work_match.columns]
-    merged = enriched.merge(work_match[merge_cols], left_on="PLAYER_KEY", right_on="PLAYER_KEY_IR", how="left", suffixes=("", "_IR"))
+    if "PLAYER_KEY_IR" in work_ir.columns:
+        work_ir = work_ir[
+            work_ir["PLAYER_KEY_IR"].fillna("").astype(str).str.strip() != ""
+        ].copy()
 
-    if "INJ_STATUS_IR" in merged.columns: merged["INJ_STATUS"] = merged["INJ_STATUS_IR"].fillna(merged["INJ_STATUS"])
-    if "INJ_REASON_IR" in merged.columns: merged["INJ_REASON"] = merged["INJ_REASON_IR"].fillna(merged["INJ_REASON"])
-    if "INJ_REPORT_URL_IR" in merged.columns: merged["INJ_REPORT_URL"] = merged["INJ_REPORT_URL_IR"].fillna(merged["INJ_REPORT_URL"])
+    by_id: dict[int, pd.Series] = {}
+    if "PLAYER_ID_IR" in work_ir.columns:
+        for _, item in work_ir.iterrows():
+            pid = pd.to_numeric(item.get("PLAYER_ID_IR"), errors="coerce")
+            if pd.notna(pid):
+                by_id[int(pid)] = item
 
-    merged["IS_UNAVAILABLE"] = merged["INJ_STATUS"].isin(INACTIVE_STATUSES)
-    drop_cols = [c for c in ["PLAYER_KEY_IR", "INJ_STATUS_IR", "INJ_REASON_IR", "INJ_REPORT_URL_IR"] if c in merged.columns]
-    if drop_cols: merged = merged.drop(columns=drop_cols)
+    by_name = {
+        str(item.get("PLAYER_KEY_IR", "")): item
+        for _, item in work_ir.iterrows()
+        if str(item.get("PLAYER_KEY_IR", ""))
+    }
 
-    return merged
+    for idx_row, player in enriched.iterrows():
+        match = None
+        pid = pd.to_numeric(player.get("PLAYER_ID"), errors="coerce")
+        if pd.notna(pid):
+            match = by_id.get(int(pid))
+        if match is None:
+            key = normalize_text(player.get("PLAYER", ""))
+            match = by_name.get(key)
 
-@st.cache_data(ttl=36000, show_spinner=False)
-def get_matchup_injury_context(away_team_id: int, home_team_id: int, away_team_name: str, home_team_name: str, away_df: pd.DataFrame, home_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+        if match is None:
+            continue
+
+        status = str(match.get("INJ_STATUS", "Questionable") or "Questionable")
+        enriched.at[idx_row, "INJ_STATUS"] = status
+        enriched.at[idx_row, "INJ_REASON"] = str(match.get("INJ_REASON", "") or "")
+        enriched.at[idx_row, "INJ_REPORT_URL"] = str(match.get("INJ_REPORT_URL", "") or "")
+
+    enriched["IS_UNAVAILABLE"] = enriched["INJ_STATUS"].isin(INACTIVE_STATUSES)
+    return enriched
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_matchup_injury_context(
+    away_team_id: int,
+    home_team_id: int,
+    away_team_name: str,
+    home_team_name: str,
+    away_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """Compatibility helper backed by NBA Official PDF with ESPN fallback."""
+    game_matchup = (
+        f"{TEAM_ABBR_LOOKUP[int(away_team_id)]}@"
+        f"{TEAM_ABBR_LOOKUP[int(home_team_id)]}"
+    )
     try:
-        injury_df = fetch_latest_injury_report_df()
+        injury_df = get_preferred_injury_report(
+            (int(away_team_id), int(home_team_id)), game_matchup
+        )
     except Exception:
         injury_df = pd.DataFrame()
+    away_injury_df = merge_injury_report(
+        away_df,
+        injury_df,
+        away_team_name,
+        away_team_id,
+        game_matchup=game_matchup,
+    )
+    home_injury_df = merge_injury_report(
+        home_df,
+        injury_df,
+        home_team_name,
+        home_team_id,
+        game_matchup=game_matchup,
+    )
 
-    injury_report_url = ""
-    if not injury_df.empty and "INJ_REPORT_URL" in injury_df.columns:
-        valid_urls = injury_df["INJ_REPORT_URL"].dropna().astype(str)
-        valid_urls = valid_urls[valid_urls.str.strip() != ""]
-        if not valid_urls.empty: injury_report_url = valid_urls.iloc[0]
+    return away_injury_df, home_injury_df, {
+        "source": "ESPN",
+        "report_label_et": "ESPN",
+        "report_label_brt": "ESPN",
+    }
 
-    injury_report_meta = parse_injury_report_timestamp_from_url(injury_report_url)
-    game_matchup = f"{TEAM_ABBR_LOOKUP[int(away_team_id)]}@{TEAM_ABBR_LOOKUP[int(home_team_id)]}"
-
-    away_injury_df = merge_injury_report(away_df, injury_df, away_team_name, away_team_id, game_matchup=game_matchup)
-    home_injury_df = merge_injury_report(home_df, injury_df, home_team_name, home_team_id, game_matchup=game_matchup)
-
-    return away_injury_df, home_injury_df, injury_report_meta
 
 # ---------------------------------------------------------
 # 5. FUNÇÕES DE FILTRO E VISUALIZAÇÃO DE TABELAS
 # ---------------------------------------------------------
 def apply_filters(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str) -> pd.DataFrame:
     filtered = team_df[(team_df["SEASON_GP"] >= min_games) & (team_df["SEASON_MIN"] >= min_minutes)].copy()
-    if role_filter != "Todos": filtered = filtered[filtered["ROLE"] == role_filter].copy()
+    if "IS_UNAVAILABLE" in filtered.columns:
+        filtered = filtered[~filtered["IS_UNAVAILABLE"].fillna(False)].copy()
+    if role_filter != "Todos":
+        filtered = filtered[filtered["ROLE"] == role_filter].copy()
     return filtered
 
 def filter_and_sort_team_df(team_df: pd.DataFrame, min_games: int, min_minutes: int, role_filter: str, sort_column: str, ascending: bool) -> pd.DataFrame:
@@ -1062,13 +2287,13 @@ def build_display_dataframes(team_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
     display_df["3PA Temp"] = display_df["SEASON_3PA"]
     display_df["3PA L5"] = display_df["L5_3PA"]
     display_df["3PA L10"] = display_df["L10_3PA"]
-    display_df["Proj PRA"] = display_df["PROJ_PRA"]
-    display_df["Proj PTS"] = display_df["PROJ_PTS"]
-    display_df["Proj REB"] = display_df["PROJ_REB"]
-    display_df["Proj AST"] = display_df["PROJ_AST"]
-    display_df["Proj 3PM"] = display_df["PROJ_3PM"]
-    display_df["Proj FGA"] = display_df["PROJ_FGA"]
-    display_df["Proj 3PA"] = display_df["PROJ_3PA"]
+    display_df["Proj PRA"] = display_df.get("PROJ_PRA_V1", display_df["PROJ_PRA"])
+    display_df["Proj PTS"] = display_df.get("PROJ_PTS_V1", display_df["PROJ_PTS"])
+    display_df["Proj REB"] = display_df.get("PROJ_REB_V1", display_df["PROJ_REB"])
+    display_df["Proj AST"] = display_df.get("PROJ_AST_V1", display_df["PROJ_AST"])
+    display_df["Proj 3PM"] = display_df.get("PROJ_3PM_V1", display_df["PROJ_3PM"])
+    display_df["Proj FGA"] = display_df.get("PROJ_FGA_V1", display_df["PROJ_FGA"])
+    display_df["Proj 3PA"] = display_df.get("PROJ_3PA_V1", display_df["PROJ_3PA"])
     display_df["Matchup"] = display_df["MATCHUP_LABEL"]
     display_df["Hit PRA"] = display_df.get("HIT_RATE_L10_TEXT", "-")
     display_df["Hit PTS"] = display_df.get("PTS_HIT_RATE_L10_TEXT", "-")

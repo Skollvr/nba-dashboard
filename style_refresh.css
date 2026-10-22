@@ -1,0 +1,602 @@
+/* NBA Dashboard — Visual renovado (ativado SOMENTE pelo seletor).
+   Mantém style.css clássico intacto; não altera lógica de projeções. */
+:root {
+  --nova-bg: #070d16;
+  --nova-panel: #0e1827;
+  --nova-panel-hi: #132035;
+  --nova-line: rgba(151,174,211,.15);
+  --nova-text: #f3f7ff;
+  --nova-muted: #9facc1;
+  --nova-accent: #75d8c4;
+  --nova-violet: #9b91f5;
+}
+
+.stApp {
+  background: radial-gradient(ellipse 75% 33% at 55% -10%, #1b2a43 0%, transparent 80%),
+              linear-gradient(180deg, #09101c 0%, #070d16 52%, #080d16 100%) !important;
+  color: var(--nova-text);
+}
+[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, #111d2e 0%, #0b1421 62%, #0c1421 100%) !important;
+  border-right: 1px solid var(--nova-line) !important;
+}
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] label p { color: #c5d0e2 !important; }
+[data-testid="stSidebar"] [data-testid="stHeading"] { letter-spacing: -.02em; }
+[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlockBorderWrapper"] {
+  border-color: var(--nova-line);
+}
+.block-container {
+  max-width: 1550px !important;
+  padding-top: 1.2rem !important;
+  padding-bottom: 3rem !important;
+  padding-left: clamp(1rem, 2.5vw, 2.8rem) !important;
+  padding-right: clamp(1rem, 2.5vw, 2.8rem) !important;
+}
+/* Respect the chosen theme, including Streamlit-generated widgets. */
+.stApp .stButton > button[kind="primary"], 
+.stApp [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+  background: #52bfad !important;
+  border: 1px solid #52bfad !important;
+  color: #07141b !important;
+  box-shadow: 0 4px 17px rgba(82,191,173,.14) !important;
+  font-weight: 760 !important;
+}
+.stApp .stButton > button[kind="primary"]:hover {
+  background: #63ceba !important;
+  border-color: #63ceba !important;
+  color: #07141b !important;
+  box-shadow: 0 5px 24px rgba(82,191,173,.25) !important;
+}
+.stApp .stButton > button:not([kind="primary"]) {
+  background: #151f30 !important;
+  border: 1px solid #344158 !important;
+  border-radius: 10px !important;
+  color: #dbe6f6 !important;
+  box-shadow: none !important;
+}
+.stApp [data-testid="stSegmentedControl"] button[aria-pressed="true"] {
+  background: #183d3c !important;
+  color: #b9f5e9 !important;
+  border-color: #42786e !important;
+}
+.stApp [data-testid="stExpander"],
+.stApp [data-testid="stVerticalBlockBorderWrapper"] > div[style*="border"] {
+  background: rgba(17,27,43,.55) !important;
+  border-color: var(--nova-line) !important;
+  border-radius: 14px !important;
+}
+.stApp div[data-testid="stHorizontalBlock"] button:focus,
+.stApp div[data-testid="stHorizontalBlock"] button:active {
+  box-shadow: 0 0 0 2px rgba(115,216,196,.3) !important;
+  color: #f4f8ff !important;
+}
+.stApp h1, .stApp h2, .stApp h3 { letter-spacing: -.035em; }
+.stApp [data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; }
+.stApp [data-testid="stMetric"] {
+  background: #111b2b; border: 1px solid var(--nova-line);
+  padding: 12px; border-radius: 12px;
+}
+.stApp [data-testid="stAlert"] {
+  border-radius: 12px !important;
+}
+
+/* Title/section identity */
+.nova-brand { display:flex; align-items:center; gap:14px; margin: .45rem 0 .85rem; }
+.nova-brand-mark {
+  flex:0 0 44px; height:44px; display:grid; place-items:center;
+  border-radius:13px; background:linear-gradient(140deg,#75ddc4,#6b91ef);
+  font-size:24px; box-shadow: 0 7px 28px rgba(85,163,184,.2);
+}
+.nova-brand-kicker {
+  color:var(--nova-accent) !important; font-weight:750; letter-spacing:.17em;
+  font-size:.66rem; text-transform:uppercase; margin-bottom:2px;
+}
+.nova-brand-title {
+  font-weight:900; letter-spacing:-.05em; color:var(--nova-text) !important;
+  font-size: clamp(1.5rem,2.6vw,2.2rem); line-height:1.07;
+}
+.nova-brand-sub { color:var(--nova-muted) !important; font-size:.82rem; margin:3px 0 0; }
+.nova-strip {
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  margin:0 0 1.0rem;
+}
+.nova-strip span {
+  background:rgba(115,216,196,.06); border:1px solid var(--nova-line);
+  color:#b5c6d9 !important; padding:5px 9px; border-radius:7px;
+  font-size:.69rem; font-weight:700; letter-spacing:.025em;
+}
+.nova-strip span:first-child {
+  color:#a9eadb !important; border-color:rgba(115,216,196,.33);
+}
+.nova-section-head {
+  margin: .9rem 0 .8rem; display:flex; align-items:center;
+  justify-content:space-between; flex-wrap:wrap; gap:8px;
+}
+.nova-section-head h3 {
+  color:#f5f8ff !important; font-size:1.16rem; font-weight:830;
+  letter-spacing:-.027em; margin:0;
+}
+.nova-section-head small {
+  color:var(--nova-muted) !important; font-size:.75rem;
+}
+.nova-team-meta { margin:0 0 .85rem; display:flex; gap:6px; flex-wrap:wrap; }
+
+/* Matchup banner */
+.nova-matchup {
+  position:relative; overflow:hidden; border-radius:19px;
+  border:1px solid rgba(152,172,202,.21);
+  background:linear-gradient(120deg,rgba(19,30,48,.97),rgba(13,23,37,.96) 48%,rgba(19,30,48,.97));
+  padding:20px clamp(14px,3vw,30px); margin: .55rem 0 1.25rem;
+}
+.nova-matchup:after {
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(90deg,var(--team-away),transparent 24%,transparent 76%,var(--team-home));
+  opacity:.13;
+}
+.nova-matchup-kicker {
+  color:#96a9c1 !important; text-align:center; font-size:.65rem;
+  font-weight:760; letter-spacing:.18em; text-transform:uppercase; margin:0 0 14px;
+}
+.nova-matchup-main {
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(126px,.53fr) minmax(0,1fr);
+  align-items:center; gap:13px; position:relative; z-index:1;
+}
+.nova-matchup-team { display:flex; align-items:center; gap:13px; min-width:0; }
+.nova-matchup-team.home { justify-content:flex-end; flex-direction:row-reverse; text-align:right; }
+.nova-matchup-logo {
+  display:block; flex:0 0 74px; width:74px; height:74px; object-fit:contain;
+  filter: drop-shadow(0 6px 10px rgba(0,0,0,.23));
+}
+.nova-matchup-name {
+  color:#f6f9ff !important; font-weight:850; font-size:clamp(.96rem,1.5vw,1.5rem);
+  line-height:1.08; letter-spacing:-.03em; overflow-wrap:anywhere;
+}
+.nova-matchup-meta { color:#9baac0 !important; font-size:.72rem; margin-top:6px; }
+.nova-matchup-center { text-align:center; }
+.nova-versus {
+  color:#8092aa !important; font-weight:800; letter-spacing:.2em;
+  font-size:.7rem; margin-bottom:9px;
+}
+.nova-gametime {
+  display:inline-block; color:#d7e9f8 !important; background:#19273b;
+  border:1px solid #324660; border-radius:10px; padding:8px 10px;
+  font-weight:760; font-size:.75rem; line-height:1.35;
+}
+
+/* Player cards. CSS namespaced; classic untouched. */
+.nova-player {
+  --team: #7dd3ca; --team-soft: #7999b9;
+  background:linear-gradient(160deg,#141f30 0%,#101a2a 52%,#0d1727 100%);
+  border:1px solid #2a384d;
+  border-radius:18px; margin:0 0 14px; padding:0;
+  overflow:hidden; position:relative; min-width:0;
+  box-shadow:0 8px 23px rgba(0,0,0,.12);
+}
+.nova-player:before {
+  content:""; display:block; width:100%; height:3px;
+  background:linear-gradient(90deg,var(--team) 0%, var(--team-soft) 65%, transparent 100%);
+}
+.nova-player-top {
+  display:grid; grid-template-columns:75px minmax(0,1fr) 43px;
+  align-items:center; gap:11px; padding:14px 15px 9px;
+}
+.nova-portrait {
+  width:74px; height:74px; display:block; object-fit:contain;
+  object-position:center bottom; background:radial-gradient(ellipse at 50% 100%,rgba(166,189,220,.16),transparent 70%);
+  border:1px solid #34445b; border-radius:13px;
+}
+.nova-player-name {
+  color:#f9fbff !important; font-size:clamp(.93rem,1.2vw,1.15rem);
+  font-weight:880; line-height:1.17; letter-spacing:-.035em;
+}
+.nova-player-team {
+  color:#aabbd0 !important; font-size:.71rem; margin-top:5px;
+  text-transform:uppercase; letter-spacing:.04em; font-weight:700;
+}
+.nova-player-team strong { color:var(--team) !important; }
+.nova-small-logo { width:38px; height:38px; object-fit:contain; display:block; }
+.nova-sample {
+  display:inline-flex; align-items:center; gap:4px; background:#1c2a3c;
+  border:1px solid #32445b; border-radius:7px; padding:4px 7px;
+  color:#bcd0e3 !important; font-size:.67rem; margin-top:7px;
+}
+.nova-pred {
+  margin:0 14px 12px; padding:13px 14px;
+  border:1px solid rgba(148,177,220,.17);
+  border-radius:13px;
+  background:linear-gradient(120deg,rgba(34,51,75,.95),rgba(22,34,54,.9));
+  display:flex; gap:10px; justify-content:space-between; align-items:center;
+  flex-wrap:wrap;
+}
+.nova-pred-label { color:#a9bad0 !important; font-weight:780; font-size:.67rem; letter-spacing:.09em; text-transform:uppercase; }
+.nova-pred-value {
+  color:#f5f8ff !important; font-size:clamp(1.55rem,2.1vw,1.95rem);
+  font-weight:920; line-height:1.06; letter-spacing:-.055em; margin-top:3px;
+}
+.nova-pred-aside { text-align:right; }
+.nova-pred-aside .nova-small { color:#9eb1c7 !important; font-size:.7rem; }
+.nova-pred-aside strong {
+  display:block; color:#f0f7fd !important; font-size:.88rem; font-weight:830; margin-top:3px;
+}
+.nova-quote-hint {
+  margin-top:5px; max-width:185px; margin-left:auto;
+  color:#abc2d8 !important; font-size:.63rem;
+  font-weight:670; line-height:1.3;
+}
+.nova-data-warning { color:#ecc38d !important; font-weight:760; font-size:.75rem; }
+.nova-stat-grid {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:1px; margin:0 14px; background:#2c3c50;
+  border:1px solid #2c3c50; border-radius:12px; overflow:hidden;
+}
+.nova-stat {
+  text-align:center; background:#111d2d; padding:11px 5px;
+}
+.nova-stat-label {
+  color:#8fa7c0 !important; font-size:.65rem; font-weight:780;
+  letter-spacing:.09em; text-transform:uppercase;
+}
+.nova-stat-value {
+  color:#f7f9ff !important; font-size:1.3rem; font-weight:870;
+  letter-spacing:-.045em; margin-top:4px;
+}
+.nova-stat-small { color:#8ea4bb !important; font-size:.66rem; margin-top:2px; }
+.nova-card-bottom {
+  padding:12px 14px 13px; display:flex; flex-wrap:wrap;
+  align-items:center; gap:6px; justify-content:space-between;
+}
+.nova-chips { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+.nova-chip {
+  color:#cbd8e9 !important; display:inline-flex; align-items:center; gap:4px;
+  background:#1a2a3d; border:1px solid #30445d;
+  border-radius:7px; padding:5px 8px; font-size:.68rem; font-weight:720; line-height:1.22;
+}
+.nova-chip.positive { background:#10382f; border-color:#2e725b; color:#a8efd4 !important; }
+.nova-chip.negative { background:#3a2029; border-color:#714053; color:#ffb9c5 !important; }
+.nova-chip.warning { background:#3a3020; border-color:#706044; color:#f2d9a1 !important; }
+.nova-card-footer {
+  padding:0 15px 14px; color:#8fa5c0 !important; font-size:.7rem;
+}
+.nova-card-footer strong { color:#cbdaee !important; }
+
+/* Matchup & existing detail sections remain familiar, but cleaner. */
+.player-headline-card { border-radius:14px; background:linear-gradient(140deg,#283452,#182338) !important; border-color:#415375 !important; padding:1.05rem 1.2rem; }
+.player-headline-value { font-weight:900; letter-spacing:-.04em; font-size:1.65rem; line-height:1.15; }
+.player-headline-label { color:#b5caff; }
+.focus-shell, .detail-box, .summary-card, .ranking-shell {
+  background:linear-gradient(150deg,#121d2d,#0f1929) !important;
+  border:1px solid #2b3b50 !important; border-radius:14px;
+}
+.focus-shell { padding:1.1rem 1.25rem; }
+.detail-mini { background:#0c1523 !important; border-color:#27374e !important; }
+.detail-mini-highlight { background:#1c2b40 !important; border-color:#4b5c78 !important; }
+.ranking-row { border-bottom-color:#253447; }
+.ranking-rank { background:#254a48; color:#bcf6e9; }
+.hero-pill, .info-pill { border-radius:8px; }
+.stApp .stTabs [data-baseweb="tab-list"] { gap: .9rem; border-bottom:1px solid #2c3a50; }
+.stApp .stTabs [data-baseweb="tab"] {
+  border-radius:8px 8px 0 0; font-weight:780;
+}
+.stApp .stTabs [aria-selected="true"] { color:#9fe8dc !important; }
+.stApp .stExpander { border-radius:12px !important; }
+
+@media(max-width: 1050px) {
+  .nova-matchup-logo { width:58px; height:58px; flex-basis:58px; }
+  .nova-matchup { padding:17px; }
+  .nova-player-top { grid-template-columns:62px minmax(0,1fr) 35px; }
+  .nova-portrait { width:61px; height:61px; }
+  .nova-small-logo { width:31px; height:31px; }
+}
+@media(max-width: 768px) {
+  .block-container { padding: 1.0rem .85rem 2rem !important; }
+  .nova-matchup-main { grid-template-columns:minmax(0,1fr) 94px minmax(0,1fr); gap:5px; }
+  .nova-matchup { padding:12px 9px; }
+  .nova-matchup-kicker { margin-bottom:10px; }
+  .nova-matchup-team { flex-direction:column; justify-content:center; gap:5px; text-align:center; }
+  .nova-matchup-team.home { flex-direction:column; text-align:center; }
+  .nova-matchup-name { font-size:.86rem; line-height:1.16; }
+  .nova-matchup-logo { width:56px!important; height:56px!important; flex:0 0 56px; max-width:initial!important; }
+  .nova-matchup-meta { font-size:.65rem; }
+  .nova-gametime { font-size:.65rem; padding:6px 4px; border-radius:6px; }
+  .nova-player { margin-bottom:10px; }
+  .nova-player-top { grid-template-columns:64px minmax(0,1fr) 33px; }
+  .nova-portrait { width:62px!important; height:62px!important; max-width:none!important; }
+  .nova-small-logo { width:30px!important; height:30px!important; max-width:none!important; }
+  .nova-player-name { font-size:1rem; }
+  .nova-pred { margin:0 10px 10px; }
+  .nova-stat-grid { margin:0 10px; }
+  .nova-pred-value { font-size:1.55rem; }
+  .nova-stat-value { font-size:1.12rem; }
+  .nova-section-head { margin:.7rem 0; }
+  .nova-card-bottom { padding:10px; }
+  .nova-card-footer { padding:0 10px 12px; }
+  /* The classic sheet forces all images <=60px. Revert for this design. */
+  .stApp img:not(.nova-small-logo):not(.nova-portrait):not(.nova-matchup-logo) { max-width:100%!important; }
+}
+@media(max-width:380px) {
+  .nova-player-top { grid-template-columns:55px minmax(0,1fr) 30px; gap:7px; }
+  .nova-portrait { width:54px!important; height:54px!important; }
+  .nova-player-name { font-size:.9rem; }
+  .nova-pred-aside { text-align:left; }
+  .nova-quote-hint { margin-left:0; }
+  .nova-card-bottom { gap:5px; }
+}
+
+
+/* Primary buttons: Streamlit renders the label inside a paragraph. The
+   classic stylesheet globally paints p/span light, so explicitly fix descendants
+   rather than increasing lightness of the whole button. */
+.stApp .stButton > button[kind="primary"] p,
+.stApp .stButton > button[kind="primary"] span,
+.stApp .stButton > button[kind="primary"] strong,
+.stApp .stButton > button[kind="primary"]:hover p,
+.stApp .stButton > button[kind="primary"]:focus p,
+.stApp .stButton > button[kind="primary"]:active p {
+  color: #07141b !important;
+  font-weight: 825 !important;
+  text-shadow: none !important;
+}
+.stApp .stButton > button[kind="primary"]:focus,
+.stApp .stButton > button[kind="primary"]:active {
+  color: #07141b !important;
+  background: #52bfad !important;
+  border-color: #52bfad !important;
+  box-shadow: 0 0 0 3px rgba(82,191,173,.27) !important;
+}
+
+/* High-contrast detail workspace */
+.nova-workspace-label {
+  display:flex; gap:10px; align-items:center; margin: 1.1rem 0 .7rem;
+  padding:10px 13px; border-radius:10px;
+  background:linear-gradient(95deg,#19283b 0%,#111c2d 75%);
+  border-left:3px solid #56c7b8;
+  color:#e3edf9 !important;
+  font-size:.79rem; font-weight:785;
+}
+.nova-workspace-label span {
+  color:#a9bacf !important; font-size:.72rem; font-weight:500;
+}
+.nova-workspace-sub {
+  color:#a8b6c8 !important; font-size:.8rem; margin:-.1rem 0 .75rem;
+  line-height:1.5;
+}
+.nova-focus-hero {
+  display:grid; grid-template-columns: repeat(4,minmax(0,1fr));
+  gap:9px; margin:.8rem 0 1.1rem;
+}
+.nova-focus-kpi {
+  background:linear-gradient(155deg,#19283b,#111e30);
+  border:1px solid #314259; border-radius:13px;
+  padding:12px 13px; min-width:0;
+}
+.nova-focus-kpi.main {
+  background:linear-gradient(135deg,#1b4646,#17313e);
+  border-color:#34796d;
+}
+.nova-focus-kpi-label {
+  color:#a7b9cd !important; font-size:.67rem; text-transform:uppercase;
+  letter-spacing:.06em; font-weight:750;
+}
+.nova-focus-kpi-value {
+  color:#edf7ff !important; font-weight:860; font-size:clamp(1.12rem,1.55vw,1.62rem);
+  letter-spacing:-.04em; line-height:1.2; margin-top:6px;
+}
+.nova-focus-kpi-sub {
+  color:#99b1c7 !important; font-size:.7rem; margin-top:4px;
+  line-height:1.35;
+}
+.nova-section-lead {
+  color:#f3f8ff !important; font-weight:820; font-size:1.02rem;
+  margin:1.0rem 0 .7rem; letter-spacing:-.025em;
+}
+.nova-market-hint {
+  background:#172b3e; border:1px solid #2d4c68;
+  padding:11px 14px; border-radius:12px;
+  color:#bad0e6 !important; font-size:.82rem; line-height:1.5;
+  margin:.3rem 0 1rem;
+}
+.nova-market-hint strong { color:#d9eefa !important; }
+.nova-detail-compare {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:9px; margin:0 0 1rem;
+}
+.nova-compare-item {
+  background:#142135; border:1px solid #2d4158; border-radius:12px; padding:12px 15px;
+}
+.nova-compare-item.proj {
+  background:linear-gradient(135deg,#173e3b,#132a39);
+  border-color:#42756c;
+}
+.nova-compare-label {
+  color:#adc0d6 !important; font-size:.68rem; text-transform:uppercase;
+  letter-spacing:.07em; font-weight:750;
+}
+.nova-compare-value {
+  color:#f0f8ff !important; font-weight:840; font-size:1.55rem;
+  margin-top:5px; line-height:1.1;
+}
+
+/* Nested tabs: clear active state and touch targets */
+.stApp [data-testid="stTabs"] [data-baseweb="tab-list"] {
+  gap:4px !important;
+  background:#111d2b;
+  border:1px solid #27384e;
+  border-radius:12px;
+  padding:5px;
+  margin:6px 0 14px;
+  flex-wrap:wrap;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab"] {
+  background:transparent;
+  border-radius:8px !important;
+  min-height:39px;
+  padding:9px 13px;
+  color:#a6b9d1 !important;
+  font-size:.82rem;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab"] p {
+  color:inherit !important;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+  background:#244c48 !important;
+  border:1px solid #467e73 !important;
+  color:#d3fff3 !important;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] p {
+  color:#d3fff3 !important;
+}
+.stApp [data-testid="stTabs"] [data-baseweb="tab-highlight"],
+.stApp [data-testid="stTabs"] [data-baseweb="tab-border"] {
+  background:transparent !important;
+}
+
+/* Ranking and best-line presentation */
+.nova-tip-grid {
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px; margin:.85rem 0;
+}
+.nova-tip {
+  border:1px solid #325063; border-radius:15px; padding:16px;
+  background:linear-gradient(140deg,#16283a,#111d2d);
+  min-width:0;
+}
+.nova-tip.top {
+  background:linear-gradient(140deg,#173b37,#17283b);
+  border-color:#397b6c;
+}
+.nova-tip-top {
+  display:flex; align-items:center; justify-content:space-between;
+  gap:8px; flex-wrap:wrap; margin-bottom:10px;
+}
+.nova-tip-label {
+  font-size:.67rem; font-weight:825; text-transform:uppercase;
+  letter-spacing:.11em; color:#b4d4df !important;
+}
+.nova-tip-strength {
+  border:1px solid #4f836e; background:#1e413d;
+  padding:4px 7px; border-radius:6px;
+  color:#b9e8d3 !important; font-size:.65rem; font-weight:800;
+}
+.nova-tip-player {
+  font-size:1.17rem; font-weight:870; letter-spacing:-.03em;
+  color:#f0f8ff !important; margin:0 0 5px;
+}
+.nova-tip-details { color:#a9bdd1 !important; font-size:.74rem; line-height:1.4; }
+.nova-tip-metrics {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:6px; margin:12px 0 8px;
+}
+.nova-tip-metric {
+  border:1px solid #35475f; background:#102031;
+  border-radius:9px; padding:9px; text-align:center;
+}
+.nova-tip-metric small {
+  color:#9aafc4 !important; font-size:.62rem; font-weight:750;
+  text-transform:uppercase; letter-spacing:.08em;
+}
+.nova-tip-metric strong {
+  display:block; color:#eff8ff !important; font-size:1.15rem;
+  font-weight:830; margin-top:5px;
+}
+.nova-empty-panel {
+  background:#162637; border:1px dashed #3a5770;
+  color:#b7cce1 !important; border-radius:12px;
+  padding:14px 16px; line-height:1.45; font-size:.82rem;
+  margin:10px 0 13px;
+}
+.ranking-shell {
+  background:#101e2e !important;
+  border:1px solid #30445e !important;
+  border-radius:14px;
+  padding:5px 14px !important;
+}
+.ranking-row { padding:13px 2px !important; gap:12px !important; }
+.ranking-row:nth-child(even) { background:rgba(117,216,196,.025); }
+.ranking-rank { background:#28514d !important; color:#bceee0 !important; }
+.ranking-stat-value { font-size:1.02rem !important; }
+.ranking-player { color:#f4f8fd !important; font-size:.94rem; }
+.ranking-sub { color:#a5b6cb !important; }
+.ranking-good .ranking-stat-value { color:#79dcc0 !important; }
+.ranking-bad .ranking-stat-value { color:#f3aab8 !important; }
+@media(max-width:850px){
+  .nova-focus-hero { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .nova-tip-grid { grid-template-columns:1fr; }
+}
+@media(max-width:768px){
+  .nova-detail-compare { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .nova-focus-kpi { padding:10px; }
+  .nova-focus-kpi-value { font-size:1.17rem; }
+  .nova-compare-item { padding:10px 9px; }
+  .nova-compare-value { font-size:1.18rem; }
+  .stApp [data-testid="stTabs"] [data-baseweb="tab"] {
+    min-height:38px; padding:8px 9px; font-size:.75rem;
+  }
+  .ranking-row { gap:5px !important; }
+}
+@media(max-width:420px){
+  .nova-detail-compare { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .nova-tip-metrics { gap:4px; }
+}
+
+
+/* Panorama: independent overview, three clear leader cards and ranking */
+.summary-card {
+  background:linear-gradient(145deg,#152337,#101d2e) !important;
+  border:1px solid #30425b !important;
+  border-radius:14px !important;
+  min-height:155px;
+  padding:15px !important;
+}
+.summary-card .summary-label {
+  color:#82dec9 !important; font-weight:820 !important;
+  font-size:.67rem !important; letter-spacing:.11em;
+  margin-bottom:.55rem;
+}
+.summary-card .summary-value {
+  color:#f3f8ff !important; font-size:1.28rem !important;
+  font-weight:850 !important; letter-spacing:-.025em; line-height:1.2;
+}
+.summary-card .summary-meta {
+  color:#a7bbd3 !important; font-size:.73rem !important;
+  line-height:1.4;
+}
+.summary-card .detail-mini-grid {
+  margin-top:11px !important;
+}
+.summary-card .detail-mini {
+  background:#0c1726 !important;
+  border:1px solid #263b53 !important;
+  border-radius:9px;
+}
+.summary-card .detail-mini-highlight {
+  background:#192e3d !important; border-color:#385f5d !important;
+}
+.summary-card .detail-mini-value { font-size:1.02rem !important; }
+.nova-tip .nova-tip-strength { overflow-wrap:anywhere; }
+.nova-focus-player-heading {
+  display:flex; align-items:center; gap:14px; min-width:0;
+  background:linear-gradient(135deg,#18293c,#111d2e);
+  border:1px solid #2d435b;
+  border-left:4px solid var(--nova-team,#53bda7);
+  padding:14px 17px; border-radius:13px;
+  margin:10px 0 11px;
+}
+.nova-focus-player-heading strong {
+  color:#f2f8ff !important; font-weight:870; font-size:1.36rem;
+  letter-spacing:-.035em; line-height:1.2;
+}
+.nova-focus-player-heading small {
+  color:#a8bed3 !important; font-weight:620; display:block;
+  margin-top:6px; font-size:.8rem;
+}
+.nova-focus-player-heading img {
+  width:46px; height:46px; max-width:46px !important;
+  object-fit:contain;
+}
+@media(max-width:768px) {
+  .nova-focus-player-heading { padding:11px; gap:9px; }
+  .nova-focus-player-heading strong { font-size:1.08rem; }
+  .nova-focus-player-heading img { width:39px;height:39px;max-width:39px!important; }
+  .summary-card { min-height:137px; }
+}

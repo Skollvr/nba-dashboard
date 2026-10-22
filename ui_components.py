@@ -1,11 +1,16 @@
 import streamlit as st
+from html import escape as escape_html
+from ui_refresh import (
+    render_player_card_refresh, render_matchup_header_refresh,
+    render_focus_summary_refresh, render_focus_comparison_refresh,
+    render_tip_card_refresh,
+)
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import pytz
 from datetime import datetime
 from pandas.io.formats.style import Styler
-from pdf_reader import parse_injury_report_timestamp_from_url
 from config import (
     NBA_TEAM_COLORS, TEAM_LOGO_URL, PLAYER_HEADSHOT_URL, 
     LINE_METRIC_OPTIONS, CHART_OPTIONS, TEAM_LOOKUP, SORT_OPTIONS
@@ -14,7 +19,6 @@ from processamento import (
     get_line_context,
     get_matchup_chip_class,
     get_metric_matchup_context,
-    fetch_latest_injury_report_df,
     merge_injury_report,
     filter_and_sort_team_df,
     build_display_dataframes,
@@ -23,6 +27,7 @@ from processamento import (
     get_metric_allowed_column
 )
 from api_nba import get_player_log
+from pdf_reader import parse_injury_report_timestamp_from_url
 
 from datetime import timedelta
 
@@ -30,39 +35,38 @@ from datetime import timedelta
 # 1. ESTILIZAÇÃO E CSS
 # =========================================================
 
-def get_game_datetime_brasilia(status_text: str) -> str:
-    """Converte o status de horário da NBA (ET) para o horário de Brasília."""
+def get_game_datetime_brasilia(status_text: str, game_time_brt: str = "") -> str:
+    """Prefer the exact Brasilia timestamp calculated from the ESPN event."""
+    if game_time_brt and str(game_time_brt).strip().lower() not in {"nan", "none"}:
+        return str(game_time_brt)
+
+    # Fallback for non-ESPN schedule sources that still expose only ET text.
     if not status_text or "ET" not in status_text:
-        return status_text # Retorna "Final" ou "Live" se o jogo já começou
-    
+        return status_text
+
     try:
-        # Extrai o horário (ex: "7:30 pm")
         time_part = status_text.replace(" ET", "").strip()
-        # Converte para objeto datetime assumindo a data de hoje
         et_time = datetime.strptime(time_part, "%I:%M %p")
-        
-        # Define o fuso de NY (Eastern Time) e de Brasília
         tz_et = pytz.timezone("US/Eastern")
-        tz_br = pytz.timezone("America/Sao_Paulo") # Ou use a variável APP_TIMEZONE
-        
-        # Ajusta para hoje e aplica o fuso ET
+        tz_br = pytz.timezone("America/Sao_Paulo")
         now = datetime.now()
-        et_dt = tz_et.localize(datetime(now.year, now.month, now.day, et_time.hour, et_time.minute))
-        
-        # Converte para Brasília
+        et_dt = tz_et.localize(
+            datetime(now.year, now.month, now.day, et_time.hour, et_time.minute)
+        )
         br_dt = et_dt.astimezone(tz_br)
         return br_dt.strftime("%H:%M BRT")
     except Exception:
-        return status_text # Caso algo falhe, mantém o original para não quebrar a tela
+        return status_text
 
 def inject_css() -> None:
-    """Lê o arquivo style.css e aplica no Streamlit."""
-    try:
-        with open("style.css", "r", encoding="utf-8") as f:
-            css = f.read()
-        st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
-    except FileNotFoundError:
-        pass
+    """Classic style unchanged; load refresh stylesheet only when chosen."""
+    with open("style.css", "r", encoding="utf-8") as f:
+        st.markdown("<style>" + f.read() + "</style>", unsafe_allow_html=True)
+
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        with open("style_refresh.css", "r", encoding="utf-8") as f:
+            st.markdown("<style>" + f.read() + "</style>", unsafe_allow_html=True)
+
 
 def style_full_stats_table(df: pd.DataFrame) -> Styler:
     """Aplica cores e formatos na tabela detalhada."""
@@ -130,6 +134,10 @@ def render_metric_distribution_chart(row: pd.Series):
 # =========================================================
 
 def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        render_player_card_refresh(row, line_metric, line_value, use_market_line)
+        return
+
     # --- RASTREADOR DE CORES "BLINDADO" (CORREÇÃO DEFINITIVA) ---
     # Pegamos os dados brutos para evitar adivinhações por texto
     raw_team_name = str(row.get('TEAM_NAME', 'NBA'))
@@ -180,7 +188,13 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
         """, unsafe_allow_html=True)
             
             position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
-            st.caption(f"Pos {position} • GP {int(row['SEASON_GP'])} • MIN {format_number(row['SEASON_MIN'])}")
+            st.caption(
+                f"Pos {position} • GP {int(row['SEASON_GP'])} • "
+                f"MIN temp {format_number(row['SEASON_MIN'])} • "
+                f"MIN proj {format_number(row.get('PROJ_MIN_V1', float('nan')))} "
+                f"({row.get('MINUTES_SOURCE', 'Modelo interno')}) • "
+                f"{row.get('SAMPLE_STATUS', '')}"
+            )
             st.markdown(
                 render_player_headline_html(row, line_metric, line_value, use_market_line),
                 unsafe_allow_html=True,
@@ -224,8 +238,19 @@ def render_summary_cards(away_df: pd.DataFrame, home_df: pd.DataFrame, min_games
     if combined.empty:
         return
         
-    # Título da seção atualizado
-    st.markdown('<div style="margin-top: 1rem; margin-bottom: 0.8rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; color: #10b981; font-weight: 800;">🔥 Líderes do Confronto (Média últimos 10 jogos)</div>', unsafe_allow_html=True)
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        st.markdown(
+            '<div class="nova-section-head"><h3>Líderes da partida</h3>'
+            '<small>PTS · REB · AST — médias dos últimos jogos disponíveis</small></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="nova-workspace-sub">Amostras pequenas são apenas '
+            'referência inicial. Os líderes não são recomendações de aposta.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<div style="margin-top: 1rem; margin-bottom: 0.8rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1.5px; color: #10b981; font-weight: 800;">🔥 Líderes do Confronto (Média últimos 10 jogos)</div>', unsafe_allow_html=True)
     
     # Identifica os líderes independentes para cada estatística (baseado nos últimos 10 jogos)
     leader_pts = combined.sort_values("L10_PTS", ascending=False).iloc[0]
@@ -283,7 +308,8 @@ def render_player_focus_panel(
     use_market_line: bool,
     season: str,
     chart_mode: str,
-    opp_abbr: str
+    opp_abbr: str,
+    season_scope: str = "Regular Season",
 ) -> None:
     # --- RASTREADOR DE CORES (GSW/CHA FIX) ---
     t_name = str(row.get('TEAM_NAME', '')).upper()
@@ -301,34 +327,60 @@ def render_player_focus_panel(
                 
     colors = NBA_TEAM_COLORS.get(tk, {'primary': '#1d222d', 'secondary': '#ffcc00'})
 
-    st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
-
-    top_left, top_right = st.columns([1, 5])
-    with top_left:
-        st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
-
-    with top_right:
-        jersey = f"#{row.get('JERSEY_NUMBER')} | " if row.get('JERSEY_NUMBER') and str(row.get('JERSEY_NUMBER')).strip() else ""
-        st.markdown(f"""
-            <div style="
-                background: linear-gradient(135deg, {colors['primary']} 0%, {colors['secondary']} 150%);
-                padding: 20px; border-radius: 12px; border-left: 15px solid {colors['secondary']};
-                margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-            ">
-                <h1 style="color: {colors['secondary']}; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -1px;">
-                    {row['PLAYER']}
-                </h1>
-                <div style="color: {colors['secondary']}; opacity: 0.9; font-weight: 600; font-size: 14px;">
-                    {row.get('TEAM_NAME', 'NBA')} | {jersey}{row.get('POSITION', '')}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-
-        position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        # Same player image and team colors; more compact player identity.
+        player_num = pd.to_numeric(row.get("PLAYER_ID"), errors="coerce")
+        photo = get_player_headshot_url(int(player_num)) if pd.notna(player_num) else ""
+        gp_value = pd.to_numeric(row.get("SEASON_GP", 0), errors="coerce")
+        gp = int(gp_value) if pd.notna(gp_value) else 0
+        name = escape_html(str(row.get("PLAYER", "")))
+        tname = escape_html(str(row.get("TEAM_NAME", "NBA")))
+        pos = escape_html(str(row.get("POSITION", "—")))
+        sample = escape_html(str(row.get("SAMPLE_STATUS", "")))
         st.markdown(
-            f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • MIN {format_number(row["SEASON_MIN"])} • Time {row["TEAM_NAME"]}</div>',
+            '<div class="nova-focus-player-heading" '
+            f'style="--nova-team:{colors["primary"]}">'
+            f'<img src="{escape_html(photo, quote=True)}" alt="Foto de {name}">'
+            '<div>'
+            f'<strong>{name}</strong>'
+            f'<small>{tname} · {pos} · GP {gp} · '
+            f'MIN proj {format_number(row.get("PROJ_MIN_V1"))} · {sample}</small>'
+            '</div></div>',
             unsafe_allow_html=True,
         )
+    else:
+        st.markdown('<div class="focus-shell">', unsafe_allow_html=True)
+
+        top_left, top_right = st.columns([1, 5])
+        with top_left:
+            st.image(get_player_headshot_url(int(row["PLAYER_ID"])), width=92)
+
+        with top_right:
+            jersey = f"#{row.get('JERSEY_NUMBER')} | " if row.get('JERSEY_NUMBER') and str(row.get('JERSEY_NUMBER')).strip() else ""
+            st.markdown(f"""
+                <div style="
+                    background: linear-gradient(135deg, {colors['primary']} 0%, {colors['secondary']} 150%);
+                    padding: 20px; border-radius: 12px; border-left: 15px solid {colors['secondary']};
+                    margin-bottom: 20px; box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+                ">
+                    <h1 style="color: {colors['secondary']}; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -1px;">
+                        {row['PLAYER']}
+                    </h1>
+                    <div style="color: {colors['secondary']}; opacity: 0.9; font-weight: 600; font-size: 14px;">
+                        {row.get('TEAM_NAME', 'NBA')} | {jersey}{row.get('POSITION', '')}
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+
+            position = row["POSITION"] if str(row["POSITION"]).strip() else "-"
+            st.markdown(
+                f'<div class="focus-sub">Pos {position} • GP {int(row["SEASON_GP"])} • '
+                f'MIN temp {format_number(row["SEASON_MIN"])} • '
+                f'MIN proj {format_number(row.get("PROJ_MIN_V1", 0.0))} '
+                f'({row.get("MINUTES_SOURCE", "Modelo interno")}) • '
+                f'{row.get("SAMPLE_STATUS", "")} • Time {row["TEAM_NAME"]}</div>',
+                unsafe_allow_html=True,
+            )
             
     _visual_metric = st.pills(
         "Métrica em análise detalhada", 
@@ -342,33 +394,78 @@ def render_player_focus_panel(
 
     render_badges(
         row.get("ROLE", "-"),
-        row.get("FORM_SIGNAL", "→ Estável"),
-        row.get("OSC_CLASS", "-"),
+        row.get(f"FORM_{visual_metric}_SIGNAL", row.get("FORM_SIGNAL", "→ Estável")),
+        row.get(f"OSC_{visual_metric}_CLASS", row.get("OSC_CLASS", "-")),
         focus_matchup_label_v1,
     )
-    
-    render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
 
-    overview_tab, detail_tab, visual_tab, market_tab = st.tabs(["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"])
+    visual_line_context = get_line_context(
+        row,
+        visual_metric,
+        line_value,
+        use_market_line=use_market_line,
+    )
+
+    has_active_line = bool(visual_line_context.get("has_active_line", False))
+
+    if not has_active_line:
+        if pd.isna(pd.to_numeric(visual_line_context.get("projection"), errors="coerce")):
+            st.warning(
+                f"{visual_metric}: estatística de arremesso não validada para "
+                f"{row['PLAYER']}. Projeção e Edge ficam indisponíveis."
+            )
+        else:
+            st.info(
+                f"Linha {visual_metric} indisponível para {row['PLAYER']}. "
+                "Preencha Gerar linha manual para calcular Edge e Hit; "
+                "as médias e o matchup continuam disponíveis."
+            )
+
+    modern_focus = st.session_state.get("dashboard_visual_mode") == "Renovado"
+    if modern_focus:
+        st.markdown(
+            '<div class="nova-workspace-label">'
+            'Painel de análise do jogador'
+            '<span>Projeção, forma, eficiência e histórico no mesmo lugar</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        render_focus_summary_refresh(row, visual_metric, visual_line_context)
+        overview_tab, detail_tab, visual_tab, market_tab = st.tabs(
+            ["Visão geral", "Estatísticas", "Raio-X", "Mercado e H2H"]
+        )
+    else:
+        render_focus_summary_tiles(row, visual_metric, line_value, use_market_line)
+        overview_tab, detail_tab, visual_tab, market_tab = st.tabs(
+            ["Resumo", "Detalhamento", "📈 Raio-X Visual", "💰 Tendências Market"]
+        )
 
     with overview_tab:
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Forma recente e projeção</div>',
+                unsafe_allow_html=True,
+            )
         render_player_support_tiles(row, visual_metric, line_value, use_market_line)
-        
-        proj_std = float(row.get(get_metric_projection_column(visual_metric), 0.0))
-        proj_v1 = float(row.get(f"PROJ_{visual_metric}_V1", proj_std))
-        proj_delta = proj_v1 - proj_std
 
-        c_std, c_v1, c_delta = st.columns(3)
+        if modern_focus:
+            render_focus_comparison_refresh(row, visual_metric)
+            st.markdown(
+                '<div class="nova-section-lead">Como chegamos à projeção</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            proj_std = float(row.get(get_metric_projection_column(visual_metric), 0.0))
+            proj_v1 = float(row.get(f"PROJ_{visual_metric}_V1", proj_std))
+            proj_delta = proj_v1 - proj_std
+            c_std, c_v1, c_delta = st.columns(3)
+            with c_std:
+                st.metric(f"PROJ padrão {visual_metric}", format_number(proj_std))
+            with c_v1:
+                st.metric(f"PROJ V1 {visual_metric}", format_number(proj_v1))
+            with c_delta:
+                st.metric("Δ V1", format_signed_number(proj_delta))
 
-        with c_std:
-            st.metric(f"PROJ padrão {visual_metric}", format_number(proj_std))
-
-        with c_v1:
-            st.metric(f"PROJ V1 {visual_metric}", format_number(proj_v1))
-
-        with c_delta:
-            st.metric("Δ V1", format_signed_number(proj_delta))   
-            
         st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
         st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
         st.markdown(
@@ -377,6 +474,16 @@ def render_player_focus_panel(
     )
 
     with detail_tab:
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Médias da temporada e recortes recentes</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="nova-workspace-sub">Compare a temporada com os últimos '
+                '5 e 10 jogos. O painel continua identificando amostras pequenas.</div>',
+                unsafe_allow_html=True,
+            )
         first_cols = st.columns(2)
         second_cols = st.columns(2)
 
@@ -403,280 +510,336 @@ def render_player_focus_panel(
 
         for col, item in zip(extra_cols, extra_detail_items):
             with col:
-                st.markdown(
-                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
-                    unsafe_allow_html=True,
-                )
+                quality_column = f"DATA_QUALITY_{item[0]}"
+                if quality_column in row.index and not bool(row.get(quality_column)):
+                    st.info(
+                        f"{item[0]} indisponível: dados de arremesso da ESPN "
+                        "não passaram na validação da amostra."
+                    )
+                else:
+                    st.markdown(
+                        render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                        unsafe_allow_html=True,
+                    )
 
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Leitura de matchup</div>',
+                unsafe_allow_html=True,
+            )
         st.markdown(render_matchup_detail_box_html(row, visual_metric), unsafe_allow_html=True)
 
     with visual_tab:
-        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric)
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Desempenho jogo a jogo</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="nova-workspace-sub">Explore produção e minutos. '
+                'Over/under só aparece quando existe linha válida.</div>',
+                unsafe_allow_html=True,
+            )
+        render_player_chart(row["PLAYER"], int(row["PLAYER_ID"]), season, chart_mode, visual_metric, season_scope=season_scope)
 
-        st.divider()
+        if not has_active_line:
+            st.divider()
+            st.markdown(f"### Frequência na Temporada — {visual_metric}")
+            st.info(
+                "Dados insuficientes para comparar OVER/UNDER: "
+                "é necessária uma linha manual individual ou uma linha de mercado."
+            )
 
-        st.markdown(f"### Frequência na Temporada — {visual_metric}")
-        st.caption("Veja os montinhos: concentrados à esquerda (piso), espalhados à direita (teto).")
+            st.divider()
+            st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
+            st.info(
+                "Dados insuficientes para destacar jogos acima/abaixo da linha. "
+                "Informe uma linha para completar esta visualização."
+            )
+        else:
+            st.divider()
 
-        log = get_player_log(int(row["PLAYER_ID"]), season)
+            st.markdown(f"### Frequência na Temporada — {visual_metric}")
+            st.caption("Veja os montinhos: concentrados à esquerda (piso), espalhados à direita (teto).")
 
-        if not log.empty:
-            log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
-            log["3PM"] = log.get("FG3M", 0)
-            log["3PA"] = log.get("FG3A", 0)
+            log = get_player_log(int(row["PLAYER_ID"]), season, season_scope=season_scope)
 
-            visual_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
-            active_line = float(visual_ctx["line_value"])
+            if not log.empty:
+                log["PRA"] = log["PTS"] + log["REB"] + log["AST"]
+                log["3PM"] = log.get("FG3M", 0)
+                log["3PA"] = log.get("FG3A", 0)
 
-            log_col_map = {
-                "PRA": "PRA",
-                "PTS": "PTS",
-                "REB": "REB",
-                "AST": "AST",
-                "3PM": "3PM",
-                "FGA": "FGA",
-                "3PA": "3PA",
-            }
-            active_col = log_col_map.get(visual_metric, "PRA")
+                visual_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
+                active_line = float(visual_ctx["line_value"])
 
-            if active_col in log.columns:
-                hist_data = log[active_col].dropna()
+                log_col_map = {
+                    "PRA": "PRA",
+                    "PTS": "PTS",
+                    "REB": "REB",
+                    "AST": "AST",
+                    "3PM": "3PM",
+                    "FGA": "FGA",
+                    "3PA": "3PA",
+                }
+                active_col = log_col_map.get(visual_metric, "PRA")
 
-                if not hist_data.empty:
-                    fig = go.Figure()
-                    fig.add_trace(go.Histogram(
-                        x=hist_data,
-                        xbins=dict(start=-0.5, end=max(hist_data.max(), active_line) + 5, size=1),
-                        marker_color="rgba(139,92,246, 0.65)",
-                        marker_line_color="rgba(139,92,246, 1)",
-                        marker_line_width=1.5,
-                        opacity=0.9,
-                        hovertemplate=f"Valor exato de {visual_metric}: %{{x}}<br>Jogos: %{{y}}<extra></extra>"
-                    ))
+                if active_col in log.columns:
+                    hist_data = log[active_col].dropna()
 
-                    line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
-                    fig.add_vline(
-                        x=active_line,
-                        line_dash="dash",
-                        line_color=line_color,
-                        line_width=3,
-                        annotation_text=f"Linha ({visual_ctx['line_source']}): {active_line}",
-                        annotation_position="top right",
-                        annotation_font_color="#cbd5e1"
-                    )
+                    if not hist_data.empty:
+                        fig = go.Figure()
+                        fig.add_trace(go.Histogram(
+                            x=hist_data,
+                            xbins=dict(start=-0.5, end=max(hist_data.max(), active_line) + 5, size=1),
+                            marker_color="rgba(139,92,246, 0.65)",
+                            marker_line_color="rgba(139,92,246, 1)",
+                            marker_line_width=1.5,
+                            opacity=0.9,
+                            hovertemplate=f"Valor exato de {visual_metric}: %{{x}}<br>Jogos: %{{y}}<extra></extra>"
+                        ))
 
-                    if not use_market_line and visual_metric != line_metric:
-                        st.warning(
-                            f"A linha vertical usa o valor manual da sidebar ({active_line}), "
-                            f"que foi digitado para {line_metric}."
+                        line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
+                        fig.add_vline(
+                            x=active_line,
+                            line_dash="dash",
+                            line_color=line_color,
+                            line_width=3,
+                            annotation_text=f"Linha ({visual_ctx['line_source']}): {active_line}",
+                            annotation_position="top right",
+                            annotation_font_color="#cbd5e1"
                         )
 
-                    fig.update_layout(
-                        template="plotly_dark",
-                        height=380,
-                        margin=dict(l=20, r=20, t=40, b=20),
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        plot_bgcolor="rgba(15,23,42,0.35)",
-                        bargap=0.08,
-                        showlegend=False,
-                        dragmode=False,
-                    )
-                    fig.update_xaxes(
-                        title=f"{visual_metric} por jogo",
-                        showgrid=True,
-                        gridcolor="rgba(148,163,184,0.1)"
-                    )
-                    fig.update_yaxes(
-                        title="Quantidade de jogos",
-                        showgrid=True,
-                        gridcolor="rgba(148,163,184,0.1)"
-                    )
+                        if not use_market_line and visual_metric != line_metric:
+                            st.warning(
+                                f"A linha vertical usa o valor manual da sidebar ({active_line}), "
+                                f"que foi digitado para {line_metric}."
+                            )
 
-                    st.plotly_chart(fig, use_container_width=True)
+                        fig.update_layout(
+                            template="plotly_dark",
+                            height=380,
+                            margin=dict(l=20, r=20, t=40, b=20),
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(15,23,42,0.35)",
+                            bargap=0.08,
+                            showlegend=False,
+                            dragmode=False,
+                        )
+                        fig.update_xaxes(
+                            title=f"{visual_metric} por jogo",
+                            showgrid=True,
+                            gridcolor="rgba(148,163,184,0.1)"
+                        )
+                        fig.update_yaxes(
+                            title="Quantidade de jogos",
+                            showgrid=True,
+                            gridcolor="rgba(148,163,184,0.1)"
+                        )
 
-                    over_count = int((hist_data > active_line).sum())
-                    under_count = int((hist_data < active_line).sum())
-                    push_count = int((hist_data == active_line).sum())
+                        st.plotly_chart(fig, use_container_width=True)
 
-                    push_html = (
-                        f'<span style="margin: 0 0.8rem; color: #334155;">|</span>'
-                        f'<span style="color: #cbd5e1;">PUSH = {push_count}</span>'
-                        if push_count > 0 else ""
-                    )
+                        over_count = int((hist_data > active_line).sum())
+                        under_count = int((hist_data < active_line).sum())
+                        push_count = int((hist_data == active_line).sum())
 
-                    st.markdown(
-                        f"""
-                        <div style="font-size: 0.95rem; margin-top: 0.35rem;">
-                            <span style="color: #10b981;">OVER NA TEMPORADA = {over_count}</span>
-                            <span style="margin: 0 0.8rem; color: #334155;">|</span>
-                            <span style="color: #ef4444;">UNDER NA TEMPORADA = {under_count}</span>
-                            {push_html}
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                        push_html = (
+                            f'<span style="margin: 0 0.8rem; color: #334155;">|</span>'
+                            f'<span style="color: #cbd5e1;">PUSH = {push_count}</span>'
+                            if push_count > 0 else ""
+                        )
 
-                st.divider()
+                        st.markdown(
+                            f"""
+                            <div style="font-size: 0.95rem; margin-top: 0.35rem;">
+                                <span style="color: #10b981;">OVER NA TEMPORADA = {over_count}</span>
+                                <span style="margin: 0 0.8rem; color: #334155;">|</span>
+                                <span style="color: #ef4444;">UNDER NA TEMPORADA = {under_count}</span>
+                                {push_html}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
-                st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
-                st.caption("Cada ponto é um jogo. A linha de tendência mostra se a produção sobe junto com os minutos.")
+                    st.divider()
 
-                scatter_df = log[["MIN", active_col, "GAME_DATE"]].copy().dropna()
-                scatter_df["MATCHUP"] = log["MATCHUP"] if "MATCHUP" in log.columns else ""
+                    st.markdown(f"### Eficiência: Minutos vs {visual_metric}")
+                    st.caption("Cada ponto é um jogo. A linha de tendência mostra se a produção sobe junto com os minutos.")
 
-                if not scatter_df.empty:
-                    x = scatter_df["MIN"]
-                    y = scatter_df[active_col]
+                    scatter_df = log[["MIN", active_col, "GAME_DATE"]].copy().dropna()
+                    scatter_df["MATCHUP"] = log["MATCHUP"] if "MATCHUP" in log.columns else ""
 
-                    z = np.polyfit(x, y, 1)
-                    p = np.poly1d(z)
-                    trend_x = np.array([x.min(), x.max()])
-                    trend_y = p(trend_x)
+                    if not scatter_df.empty:
+                        x = scatter_df["MIN"]
+                        y = scatter_df[active_col]
 
-                    line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
+                        z = np.polyfit(x, y, 1)
+                        p = np.poly1d(z)
+                        trend_x = np.array([x.min(), x.max()])
+                        trend_y = p(trend_x)
 
-                    fig_scatter = go.Figure()
-                    fig_scatter.add_trace(go.Scatter(
-                        x=x,
-                        y=y,
-                        mode="markers",
-                        marker=dict(
-                            size=12,
-                            color=np.where(y >= active_line, "#10b981", "#ef4444"),
-                            line=dict(width=1, color="#f8fafc"),
-                            opacity=0.8,
-                        ),
-                        text=scatter_df.apply(
-                            lambda r: f"Data: {r['GAME_DATE'].strftime('%d/%m')}<br>"
-                                      f"Matchup: {r['MATCHUP']}<br>"
-                                      f"Minutos: {r['MIN']}<br>"
-                                      f"{visual_metric}: {r[active_col]}",
-                            axis=1
-                        ),
-                        hoverinfo="text",
-                        name="Jogos"
-                    ))
+                        line_color = "#10b981" if visual_ctx["edge"] >= 0 else "#ef4444"
 
-                    fig_scatter.add_trace(go.Scatter(
-                        x=trend_x,
-                        y=trend_y,
-                        mode="lines",
-                        line=dict(color="rgba(255, 255, 255, 0.4)", width=2, dash="dot"),
-                        name="Tendência",
-                        hoverinfo="skip"
-                    ))
+                        fig_scatter = go.Figure()
+                        fig_scatter.add_trace(go.Scatter(
+                            x=x,
+                            y=y,
+                            mode="markers",
+                            marker=dict(
+                                size=12,
+                                color=np.where(y >= active_line, "#10b981", "#ef4444"),
+                                line=dict(width=1, color="#f8fafc"),
+                                opacity=0.8,
+                            ),
+                            text=scatter_df.apply(
+                                lambda r: f"Data: {r['GAME_DATE'].strftime('%d/%m')}<br>"
+                                          f"Matchup: {r['MATCHUP']}<br>"
+                                          f"Minutos: {r['MIN']}<br>"
+                                          f"{visual_metric}: {r[active_col]}",
+                                axis=1
+                            ),
+                            hoverinfo="text",
+                            name="Jogos"
+                        ))
 
-                    fig_scatter.add_hline(
-                        y=active_line,
-                        line_dash="dash",
-                        line_color=line_color,
-                        line_width=2,
-                        annotation_text="Linha",
-                        annotation_position="bottom right"
-                    )
+                        fig_scatter.add_trace(go.Scatter(
+                            x=trend_x,
+                            y=trend_y,
+                            mode="lines",
+                            line=dict(color="rgba(255, 255, 255, 0.4)", width=2, dash="dot"),
+                            name="Tendência",
+                            hoverinfo="skip"
+                        ))
 
-                    fig_scatter.update_layout(
-                        template="plotly_dark",
-                        height=400,
-                        margin=dict(l=20, r=20, t=20, b=20),
-                        paper_bgcolor="rgba(0,0,0,0)",
-                        plot_bgcolor="rgba(15,23,42,0.35)",
-                        xaxis_title="Minutos Jogados",
-                        yaxis_title=f"Valor de {visual_metric}",
-                        showlegend=False,
-                        dragmode=False
-                    )
-                    fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
-                    fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                        fig_scatter.add_hline(
+                            y=active_line,
+                            line_dash="dash",
+                            line_color=line_color,
+                            line_width=2,
+                            annotation_text="Linha",
+                            annotation_position="bottom right"
+                        )
 
-                    st.plotly_chart(fig_scatter, use_container_width=True)
+                        fig_scatter.update_layout(
+                            template="plotly_dark",
+                            height=400,
+                            margin=dict(l=20, r=20, t=20, b=20),
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(15,23,42,0.35)",
+                            xaxis_title="Minutos Jogados",
+                            yaxis_title=f"Valor de {visual_metric}",
+                            showlegend=False,
+                            dragmode=False
+                        )
+                        fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
+                        fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
 
-                    correl = x.corr(y)
-                    if correl > 0.7:
-                        st.success(f"📈 Alta Correlação ({correl:.2f}): produção muito dependente dos minutos.")
-                    elif correl > 0.4:
-                        st.info(f"📊 Correlação Moderada ({correl:.2f}): minutos ajudam, mas não explicam tudo.")
-                    else:
-                        st.warning(f"📉 Baixa Correlação ({correl:.2f}): produção mais oscilante, pouco dependente dos minutos.")
+                        st.plotly_chart(fig_scatter, use_container_width=True)
+
+                        correl = x.corr(y)
+                        if correl > 0.7:
+                            st.success(f"📈 Alta Correlação ({correl:.2f}): produção muito dependente dos minutos.")
+                        elif correl > 0.4:
+                            st.info(f"📊 Correlação Moderada ({correl:.2f}): minutos ajudam, mas não explicam tudo.")
+                        else:
+                            st.warning(f"📉 Baixa Correlação ({correl:.2f}): produção mais oscilante, pouco dependente dos minutos.")
+                else:
+                    st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
             else:
-                st.info(f"Dados indisponíveis para a métrica {visual_metric}.")
-        else:
-            st.info("Sem histórico suficiente para gerar os gráficos.")
-    
+                st.info("Sem histórico suficiente para gerar os gráficos.")
+        
     # --- ABA DE MERCADO DINÂMICA (FORMATO 22,5 CORRIGIDO) ---
     with market_tab:
-        st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
-        
-        v_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
-        active_line = float(v_ctx['line_value'])
-        
-        current_opp = opp_abbr
-        for abbr, info in NBA_TEAM_COLORS.items():
-            team_info_name = str(info.get('name', '')).upper()
-            if team_info_name in str(current_opp).upper():
-                current_opp = abbr
-                break
-        
-        log = get_player_log(int(row["PLAYER_ID"]), season)
-        
-        if not log.empty:
-            log['PRA'] = log['PTS'] + log['REB'] + log['AST']
-            log['3PM'] = log.get('FG3M', 0)
-            log['3PA'] = log.get('FG3A', 0)
-            
-            h2h_log = log[log['MATCHUP'].str.contains(current_opp, case=False, na=False)].copy()
-            
-            if not h2h_log.empty:
-                target_col = visual_metric
-                h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', target_col]].copy()
-                h2h_display['Data'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
-                h2h_display['Linha'] = active_line
-                
-                real_col_name = f'Real ({visual_metric})'
-                h2h_display = h2h_display.rename(columns={
-                    'MATCHUP': 'Confronto',
-                    'WL': 'Res',
-                    'MIN': 'Min',
-                    target_col: real_col_name
-                })
-                
-                final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', 'Linha', real_col_name]]
-                
-                def style_hit_miss(val):
-                    try:
-                        num = float(val)
-                        if num >= active_line:
-                            return 'background-color: rgba(34,197,94,0.15); color: #86efac; font-weight: bold; border-left: 4px solid #22c55e;'
-                        else:
-                            return 'background-color: rgba(239,68,68,0.15); color: #fca5a5; font-weight: bold; border-left: 4px solid #ef4444;'
-                    except:
-                        return ''
-
-                st.write(f"Comparando histórico com a linha atual: **{active_line:.1f}** ({v_ctx['line_source']})")
-                
-                # CORREÇÃO DA VÍRGULA E CASAS DECIMAIS:
-                # O format abaixo força 1 casa decimal e troca o ponto por vírgula
-                styled_df = final_table.style.format({
-                    'Linha': lambda x: f"{x:.1f}".replace('.', ','),
-                    real_col_name: lambda x: f"{x:.1f}".replace('.', ',')
-                }).map(style_hit_miss, subset=[real_col_name])
-                
-                st.dataframe(styled_df, use_container_width=True, hide_index=True)
-                
-                hits = (h2h_log[target_col] >= active_line).sum()
-                total = len(h2h_log)
-                pct = int((hits / total) * 100) if total > 0 else 0
-                
-                st.markdown(f"""
-                    <div style="padding: 15px; background: rgba(15,23,42,0.6); border-radius: 10px; border-left: 5px solid #38bdf8; margin-top: 10px;">
-                        🎯 <b>Taxa de Acerto vs {current_opp}:</b> {hits}/{total} ({pct}%) 
-                        <br><small style="opacity: 0.8;">Jogador cumpriu a linha de <b>{active_line:.1f} {visual_metric}</b> em {hits} dos últimos {total} jogos contra este time.</small>
-                    </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
+        if modern_focus:
+            st.markdown(
+                '<div class="nova-section-lead">Histórico contra o adversário</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                '<div class="nova-market-hint"><strong>Mercado e H2H</strong> · '
+                'Compare o jogador contra este adversário. Dados de OVER/UNDER '
+                'exigem uma linha ativa; ausência de linha não significa recomendação.</div>',
+                unsafe_allow_html=True,
+            )
         else:
-            st.error("Erro ao carregar log do jogador.")            
+            st.markdown(f"### ⚔️ Histórico de Confronto (H2H) — Foco em {visual_metric}")
+
+        if not has_active_line:
+            st.info(
+                "Dados insuficientes para comparar o histórico H2H contra uma linha. "
+                "Informe uma linha manual individual ou use uma linha de mercado."
+            )
+        else:
+            
+            v_ctx = get_line_context(row, visual_metric, line_value, use_market_line)
+            active_line = float(v_ctx['line_value'])
+            
+            current_opp = opp_abbr
+            for abbr, info in NBA_TEAM_COLORS.items():
+                team_info_name = str(info.get('name', '')).upper()
+                if team_info_name in str(current_opp).upper():
+                    current_opp = abbr
+                    break
+            
+            log = get_player_log(int(row["PLAYER_ID"]), season)
+            
+            if not log.empty:
+                log['PRA'] = log['PTS'] + log['REB'] + log['AST']
+                log['3PM'] = log.get('FG3M', 0)
+                log['3PA'] = log.get('FG3A', 0)
+                
+                h2h_log = log[log['MATCHUP'].str.contains(current_opp, case=False, na=False)].copy()
+                
+                if not h2h_log.empty:
+                    target_col = visual_metric
+                    h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', target_col]].copy()
+                    h2h_display['Data'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
+                    h2h_display['Linha'] = active_line
+                    
+                    real_col_name = f'Real ({visual_metric})'
+                    h2h_display = h2h_display.rename(columns={
+                        'MATCHUP': 'Confronto',
+                        'WL': 'Res',
+                        'MIN': 'Min',
+                        target_col: real_col_name
+                    })
+                    
+                    final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', 'Linha', real_col_name]]
+                    
+                    def style_hit_miss(val):
+                        try:
+                            num = float(val)
+                            if num >= active_line:
+                                return 'background-color: rgba(34,197,94,0.15); color: #86efac; font-weight: bold; border-left: 4px solid #22c55e;'
+                            else:
+                                return 'background-color: rgba(239,68,68,0.15); color: #fca5a5; font-weight: bold; border-left: 4px solid #ef4444;'
+                        except:
+                            return ''
+
+                    st.write(f"Comparando histórico com a linha atual: **{active_line:.1f}** ({v_ctx['line_source']})")
+                    
+                    # CORREÇÃO DA VÍRGULA E CASAS DECIMAIS:
+                    # O format abaixo força 1 casa decimal e troca o ponto por vírgula
+                    styled_df = final_table.style.format({
+                        'Linha': lambda x: f"{x:.1f}".replace('.', ','),
+                        real_col_name: lambda x: f"{x:.1f}".replace('.', ',')
+                    }).map(style_hit_miss, subset=[real_col_name])
+                    
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                    
+                    hits = (h2h_log[target_col] >= active_line).sum()
+                    total = len(h2h_log)
+                    pct = int((hits / total) * 100) if total > 0 else 0
+                    
+                    st.markdown(f"""
+                        <div style="padding: 15px; background: rgba(15,23,42,0.6); border-radius: 10px; border-left: 5px solid #38bdf8; margin-top: 10px;">
+                            🎯 <b>Taxa de Acerto vs {current_opp}:</b> {hits}/{total} ({pct}%) 
+                            <br><small style="opacity: 0.8;">Jogador cumpriu a linha de <b>{active_line:.1f} {visual_metric}</b> em {hits} dos últimos {total} jogos contra este time.</small>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
+            else:
+                st.error("Erro ao carregar log do jogador.")            
 def render_team_section_v2(
     team_name: str,
     team_df: pd.DataFrame,
@@ -691,7 +854,8 @@ def render_team_section_v2(
     line_value: float,
     use_market_line: bool,
     cards_per_row: int,
-    opp_abbr
+    opp_abbr,
+    season_scope: str = "Regular Season",
 ) -> None:
     if team_df.empty:
         st.warning(f"Não encontrei dados para {team_name}.")
@@ -703,7 +867,14 @@ def render_team_section_v2(
         st.info("Nenhum jogador desse time passou pelos filtros atuais.")
         return
 
-    st.markdown(f"### {team_name}")
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        st.markdown(
+            '<div class="nova-section-head"><h3>' + escape_html(team_name)
+            + '</h3><small>Elenco • projeções • leitura rápida</small></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(f"### {team_name}")
 
     line_info_text = (
         f"Linha ativa: {line_metric} • mercado por jogador (BetMGM quando houver)"
@@ -752,66 +923,68 @@ def render_team_section_v2(
             season,
             chart_mode,
             opp_abbr,
+            season_scope=season_scope,
         )
 
     st.divider()
-    show_injury = st.toggle(f"🏥 Carregar Status Oficial — {team_name}", key=f"ir_toggle_{team_name}")
+    show_injury = st.toggle(
+        f"🏥 Ver lesões NBA e rotação ESPN — {team_name}",
+        key=f"ir_toggle_{team_name}",
+    )
 
     if show_injury:
-        with st.spinner("Buscando PDF oficial da NBA..."):
-            injury_df = fetch_latest_injury_report_df()
-            team_id = next((tid for tid, t in TEAM_LOOKUP.items() if t.get("full_name") == team_name), 0)
-            
-            enriched_team_df = merge_injury_report(
-                team_df=team_df,
-                injury_df=injury_df,
-                team_name=team_name,
-                team_id=team_id
-            )
-            
-            ir_tab, lineup_tab = st.tabs(["Status Oficial", "Rotação Atualizada"])
-            with ir_tab: render_injury_report_tab(enriched_team_df, team_name)
-            with lineup_tab: render_lineup_report_tab(enriched_team_df, team_name)
+        # Reuse the SAME injury data that influenced projections. Refetching
+        # ESPN here previously overwrote the official status on this tab.
+        enriched_team_df = team_df.copy()
+        ir_tab, lineup_tab = st.tabs(["Lesões NBA / ESPN", "Rotação ESPN"])
+        with ir_tab:
+            render_injury_report_tab(enriched_team_df, team_name)
+        with lineup_tab:
+            render_lineup_report_tab(enriched_team_df, team_name)
 
 
 def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
-        '<div class="section-note">Status oficial do injury report da NBA para o elenco do time.</div>',
+        '<div class="section-note">Fonte prioritária: boletim oficial NBA em PDF; '
+        'ESPN é utilizada apenas como fonte complementar. Out/Doubtful são '
+        'indisponíveis; Questionable não é exclusão automática.</div>',
         unsafe_allow_html=True,
     )
 
     if "INJ_STATUS" not in team_df.columns:
-        st.info("Injury report ainda não integrado nesta execução.")
+        st.info("Dados de lesões ESPN ainda não integrados nesta execução.")
         return
 
-    report_url = ""
-    if "INJ_REPORT_URL" in team_df.columns:
-        valid_urls = team_df["INJ_REPORT_URL"].dropna().astype(str)
-        valid_urls = valid_urls[valid_urls.str.strip() != ""]
-        if not valid_urls.empty:
-            report_url = valid_urls.iloc[0]
-
-    report_meta = parse_injury_report_timestamp_from_url(report_url)
-
-    top_cols = st.columns([1.4, 1.2, 1.4])
-    with top_cols[0]:
-        st.caption(f"PDF oficial: {report_meta['report_label_et']}")
-    with top_cols[1]:
-        st.caption(f"Brasília: {report_meta['report_label_brt']}")
-    with top_cols[2]:
-        if report_url:
-            st.caption("Fonte oficial carregada")
-        else:
-            st.caption("Fonte oficial não identificada")
+    source = str(team_df.get("INJ_SOURCE", pd.Series(["Não confirmado"])).iloc[0])
+    report_status = str(team_df.get(
+        "TEAM_REPORT_STATUS", pd.Series(["Boletim indisponível"])
+    ).iloc[0])
+    report_url = str(team_df.get("INJ_REPORT_URL", pd.Series([""])).iloc[0])
+    if "NBA Official PDF" in source and report_url.startswith("https://"):
+        stamp = parse_injury_report_timestamp_from_url(report_url)
+        st.caption(
+            f"Fonte: NBA Official PDF • Boletim: {stamp['report_label_brt']} "
+            f"({stamp['report_label_et']})"
+        )
+        st.markdown(f"[Abrir PDF oficial da NBA]({report_url})")
+    else:
+        st.caption(f"Fonte: {source} • Situação: {report_status}")
+    st.caption(
+        "Available significa apenas que o jogador não consta dos lesionados "
+        "no relatório utilizável; não é confirmação de escalação."
+    )
 
     if "INJ_MATCHUP_FOUND" in team_df.columns and not bool(team_df["INJ_MATCHUP_FOUND"].any()):
-        st.warning("Não encontrei linhas do injury report oficial para este matchup. O app não deve assumir disponibilidade oficial aqui.")
+        st.warning(
+            f"Não há boletim confirmado para este time neste confronto "
+            f"({report_status}). O app não assumirá que o elenco está disponível."
+        )
 
     report_df = team_df[["PLAYER", "INJ_STATUS", "INJ_REASON"]].copy()
     report_df = report_df.rename(
         columns={
             "PLAYER": "Jogador",
-            "INJ_STATUS": "Status oficial",
+            "INJ_STATUS": "Status de lesão",
             "INJ_REASON": "Motivo",
         }
     )
@@ -827,7 +1000,9 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
 
 def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
-        '<div class="section-note">Estrutura de rotação do time já filtrada por indisponibilidade oficial quando o injury report estiver carregado.</div>',
+        '<div class="section-note">Rotação projetada pelo depth chart da ESPN. '
+        'Depth 1 em cada posição é tratado como Titular projetado; isso não equivale a '
+        'lineup confirmado. O status visual não adiciona bônus artificial aos minutos.</div>',
         unsafe_allow_html=True,
     )
 
@@ -835,90 +1010,128 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     if "IS_UNAVAILABLE" in lineup_df.columns:
         lineup_df = lineup_df[~lineup_df["IS_UNAVAILABLE"]].copy()
 
-    starters = lineup_df[lineup_df["ROLE"] == "Titular provável"].copy()
-    bench = lineup_df[lineup_df["ROLE"] != "Titular provável"].copy()
+    starter_roles = {
+        "Titular confirmado",
+        "Titular projetado",
+        "Estimativa por minutos",
+    }
+    starters = lineup_df[lineup_df["ROLE"].isin(starter_roles)].copy()
+    rotation = lineup_df[~lineup_df["ROLE"].isin(starter_roles)].copy()
+
+    confirmed_count = int((lineup_df["ROLE"] == "Titular confirmado").sum())
+    projected_count = int((lineup_df["ROLE"] == "Titular projetado").sum())
 
     top_cols = st.columns([1.2, 1.2, 1.6])
     with top_cols[0]:
         st.markdown(
             render_single_card(
-                "Titulares prováveis",
+                "Grupo inicial",
                 str(len(starters)),
                 team_name,
-                "Média MIN",
-                format_number(starters["SEASON_MIN"].mean() if not starters.empty else 0),
-                "PRA médio",
-                format_number(starters["SEASON_PRA"].mean() if not starters.empty else 0),
+                "Confirmados",
+                str(confirmed_count),
+                "Projetados",
+                str(projected_count),
             ),
             unsafe_allow_html=True,
         )
     with top_cols[1]:
+        proj_min_mean = pd.to_numeric(
+            lineup_df.get("PROJ_MIN_V1", 0.0),
+            errors="coerce",
+        ).mean()
         st.markdown(
             render_single_card(
-                "Reservas",
-                str(len(bench)),
+                "Rotação",
+                str(len(rotation)),
                 team_name,
-                "Média MIN",
-                format_number(bench["SEASON_MIN"].mean() if not bench.empty else 0),
-                "PRA médio",
-                format_number(bench["SEASON_PRA"].mean() if not bench.empty else 0),
+                "Proj MIN média",
+                format_number(proj_min_mean),
+                "Fonte",
+                "ESPN / interno",
             ),
             unsafe_allow_html=True,
         )
     with top_cols[2]:
-        st.info("Jogadores Out/Doubtful saem automaticamente da leitura quando o injury report oficial estiver carregado.")
+        st.info(
+            "Sem lineup oficial, o Top 5 por minutos aparece apenas como "
+            "'Estimativa por minutos'. Ele não recebe bônus na projeção."
+        )
 
-    st.markdown("#### Provável escalação")
+    view_cols = [
+        "PLAYER",
+        "POSITION",
+        "ROLE",
+        "PROJ_MIN_V1",
+        "MINUTES_SOURCE",
+        "SAMPLE_STATUS",
+        "SEASON_GP",
+        "SEASON_MIN",
+        "L10_MIN_MED",
+        "INJ_STATUS",
+    ]
+
+    available_cols = [col for col in view_cols if col in lineup_df.columns]
+
+    st.markdown("#### Grupo inicial / estimado")
     starter_view = (
-        starters[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"]].copy()
+        starters[[col for col in available_cols if col in starters.columns]].copy()
         if not starters.empty
-        else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"])
+        else pd.DataFrame(columns=available_cols)
     )
     starter_view = starter_view.rename(
         columns={
             "PLAYER": "Jogador",
             "POSITION": "Pos",
-            "SEASON_MIN": "MIN",
-            "SEASON_PRA": "PRA Temp",
-            "L10_PRA": "PRA L10",
-            "TREND": "Trend",
+            "ROLE": "Status lineup",
+            "PROJ_MIN_V1": "MIN proj",
+            "MINUTES_SOURCE": "Fonte MIN",
+            "SAMPLE_STATUS": "Amostra",
+            "SEASON_GP": "GP 26/27",
+            "SEASON_MIN": "MIN temp",
+            "L10_MIN_MED": "Mediana MIN L10",
             "INJ_STATUS": "Status",
         }
     )
-    st.dataframe(style_table(starter_view, quick_view=True), use_container_width=True)
+    st.dataframe(starter_view, use_container_width=True, hide_index=True)
 
     st.markdown("#### Rotação / banco")
-    bench_view = (
-        bench[["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"]].copy()
-        if not bench.empty
-        else pd.DataFrame(columns=["PLAYER", "POSITION", "SEASON_MIN", "SEASON_PRA", "L10_PRA", "TREND", "INJ_STATUS"])
+    rotation_view = (
+        rotation[[col for col in available_cols if col in rotation.columns]].copy()
+        if not rotation.empty
+        else pd.DataFrame(columns=available_cols)
     )
-    bench_view = bench_view.rename(
+    rotation_view = rotation_view.rename(
         columns={
             "PLAYER": "Jogador",
             "POSITION": "Pos",
-            "SEASON_MIN": "MIN",
-            "SEASON_PRA": "PRA Temp",
-            "L10_PRA": "PRA L10",
-            "TREND": "Trend",
+            "ROLE": "Status lineup",
+            "PROJ_MIN_V1": "MIN proj",
+            "MINUTES_SOURCE": "Fonte MIN",
+            "SAMPLE_STATUS": "Amostra",
+            "SEASON_GP": "GP 26/27",
+            "SEASON_MIN": "MIN temp",
+            "L10_MIN_MED": "Mediana MIN L10",
             "INJ_STATUS": "Status",
         }
     )
-    st.dataframe(style_table(bench_view, quick_view=True), use_container_width=True)
+    st.dataframe(rotation_view, use_container_width=True, hide_index=True)
+
 
 def get_team_logo_url(team_id: int) -> str:
     return TEAM_LOGO_URL.format(team_id=team_id)
 
 
 def get_player_headshot_url(player_id: int) -> str:
-    return PLAYER_HEADSHOT_URL.format(player_id=player_id)
+    return f"https://a.espncdn.com/i/headshots/nba/players/full/{int(player_id)}.png"
 
 
 def format_number(value, decimals: int = 1) -> str:
     try:
-        return f"{float(value):.{decimals}f}"
+        number = float(value)
+        return f"{number:.{decimals}f}" if np.isfinite(number) else "—"
     except (TypeError, ValueError):
-        return "-"
+        return "—"
 
 
 def format_signed_number(value, decimals: int = 1) -> str:
@@ -966,8 +1179,10 @@ def style_trend(val) -> str:
 def style_role(val) -> str:
     if "Titular" in str(val):
         return "background-color: rgba(139,92,246,0.12); color: #f3e8ff; font-weight: 700;"
-    if "Reserva" in str(val):
+    if "Rotação" in str(val):
         return "background-color: rgba(148,163,184,0.08); color: #cbd5e1; font-weight: 600;"
+    if "Estimativa por minutos" in str(val):
+        return "background-color: rgba(245,158,11,0.10); color: #fde68a; font-weight: 700;"
     return ""
 
 
@@ -1096,6 +1311,9 @@ def style_table(df: pd.DataFrame, quick_view: bool) -> Styler:
     return styler
     
 def render_matchup_header(game_row: pd.Series) -> None:
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        render_matchup_header_refresh(game_row)
+        return
     away_team_id = int(game_row["VISITOR_TEAM_ID"])
     home_team_id = int(game_row["HOME_TEAM_ID"])
 
@@ -1109,8 +1327,10 @@ def render_matchup_header(game_row: pd.Series) -> None:
 
     with c2:
         st.markdown('<div class="center-vs">VS</div>', unsafe_allow_html=True)
-        # CONVERSÃO DE HORÁRIO AQUI DENTRO:
-        status_display = get_game_datetime_brasilia(game_row["GAME_STATUS_TEXT"])
+        status_display = get_game_datetime_brasilia(
+            game_row["GAME_STATUS_TEXT"],
+            game_row.get("GAME_TIME_BRT", ""),
+        )
         st.markdown(
             f'<div style="text-align:center; margin-top:0.7rem;"><span class="status-chip">{status_display}</span></div>',
             unsafe_allow_html=True,
@@ -1162,17 +1382,19 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
             stat3_label, stat3_value = "Match", row["MATCHUP_LABEL"]
             stat3_class = "ranking-good" if row["MATCHUP_LABEL"] == "Favorável" else ("ranking-bad" if row["MATCHUP_LABEL"] == "Difícil" else "")
         elif mode == "edge":
-            stat1_label, stat1_value = "Edge", format_signed_number(row["RANK_EDGE"])
+            stat1_label = str(row.get("RANK_DIRECTION", "Edge"))
+            stat1_value = format_signed_number(row["RANK_EDGE"])
             stat2_label, stat2_value = "Linha", row["RANK_LINE_HTML"]
             stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
         else:
-            stat1_label, stat1_value = "Hit", row["RANK_HIT_HTML"]
+            stat1_label = f"Hit {row.get('RANK_DIRECTION', '')}".strip()
+            stat1_value = row.get("RANK_DIR_HIT_HTML", "-")
             stat2_label, stat2_value = "Osc", row["OSC_CLASS"]
             stat3_label, stat3_value = "Proj", format_number(row["RANK_PROJ"])
             stat3_class = ""
 
-        stat1_class = "ranking-good" if mode == "edge" and row["RANK_EDGE"] > 0.75 else ("ranking-bad" if mode == "edge" and row["RANK_EDGE"] < -0.75 else "")
+        stat1_class = "ranking-good" if mode == "edge" and abs(float(row["RANK_EDGE"])) > 0.75 else ""
         stat2_class = "ranking-good" if mode == "consistency" and row["OSC_CLASS"] == "Baixa" else ("ranking-bad" if mode == "consistency" and row["OSC_CLASS"] == "Alta" else "")
 
         row_html = (
@@ -1187,6 +1409,364 @@ def render_compact_ranking_html(rank_df: pd.DataFrame, mode: str) -> str:
         rows_html.append(row_html)
 
     return f'<div class="ranking-shell">{"".join(rows_html)}</div>'
+
+
+def _tip_ratio_parts(text: str) -> tuple[int, int, float]:
+    try:
+        hit, sample = str(text).split("/")
+        hit_n = int(float(hit))
+        sample_n = int(float(sample))
+        if sample_n <= 0:
+            return 0, 0, 0.0
+        return hit_n, sample_n, hit_n / sample_n
+    except Exception:
+        return 0, 0, 0.0
+
+
+def _tip_signal_alignment(label: str, direction: str) -> int:
+    """
+    +1 = o contexto ajuda a direção da tip
+     0 = neutro
+    -1 = o contexto contraria a direção
+    """
+    label = str(label or "Neutro")
+    favorable = label in {"Favorável", "Muito favorável"}
+    difficult = label in {"Difícil", "Muito difícil"}
+
+    if direction == "OVER":
+        if favorable:
+            return 1
+        if difficult:
+            return -1
+    else:
+        if difficult:
+            return 1
+        if favorable:
+            return -1
+    return 0
+
+
+def _tip_form_alignment(form_signal: str, direction: str) -> int:
+    form_signal = str(form_signal or "")
+    if direction == "OVER":
+        if "↗" in form_signal:
+            return 1
+        if "↘" in form_signal:
+            return -1
+    else:
+        if "↘" in form_signal:
+            return 1
+        if "↗" in form_signal:
+            return -1
+    return 0
+
+
+def _build_tip_candidate(
+    row: pd.Series,
+    metric: str,
+    ctx: dict,
+    min_minutes: int,
+) -> dict | None:
+    if not ctx.get("has_active_line", False):
+        return None
+
+    line = pd.to_numeric(ctx.get("line_value"), errors="coerce")
+    projection = pd.to_numeric(ctx.get("projection"), errors="coerce")
+    if pd.isna(line) or pd.isna(projection) or float(line) <= 0 or float(projection) <= 0:
+        return None
+
+    inj_status = str(row.get("INJ_STATUS", "Available") or "Available")
+    if inj_status in {"Out", "Doubtful"}:
+        return None
+
+    edge = float(projection) - float(line)
+    direction = "OVER" if edge >= 0 else "UNDER"
+    hit_text = (
+        ctx.get("hit_l10", "-")
+        if direction == "OVER"
+        else ctx.get("under_l10", "-")
+    )
+    hit_count, sample_count, hit_ratio = _tip_ratio_parts(hit_text)
+    if sample_count < 5:
+        return None
+
+    edge_abs = abs(edge)
+    relative_edge = edge_abs / max(float(line), 0.5)
+
+    osc_value = pd.to_numeric(row.get(f"OSC_{metric}_L10", 0.0), errors="coerce")
+    osc_value = float(osc_value) if pd.notna(osc_value) else 0.0
+    osc_floor = {
+        "PTS": 2.0,
+        "REB": 1.0,
+        "AST": 0.8,
+        "PRA": 2.5,
+        "3PM": 0.45,
+        "FGA": 1.5,
+        "3PA": 1.0,
+    }.get(metric, 1.0)
+    edge_vs_osc = edge_abs / max(osc_value, osc_floor)
+
+    osc_class = str(row.get(f"OSC_{metric}_CLASS", row.get("OSC_CLASS", "-")))
+    matchup_label = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
+    form_signal = str(
+        row.get(f"FORM_{metric}_SIGNAL", row.get("FORM_SIGNAL", "→ Estável"))
+    )
+    matchup_alignment = _tip_signal_alignment(matchup_label, direction)
+    form_alignment = _tip_form_alignment(form_signal, direction)
+
+    proj_min = pd.to_numeric(row.get("PROJ_MIN_V1", 0.0), errors="coerce")
+    proj_min = float(proj_min) if pd.notna(proj_min) else 0.0
+    min_std = pd.to_numeric(row.get("MIN_STD_L10", 0.0), errors="coerce")
+    min_std = float(min_std) if pd.notna(min_std) else 0.0
+    minutes_source = str(row.get("MINUTES_SOURCE", "Modelo interno") or "Modelo interno")
+    lineup_status = str(row.get("ROLE", "Rotação") or "Rotação")
+
+    if proj_min < max(float(min_minutes), 12.0):
+        return None
+
+    # Score interno apenas para ordenar candidatos. Ele nunca é exibido como
+    # porcentagem/probabilidade ao usuário.
+    score = 0.0
+    score += min(relative_edge / 0.025, 4.0) * 1.15
+    score += min(edge_vs_osc, 2.0) * 1.25
+    score += hit_ratio * 4.0
+    score += matchup_alignment * 0.8
+    score += form_alignment * 0.6
+
+    if osc_class == "Baixa":
+        score += 0.7
+    elif osc_class == "Alta":
+        score -= 0.8
+
+    if min_std <= 3.5:
+        score += 0.5
+    elif min_std >= 6.5:
+        score -= 0.5
+
+    if lineup_status == "Titular confirmado":
+        score += 0.4
+    elif lineup_status == "Titular projetado":
+        score += 0.2
+
+    if inj_status == "Questionable":
+        score -= 1.5
+
+    conflict_count = int(matchup_alignment < 0) + int(form_alignment < 0) + int(osc_class == "Alta")
+
+    very_strong = (
+        sample_count >= 8
+        and hit_ratio >= 0.80
+        and relative_edge >= 0.06
+        and edge_vs_osc >= 0.45
+        and osc_class != "Alta"
+        and matchup_alignment >= 0
+        and form_alignment >= 0
+        and inj_status != "Questionable"
+        and (min_std <= 6.0 or minutes_source != "Modelo interno")
+        and score >= 9.0
+    )
+
+    strong = (
+        sample_count >= 6
+        and hit_ratio >= 0.70
+        and relative_edge >= 0.04
+        and edge_vs_osc >= 0.30
+        and conflict_count <= 1
+        and inj_status != "Questionable"
+        and score >= 7.0
+    )
+
+    medium = (
+        sample_count >= 5
+        and hit_ratio >= 0.60
+        and relative_edge >= 0.025
+        and edge_vs_osc >= 0.20
+        and score >= 5.0
+    )
+
+    if very_strong:
+        strength = "🔥 DESTAQUE MUITO FORTE"
+        tier = 3
+    elif strong:
+        strength = "🟢 DESTAQUE FORTE"
+        tier = 2
+    elif medium:
+        strength = "🟡 DESTAQUE MÉDIO"
+        tier = 1
+    else:
+        return None
+
+    return {
+        "PLAYER": str(row.get("PLAYER", "Jogador")),
+        "TEAM_NAME": str(row.get("TEAM_NAME", "")),
+        "METRIC": metric,
+        "DIRECTION": direction,
+        "LINE": float(line),
+        "PROJECTION": float(projection),
+        "EDGE": edge,
+        "HIT_TEXT": hit_text,
+        "HIT_COUNT": hit_count,
+        "SAMPLE_COUNT": sample_count,
+        "HIT_RATIO": hit_ratio,
+        "OSC_CLASS": osc_class,
+        "MATCHUP": matchup_label,
+        "FORM": form_signal,
+        "PROJ_MIN": proj_min,
+        "MINUTES_SOURCE": minutes_source,
+        "LINEUP_STATUS": lineup_status,
+        "LINE_SOURCE": str(ctx.get("line_source", "Linha")),
+        "STRENGTH": strength,
+        "TIER": tier,
+        "_SCORE": score,
+        "_REL_EDGE": relative_edge,
+        "_EDGE_VS_OSC": edge_vs_osc,
+    }
+
+
+def _render_tip_card(title: str, tip: dict | None) -> None:
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        render_tip_card_refresh(title, tip)
+        return
+
+    with st.container(border=True):
+        st.markdown(f"#### {title}")
+
+        if tip is None:
+            st.info("Nenhuma outra linha atingiu os critérios mínimos desta faixa.")
+            return
+
+        st.markdown(f"### {tip['PLAYER']} — {tip['DIRECTION']} {format_number(tip['LINE'])} {tip['METRIC']}")
+        st.markdown(f"**{tip['STRENGTH']}**")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Projeção", format_number(tip["PROJECTION"]))
+        c2.metric("Edge", format_signed_number(tip["EDGE"]))
+        c3.metric(f"L10 {tip['DIRECTION']}", tip["HIT_TEXT"])
+        c4.metric("MIN proj.", format_number(tip["PROJ_MIN"]))
+
+        matchup_text = str(tip["MATCHUP"]).lower()
+        osc_text = str(tip["OSC_CLASS"]).lower()
+        st.caption(
+            f"{tip['TEAM_NAME']} • matchup {matchup_text} • oscilação {osc_text} • "
+            f"{tip['LINEUP_STATUS']} • minutos: {tip['MINUTES_SOURCE']} • "
+            f"linha: {tip['LINE_SOURCE']}"
+        )
+
+
+def render_best_game_tips(
+    away_df: pd.DataFrame,
+    home_df: pd.DataFrame,
+    min_games: int,
+    min_minutes: int,
+    line_metric: str,
+    line_value: float | None,
+    use_market_line: bool,
+) -> None:
+    """
+    Mostra no máximo duas oportunidades do confronto.
+
+    Política:
+    - Muito Forte/Forte têm prioridade absoluta.
+    - Destaque Médio só aparece quando NÃO existe nenhuma tip Muito Forte/Forte.
+    - O score interno serve apenas para ordenar; não representa probabilidade.
+    """
+    combined = build_summary_cards_data(
+        away_df,
+        home_df,
+        min_games,
+        min_minutes,
+        "Todos",
+    )
+
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        st.markdown(
+            '<div class="nova-section-head"><h3>Melhores linhas do confronto</h3>'
+            '<small>Sinais qualificados · sem probabilidade artificial</small></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="nova-workspace-sub">Destaques baseados em Edge, '
+            'forma, consistência, matchup e minutos. '
+            'Apenas jogadores que atendem aos critérios aparecem.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.subheader("Melhores linhas do confronto")
+        st.caption(
+            "Classificação baseada na convergência entre projeção, Edge relativo, "
+            "histórico direcional, oscilação, matchup, forma e estabilidade de minutos. "
+            "Os selos não representam probabilidade matemática de acerto."
+        )
+
+    if combined.empty:
+        message = "Ainda não há jogadores com amostra suficiente para avaliar as melhores linhas."
+        if st.session_state.get("dashboard_visual_mode") == "Renovado":
+            st.markdown(
+                f'<div class="nova-empty-panel">{escape_html(message)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info(message)
+        return
+
+    metrics = list(LINE_METRIC_OPTIONS) if use_market_line else [line_metric]
+    candidates = []
+
+    for _, row in combined.iterrows():
+        for metric in metrics:
+            ctx = get_line_context(
+                row,
+                metric,
+                line_value if metric == line_metric else None,
+                use_market_line=use_market_line,
+            )
+            candidate = _build_tip_candidate(
+                row,
+                metric,
+                ctx,
+                min_minutes=min_minutes,
+            )
+            if candidate is not None:
+                candidates.append(candidate)
+
+    if not candidates:
+        message = (
+            "Nenhuma linha disponível atingiu os critérios mínimos para destaque neste confronto."
+            if use_market_line
+            else f"Preencha linhas individuais de {line_metric} para comparar as melhores oportunidades."
+        )
+        if st.session_state.get("dashboard_visual_mode") == "Renovado":
+            st.markdown(
+                f'<div class="nova-empty-panel">{escape_html(message)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info(message)
+        return
+
+    high_pool = [c for c in candidates if c["TIER"] >= 2]
+    medium_pool = [c for c in candidates if c["TIER"] == 1]
+
+    pool = high_pool if high_pool else medium_pool
+    pool = sorted(
+        pool,
+        key=lambda item: (
+            item["TIER"],
+            item["_SCORE"],
+            item["HIT_RATIO"],
+            item["_REL_EDGE"],
+        ),
+        reverse=True,
+    )
+
+    selected = pool[:2]
+
+    cols = st.columns(2)
+    titles = ["🔥 MELHOR LINHA DO CONFRONTO", "SEGUNDA MELHOR LINHA DO CONFRONTO"]
+    for idx_col, col in enumerate(cols):
+        with col:
+            tip = selected[idx_col] if idx_col < len(selected) else None
+            _render_tip_card(titles[idx_col], tip)
 
 
 def render_game_rankings(
@@ -1204,6 +1784,7 @@ def render_game_rankings(
         return
 
     projection_col = get_metric_projection_column(line_metric)
+    contextual_projection_col = f"PROJ_{line_metric}_V1"
 
     def parse_ratio_text(text: str) -> float:
         try:
@@ -1215,7 +1796,15 @@ def render_game_rankings(
 
     rank_df = combined.copy()
 
-    rank_df["RANK_PROJ"] = pd.to_numeric(rank_df[projection_col], errors="coerce").fillna(0.0)
+    projection_source_col = (
+        contextual_projection_col
+        if contextual_projection_col in rank_df.columns
+        else projection_col
+    )
+    rank_df["RANK_PROJ"] = pd.to_numeric(
+        rank_df[projection_source_col],
+        errors="coerce",
+    ).fillna(0.0)
 
     rank_df["LINE_CONTEXT"] = rank_df.apply(
         lambda row: get_line_context(
@@ -1227,12 +1816,51 @@ def render_game_rankings(
         axis=1,
     )
 
-    rank_df["RANK_LINE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("line_value", 0.0)))
-    rank_df["RANK_EDGE"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: float(ctx.get("edge", 0.0)))
-    rank_df["RANK_HIT_TEXT"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10", "-"))
-    rank_df["RANK_HIT_HTML"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: ctx.get("hit_l10_html", "-"))
-    rank_df["RANK_LINE_HTML"] = rank_df["LINE_CONTEXT"].apply(lambda ctx: f'<span title="{ctx.get("tooltip", "")}" style="cursor:help;">{format_number(ctx.get("line_value", 0.0))} {ctx.get("icon", "")}</span>')
+    rank_df["RANK_HAS_LINE"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: bool(ctx.get("has_active_line", False))
+    )
+    rank_df["RANK_LINE"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: pd.to_numeric(ctx.get("line_value"), errors="coerce")
+    )
+    rank_df["RANK_EDGE"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: float(ctx.get("edge", 0.0))
+    )
+    rank_df["RANK_DIRECTION"] = rank_df["RANK_EDGE"].apply(
+        lambda edge: "OVER" if float(edge) >= 0 else "UNDER"
+    )
+    rank_df["RANK_HIT_TEXT"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: ctx.get("hit_l10", "-")
+    )
+    rank_df["RANK_HIT_HTML"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: ctx.get("hit_l10_html", "-")
+    )
+    rank_df["RANK_DIR_HIT_TEXT"] = rank_df.apply(
+        lambda row: (
+            row["LINE_CONTEXT"].get("hit_l10", "-")
+            if row["RANK_DIRECTION"] == "OVER"
+            else row["LINE_CONTEXT"].get("under_l10", "-")
+        ),
+        axis=1,
+    )
+    rank_df["RANK_DIR_HIT_HTML"] = rank_df.apply(
+        lambda row: (
+            row["LINE_CONTEXT"].get("hit_l10_html", "-")
+            if row["RANK_DIRECTION"] == "OVER"
+            else row["LINE_CONTEXT"].get("under_l10_html", "-")
+        ),
+        axis=1,
+    )
+    rank_df["RANK_LINE_HTML"] = rank_df["LINE_CONTEXT"].apply(
+        lambda ctx: (
+            f'<span title="{ctx.get("tooltip", "")}" style="cursor:help;">'
+            f'{format_number(ctx.get("line_value"))} {ctx.get("icon", "")}</span>'
+            if ctx.get("has_active_line", False)
+            else "-"
+        )
+    )
     rank_df["RANK_HIT_RATE"] = rank_df["RANK_HIT_TEXT"].apply(parse_ratio_text)
+    rank_df["RANK_DIR_HIT_RATE"] = rank_df["RANK_DIR_HIT_TEXT"].apply(parse_ratio_text)
+    rank_df["RANK_EDGE_ABS"] = rank_df["RANK_EDGE"].abs()
 
     if "LINE_CONTEXT" in rank_df.columns:
         rank_df = rank_df.drop(columns=["LINE_CONTEXT"])
@@ -1242,18 +1870,35 @@ def render_game_rankings(
         ascending=[False, False],
     ).head(5)
 
-    edge_df = rank_df.sort_values(
-        ["RANK_EDGE", "RANK_HIT_RATE"],
+    line_rank_df = rank_df[rank_df["RANK_HAS_LINE"]].copy()
+
+    edge_df = line_rank_df.sort_values(
+        ["RANK_EDGE_ABS", "RANK_DIR_HIT_RATE"],
         ascending=[False, False],
     ).head(5)
 
-    consistency_df = rank_df.sort_values(
-        ["RANK_HIT_RATE", "OSC_L10", "RANK_PROJ"],
+    consistency_df = line_rank_df.sort_values(
+        ["RANK_DIR_HIT_RATE", "OSC_L10", "RANK_EDGE_ABS"],
         ascending=[False, True, False],
     ).head(5)
 
-    st.subheader(f"Ranking do confronto — {line_metric}")
-    st.caption("Bloco compacto para leitura rápida, usando BetMGM quando houver linha disponível.")
+    if st.session_state.get("dashboard_visual_mode") == "Renovado":
+        st.markdown(
+            f'<div class="nova-section-head"><h3>Ranking do confronto · '
+            f'{escape_html(line_metric)}</h3><small>Top 5 · projeção e consistência</small></div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="nova-workspace-sub">Ordenação por projeção, Edge '
+            'ou frequência direcional. As duas últimas dependem de linha ativa.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.subheader(f"Ranking do confronto — {line_metric}")
+        st.caption(
+            "Edge ordenado pela força absoluta da diferença. "
+            "Consistência considera a direção do sinal: OVER acima da linha e UNDER abaixo da linha."
+        )
 
     tab_proj, tab_edge, tab_cons = st.tabs(["Projeção", "Edge da linha", "Consistência"])
 
@@ -1261,13 +1906,26 @@ def render_game_rankings(
         st.markdown(render_compact_ranking_html(proj_df, mode="projection"), unsafe_allow_html=True)
 
     with tab_edge:
-        st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
+        if edge_df.empty:
+            st.info("Informe uma linha manual individual (ou use uma linha de mercado) para calcular Edge.")
+        else:
+            st.markdown(render_compact_ranking_html(edge_df, mode="edge"), unsafe_allow_html=True)
 
     with tab_cons:
-        st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
+        if consistency_df.empty:
+            st.info("Informe uma linha manual individual (ou use uma linha de mercado) para calcular Consistência.")
+        else:
+            st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
 
-def render_player_chart(player_name: str, player_id: int, season: str, chart_mode: str, visual_metric: str) -> None:
-    log = get_player_log(player_id, season)
+def render_player_chart(
+    player_name: str,
+    player_id: int,
+    season: str,
+    chart_mode: str,
+    visual_metric: str,
+    season_scope: str = "Regular Season",
+) -> None:
+    log = get_player_log(player_id, season, season_scope=season_scope)
     if log.empty:
         st.info("Sem histórico suficiente para esse jogador.")
         return
@@ -1335,6 +1993,21 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
         )
         fig.update_xaxes(title="", type="category", tickangle=0, showgrid=False, tickfont=dict(size=11))
         fig.update_yaxes(title="", showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
+        if st.session_state.get("dashboard_visual_mode") == "Renovado":
+            # Presentation-only override: identical data and axis scales.
+            fig.update_layout(
+                height=335 if chart_mode == "Compacto" else 375,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(15,28,43,0.75)",
+                font=dict(color="#dcebf8"),
+                hoverlabel=dict(bgcolor="#17283d", font=dict(color="#f0f8ff")),
+            )
+            fig.update_traces(
+                marker_color="#54cbb7" if chart_mode == "Compacto" else None,
+                selector=dict(type="bar"),
+            )
+            fig.update_xaxes(showgrid=False, tickfont=dict(color="#b4c6d9"))
+            fig.update_yaxes(showgrid=True, gridcolor="rgba(117,171,186,0.15)")
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L5: {recent_view[visual_metric].mean():.1f}")
     else:
@@ -1369,10 +2042,26 @@ def render_player_chart(player_name: str, player_id: int, season: str, chart_mod
         )
         fig.update_xaxes(title="", type="category", tickangle=0, showgrid=False, tickfont=dict(size=11))
         fig.update_yaxes(title="", showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
+        if st.session_state.get("dashboard_visual_mode") == "Renovado":
+            # Presentation-only override: identical data and axis scales.
+            fig.update_layout(
+                height=335 if chart_mode == "Compacto" else 375,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(15,28,43,0.75)",
+                font=dict(color="#dcebf8"),
+                hoverlabel=dict(bgcolor="#17283d", font=dict(color="#f0f8ff")),
+            )
+            fig.update_traces(
+                marker_color="#54cbb7" if chart_mode == "Compacto" else None,
+                selector=dict(type="bar"),
+            )
+            fig.update_xaxes(showgrid=False, tickfont=dict(color="#b4c6d9"))
+            fig.update_yaxes(showgrid=True, gridcolor="rgba(117,171,186,0.15)")
         st.plotly_chart(fig, use_container_width=True)
         st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L10: {recent_view[visual_metric].mean():.1f}")
 def render_badges(role: str, momentum: str, oscillation: str, matchup: str) -> None:
-    role_class = "badge-starter" if role == "Titular provável" else "badge-bench"
+    starter_roles = {"Titular confirmado", "Titular projetado", "Estimativa por minutos"}
+    role_class = "badge-starter" if role in starter_roles else "badge-bench"
 
     if str(momentum).startswith(("↗", "↑")):
         momentum_class = "badge-good"
@@ -1465,30 +2154,34 @@ def _parse_ratio_text(text: str) -> float:
 
 def _confidence_label_and_score(
     edge: float,
-    hit_ratio: float,
+    directional_hit_ratio: float,
     osc_class: str,
     matchup_label: str,
     form_signal: str,
     inj_status: str,
-) -> tuple[str, int]:
+) -> tuple[str, int, str]:
+    """
+    Pontua a força do sinal na direção da projeção.
+
+    É um score heurístico para ordenar/explicar sinais, não uma probabilidade
+    calibrada de acerto.
+    """
     score = 0
+    direction = "OVER" if edge >= 0 else "UNDER"
+    edge_strength = abs(float(edge))
 
-    if edge >= 2.5:
+    if edge_strength >= 2.5:
         score += 3
-    elif edge >= 1.0:
+    elif edge_strength >= 1.0:
         score += 2
-    elif edge >= 0.3:
+    elif edge_strength >= 0.3:
         score += 1
-    elif edge <= -2.0:
-        score -= 3
-    elif edge <= -0.8:
-        score -= 2
 
-    if hit_ratio >= 0.70:
+    if directional_hit_ratio >= 0.70:
         score += 2
-    elif hit_ratio >= 0.55:
+    elif directional_hit_ratio >= 0.55:
         score += 1
-    elif hit_ratio <= 0.40:
+    elif directional_hit_ratio <= 0.40:
         score -= 2
 
     if osc_class == "Baixa":
@@ -1496,26 +2189,29 @@ def _confidence_label_and_score(
     elif osc_class == "Alta":
         score -= 1
 
-    if matchup_label == "Favorável":
+    favorable_matchup = matchup_label in {"Favorável", "Muito favorável"}
+    difficult_matchup = matchup_label in {"Difícil", "Muito difícil"}
+    if (direction == "OVER" and favorable_matchup) or (direction == "UNDER" and difficult_matchup):
         score += 1
-    elif matchup_label == "Difícil":
+    elif (direction == "OVER" and difficult_matchup) or (direction == "UNDER" and favorable_matchup):
         score -= 1
 
-    if "↗" in str(form_signal):
+    form_signal = str(form_signal)
+    if (direction == "OVER" and "↗" in form_signal) or (direction == "UNDER" and "↘" in form_signal):
         score += 1
-    elif "↘" in str(form_signal):
+    elif (direction == "OVER" and "↘" in form_signal) or (direction == "UNDER" and "↗" in form_signal):
         score -= 1
 
     if str(inj_status) in {"Out", "Doubtful"}:
         score -= 3
-    elif str(inj_status) in {"Questionable"}:
+    elif str(inj_status) == "Questionable":
         score -= 1
 
     if score >= 5:
-        return "🔥 Confiança Alta", score
+        return "🔥 Força Alta", score, direction
     if score >= 2:
-        return "🟡 Confiança Média", score
-    return "🔴 Confiança Baixa", score
+        return "🟡 Força Média", score, direction
+    return "🔴 Força Baixa", score, direction
 
 
 def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> tuple[str, dict]:
@@ -1535,8 +2231,14 @@ def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, u
         if not ctx.get("has_market_line"):
             continue
 
-        hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
-        score = (float(ctx.get("edge", 0.0)) * 0.65) + (hit_ratio * 4.0)
+        edge = float(ctx.get("edge", 0.0))
+        direction = "OVER" if edge >= 0 else "UNDER"
+        directional_hit_ratio = _parse_ratio_text(
+            ctx.get("hit_l10", "0/1")
+            if direction == "OVER"
+            else ctx.get("under_l10", "0/1")
+        )
+        score = (abs(edge) * 0.65) + (directional_hit_ratio * 4.0)
 
         if score > best_score:
             best_score = score
@@ -1546,52 +2248,116 @@ def _best_metric_for_card(row: pd.Series, line_metric: str, line_value: float, u
     return best_metric, best_ctx
 
 def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str, str, str, str]:
-    matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
-    matchup_score_v1 = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0))
-    opp_allowed = float(row.get(get_metric_allowed_column(metric), 0.0))
-    hit_ratio = _parse_ratio_text(ctx.get("hit_l10", "0/1"))
+    matchup_label = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
+    matchup_score = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0) or 0.0)
+    defense_label = str(row.get(f"DEF_LABEL_{metric}_V2", "Neutro"))
+    team_def_label = str(row.get(f"TEAM_DEF_LABEL_{metric}", "Neutro"))
+    team_def_pct = float(row.get(f"TEAM_DEF_PCT_{metric}", 0.5) or 0.5)
+    team_def_rank = int(float(row.get(f"TEAM_DEF_RANK_{metric}", 0) or 0))
+    team_count = int(float(row.get("TEAM_DEF_TEAM_COUNT", 30) or 30))
+    h2h_label = str(row.get(f"H2H_LABEL_{metric}_V2", "Sem amostra"))
+    h2h_gp = int(float(row.get("H2H_GP", 0.0) or 0.0))
+    h2h_avg = float(row.get(f"H2H_{metric}", 0.0) or 0.0)
+    effect_pct = float(row.get(f"MATCHUP_EFFECT_PCT_{metric}_V2", 0.0) or 0.0) * 100.0
+    position_group = str(row.get("POSITION_GROUP", "-"))
+    opponent = str(row.get("OPP_TEAM_NAME", "Oponente"))
 
-    confidence_label, score = _confidence_label_and_score(
-        edge=float(ctx.get("edge", 0.0)),
-        hit_ratio=hit_ratio,
-        osc_class=str(row.get("OSC_CLASS", "-")),
-        matchup_label=matchup_label_v1,
-        form_signal=str(row.get("FORM_SIGNAL", "→ Estável")),
+    rank_text = (
+        f"{team_def_rank}/{team_count}"
+        if team_def_rank > 0 and team_count > 0
+        else f"P{int(round(team_def_pct * 100))}"
+    )
+
+    matchup_parts = [
+        f"Defesa geral: {team_def_label} ({rank_text})",
+        f"vs {position_group}: {defense_label}",
+    ]
+    if h2h_gp > 0:
+        matchup_parts.append(
+            f"H2H {h2h_avg:.1f} em {h2h_gp}j ({h2h_label})"
+        )
+    else:
+        matchup_parts.append("H2H sem amostra")
+    matchup_parts.append(f"ajuste {effect_pct:+.1f}%")
+    matchup_text = " • ".join(matchup_parts)
+
+    if not ctx.get("has_active_line", False) and pd.isna(
+        pd.to_numeric(ctx.get("projection"), errors="coerce")
+    ):
+        return (
+            "⚪ Dados incompletos",
+            f"Projeção {metric} indisponível",
+            "a ESPN não trouxe uma amostra confiável; nenhum Edge será calculado",
+            f"{opponent} • projeção suspensa até validar os dados de {metric}",
+        )
+
+    if not ctx.get("has_active_line", False):
+        context_line = (
+            f"{opponent} • {matchup_text}"
+            f" • proj {format_number(ctx.get('projection', 0.0))}"
+        )
+        return (
+            "⚪ Sem linha",
+            f"Projeção {metric}: {format_number(ctx.get('projection', 0.0))}",
+            "adicione uma linha manual para calcular Edge, hit e direção",
+            context_line,
+        )
+
+    edge = float(ctx.get("edge", 0.0))
+    direction = "OVER" if edge >= 0 else "UNDER"
+    directional_hit_ratio = _parse_ratio_text(
+        ctx.get("hit_l10", "0/1")
+        if direction == "OVER"
+        else ctx.get("under_l10", "0/1")
+    )
+
+    osc = str(row.get(f"OSC_{metric}_CLASS", row.get("OSC_CLASS", "-")))
+    form_signal = str(
+        row.get(f"FORM_{metric}_SIGNAL", row.get("FORM_SIGNAL", "→ Estável"))
+    )
+
+    strength_label, score, direction = _confidence_label_and_score(
+        edge=edge,
+        directional_hit_ratio=directional_hit_ratio,
+        osc_class=osc,
+        matchup_label=matchup_label,
+        form_signal=form_signal,
         inj_status=str(row.get("INJ_STATUS", "Available")),
     )
 
-    edge = float(ctx.get("edge", 0.0))
-    osc = str(row.get("OSC_CLASS", "-"))
-    form_signal = str(row.get("FORM_SIGNAL", "→ Estável"))
-
     if score >= 5:
-        headline = f"Vale ficar de olho em {metric}"
+        headline = f"Sinal forte para {direction} em {metric}"
     elif score >= 2:
-        headline = f"Sinal moderado para {metric}"
+        headline = f"Sinal moderado para {direction} em {metric}"
     else:
-        headline = f"Cautela com {metric}"
+        headline = f"Cautela com {direction} em {metric}"
 
     reasons = []
 
-    if edge >= 1.5:
+    if edge >= 1.0:
         reasons.append("proj acima da linha")
     elif edge <= -1.0:
         reasons.append("proj abaixo da linha")
 
-    if hit_ratio >= 0.70:
-        reasons.append("hit recente forte")
-    elif hit_ratio <= 0.40:
-        reasons.append("hit recente fraco")
+    if directional_hit_ratio >= 0.70:
+        reasons.append(f"{direction} recente forte")
+    elif directional_hit_ratio <= 0.40:
+        reasons.append(f"{direction} recente fraco")
+
+    if matchup_label in {"Favorável", "Muito favorável"}:
+        reasons.append("matchup final favorável")
+    elif matchup_label in {"Difícil", "Muito difícil"}:
+        reasons.append("matchup final difícil")
+
+    if h2h_gp > 0 and h2h_label in {"Favorável", "Muito favorável"}:
+        reasons.append("H2H favorável")
+    elif h2h_gp > 0 and h2h_label in {"Difícil", "Muito difícil"}:
+        reasons.append("H2H difícil")
 
     if osc == "Baixa":
         reasons.append("oscilação baixa")
     elif osc == "Alta":
         reasons.append("oscilação alta")
-
-    if matchup_label_v1 in {"Favorável", "Muito favorável"}:
-        reasons.append("matchup favorável")
-    elif matchup_label_v1 in {"Difícil", "Muito difícil"}:
-        reasons.append("matchup difícil")
 
     if "↗" in form_signal:
         reasons.append("momento em alta")
@@ -1607,15 +2373,14 @@ def _build_headline_reason(row: pd.Series, metric: str, ctx: dict) -> tuple[str,
     reason_text = " • ".join(reasons[:4])
 
     context_line = (
-        f"{row.get('OPP_TEAM_NAME', 'Oponente')} cede "
-        f"{format_number(opp_allowed)} "
-        f"para {row.get('POSITION_GROUP', '-')}"
-        f" • linha {format_number(ctx.get('line_value', 0.0))}"
+        f"{opponent} • {matchup_text}"
+        f" • linha {format_number(ctx.get('line_value'))}"
         f" • proj {format_number(ctx.get('projection', 0.0))}"
-        f" • score {format_signed_number(matchup_score_v1, 2)}"
+        f" • score {format_signed_number(matchup_score, 2)}"
     )
 
-    return confidence_label, headline, reason_text, context_line
+    return strength_label, headline, reason_text, context_line
+
 
 def render_player_headline_html(
     row: pd.Series,
@@ -1629,7 +2394,12 @@ def render_player_headline_html(
 
     matchup_label_v1 = str(row.get(f"MATCHUP_LABEL_{chosen_metric}_V1", "Neutro"))
     matchup_class = get_matchup_chip_class(matchup_label_v1)
-    source_label = "🎯 BetMGM" if chosen_ctx.get("line_source") == "BetMGM" else "✏️ Linha manual"
+    if chosen_ctx.get("line_source") == "BetMGM":
+        source_label = "🎯 BetMGM"
+    elif chosen_ctx.get("has_active_line", False):
+        source_label = "✏️ Linha manual"
+    else:
+        source_label = "Linha indisponível"
 
     return f"""
     <div class="player-headline-card">
@@ -1641,7 +2411,7 @@ def render_player_headline_html(
         <div class="hero-note">
             {context_line}
             <span class="matchup-chip {matchup_class}" style="margin-left:0.4rem;">
-                {matchup_label_v1} vs {row.get("POSITION_GROUP", "-")}
+                Matchup final: {matchup_label_v1}
             </span>
         </div>
     </div>
@@ -1662,7 +2432,7 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
         st.markdown("**PTS L10**")
         st.markdown(f"### {format_number(row.get('L10_PTS', 0.0))}")
         st.caption(
-            f"Proj {format_number(row.get('PROJ_PTS', 0.0))} • "
+            f"Proj {format_number(row.get('PROJ_PTS_V1', row.get('PROJ_PTS', 0.0)))} • "
             f"Hit {row.get('PTS_HIT_RATE_L10_TEXT', '-')}"
         )
 
@@ -1670,7 +2440,7 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
         st.markdown("**REB L10**")
         st.markdown(f"### {format_number(row.get('L10_REB', 0.0))}")
         st.caption(
-            f"Proj {format_number(row.get('PROJ_REB', 0.0))} • "
+            f"Proj {format_number(row.get('PROJ_REB_V1', row.get('PROJ_REB', 0.0)))} • "
             f"Hit {row.get('REB_HIT_RATE_L10_TEXT', '-')}"
         )
 
@@ -1678,67 +2448,92 @@ def render_player_support_tiles(row: pd.Series, line_metric: str, line_value: fl
         st.markdown("**AST L10**")
         st.markdown(f"### {format_number(row.get('L10_AST', 0.0))}")
         st.caption(
-            f"Proj {format_number(row.get('PROJ_AST', 0.0))} • "
+            f"Proj {format_number(row.get('PROJ_AST_V1', row.get('PROJ_AST', 0.0)))} • "
             f"Hit {row.get('AST_HIT_RATE_L10_TEXT', '-')}"
         )
 
     with c4:
-        st.markdown("**MATCHUP V1**")
+        defense_label = str(row.get(f"DEF_LABEL_{line_metric}_V2", "Neutro"))
+        h2h_label = str(row.get(f"H2H_LABEL_{line_metric}_V2", "Sem amostra"))
+        h2h_gp = int(float(row.get("H2H_GP", 0.0) or 0.0))
+        st.markdown("**MATCHUP FINAL**")
         st.markdown(f"### {matchup_label_v1}")
-        st.caption(f"Score {format_signed_number(matchup_score_v1, 2)}")
+        h2h_text = f"H2H {h2h_label} ({h2h_gp}j)" if h2h_gp > 0 else "H2H sem amostra"
+        st.caption(
+            f"Def {defense_label} • {h2h_text} • "
+            f"Score {format_signed_number(matchup_score_v1, 2)}"
+        )
 
     with c5:
-        st.markdown(f"**{line_context['line_source']} {line_metric}**")
-        st.markdown(f"### {format_signed_number(line_context['edge'])}")
-        st.caption(
-            f"Proj {format_number(proj_std)} • "
-            f"V1 {format_number(proj_v1)} • "
-            f"L10 {line_context['hit_l10']}"
-        )
+        if line_context.get("has_active_line", False):
+            st.markdown(f"**{line_context['line_source']} {line_metric}**")
+            st.markdown(f"### {format_signed_number(line_context['edge'])}")
+            st.caption(
+                f"Proj {format_number(proj_std)} • "
+                f"V1 {format_number(proj_v1)} • "
+                f"L10 {line_context['hit_l10']}"
+            )
+        else:
+            quality_missing = not pd.notna(
+                pd.to_numeric(line_context.get("projection"), errors="coerce")
+            )
+            st.markdown(f"**{'Dados insuficientes' if quality_missing else 'Sem linha'} {line_metric}**")
+            st.markdown("### —")
+            st.caption(
+                "Estatística ESPN não validada"
+                if quality_missing
+                else f"Proj {format_number(proj_std)} • V1 {format_number(proj_v1)}"
+            )
 
 def render_projection_detail_box_html(row: pd.Series) -> str:
     return f"""
     <div class="detail-box">
         <div class="detail-box-top">
-            <div class="detail-box-title">Projeções do modelo</div>
+            <div class="detail-box-title">Projeções contextuais do modelo</div>
             <div class="delta-pill-row">
-                <span class="delta-pill delta-flat">peso L10 maior</span>
+                <span class="delta-pill delta-flat">minutos + forma + defesa/H2H</span>
             </div>
         </div>
         <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj PTS</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_PTS'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_PTS_V1', row.get('PROJ_PTS', 0.0)))}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj REB</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_REB'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_REB_V1', row.get('PROJ_REB', 0.0)))}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj AST</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_AST'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_AST_V1', row.get('PROJ_AST', 0.0)))}</div>
             </div>
             <div class="detail-mini detail-mini-highlight">
                 <div class="detail-mini-label">Proj PRA</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_PRA'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_PRA_V1', row.get('PROJ_PRA', 0.0)))}</div>
             </div>
         </div>
         <div class="detail-mini-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top:0.55rem;">
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj 3PM</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_3PM'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_3PM_V1', row.get('PROJ_3PM', 0.0)))}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj FGA</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_FGA'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_FGA_V1', row.get('PROJ_FGA', 0.0)))}</div>
             </div>
             <div class="detail-mini">
                 <div class="detail-mini-label">Proj 3PA</div>
-                <div class="detail-mini-value">{format_number(row['PROJ_3PA'])}</div>
+                <div class="detail-mini-value">{format_number(row.get('PROJ_3PA_V1', row.get('PROJ_3PA', 0.0)))}</div>
             </div>
+        </div>
+        <div class="hero-note" style="margin-top:0.6rem;">
+            A projeção contextual usa produção por minuto, minutos projetados e um ajuste limitado
+            de matchup. O matchup combina defesa posicional e histórico H2H com peso reduzido
+            quando a amostra é pequena.
         </div>
     </div>
     """
+
 
 def render_split_detail_box_html(row: pd.Series, line_metric: str) -> str:
     is_home = row.get("IS_HOME", False)
@@ -1791,6 +2586,23 @@ def render_split_detail_box_html(row: pd.Series, line_metric: str) -> str:
 
 def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> str:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
+
+    if not line_context.get("has_active_line", False):
+        return f"""
+        <div class="detail-box">
+            <div class="detail-box-top">
+                <div class="detail-box-title">Linha — {line_metric}</div>
+                <div class="delta-pill-row">
+                    <span class="delta-pill delta-flat">Dados insuficientes</span>
+                </div>
+            </div>
+            <div class="hero-note">
+                Projeção atual: <strong>{format_number(line_context.get('projection', 0.0))}</strong>.
+                Linha indisponível. Preencha <strong>Gerar linha manual</strong> para calcular Edge, Hit L5 e Hit L10.
+            </div>
+        </div>
+        """
+
     line_chip_class = "delta-flat"
     if line_context["edge"] > 0.75:
         line_chip_class = "delta-up"
@@ -1838,40 +2650,78 @@ def render_manual_line_detail_box_html(row: pd.Series, line_metric: str, line_va
     </div>
     """
 def render_matchup_detail_box_html(row: pd.Series, metric: str) -> str:
-    matchup_ctx = get_metric_matchup_context(row, metric)
-    matchup_class = get_matchup_chip_class(matchup_ctx["label"])
+    matchup_label = str(row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro"))
+    matchup_score = float(row.get(f"MATCHUP_SCORE_{metric}_V1", 0.0) or 0.0)
+    matchup_class = get_matchup_chip_class(matchup_label)
 
-    return f"""
-    <div class="detail-box">
-        <div class="detail-box-top">
-            <div class="detail-box-title">Contexto do adversário — {metric}</div>
-            <div class="delta-pill-row">
-                <span class="matchup-chip {matchup_class}">{matchup_ctx['label']}</span>
-            </div>
-        </div>
-        <div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
-            <div class="detail-mini">
-                <div class="detail-mini-label">PTS ced.</div>
-                <div class="detail-mini-value">{format_number(row['OPP_PTS_ALLOWED'])}</div>
-            </div>
-            <div class="detail-mini">
-                <div class="detail-mini-label">REB ced.</div>
-                <div class="detail-mini-value">{format_number(row['OPP_REB_ALLOWED'])}</div>
-            </div>
-            <div class="detail-mini">
-                <div class="detail-mini-label">AST ced.</div>
-                <div class="detail-mini-value">{format_number(row['OPP_AST_ALLOWED'])}</div>
-            </div>
-            <div class="detail-mini detail-mini-highlight">
-                <div class="detail-mini-label">{metric} foco</div>
-                <div class="detail-mini-value">{format_number(matchup_ctx['allowed'])}</div>
-            </div>
-        </div>
-        <div class="hero-note">
-            {row['OPP_TEAM_NAME']} vs {row['POSITION_GROUP']} • liga {format_number(matchup_ctx['baseline'])} • diferença {format_signed_number(matchup_ctx['diff'])}
-        </div>
-    </div>
-    """
+    team_def_label = str(row.get(f"TEAM_DEF_LABEL_{metric}", "Neutro"))
+    team_def_pct = float(row.get(f"TEAM_DEF_PCT_{metric}", 0.5) or 0.5)
+    team_def_rank = int(float(row.get(f"TEAM_DEF_RANK_{metric}", 0) or 0))
+    team_count = int(float(row.get("TEAM_DEF_TEAM_COUNT", 30) or 30))
+
+    position_label = str(row.get(f"DEF_LABEL_{metric}_V2", "Neutro"))
+    position_score = float(row.get(f"POSITION_SCORE_{metric}_V3", 0.0) or 0.0)
+
+    h2h_label = str(row.get(f"H2H_LABEL_{metric}_V2", "Sem amostra"))
+    h2h_score = float(row.get(f"H2H_SCORE_{metric}_V3", 0.0) or 0.0)
+    h2h_gp = int(float(row.get("H2H_GP", 0.0) or 0.0))
+    h2h_avg = float(row.get(f"H2H_{metric}", 0.0) or 0.0)
+
+    matchup_effect_pct = float(
+        row.get(f"MATCHUP_EFFECT_PCT_{metric}_V2", 0.0) or 0.0
+    ) * 100.0
+
+    rank_text = (
+        f"{team_def_rank}º de {team_count}"
+        if team_def_rank > 0 and team_count > 0
+        else f"percentil {int(round(team_def_pct * 100))}"
+    )
+
+    h2h_value = (
+        f"{format_number(h2h_avg)} ({h2h_gp}j)"
+        if h2h_gp > 0
+        else "Sem amostra"
+    )
+
+    return (
+        f'<div class="detail-box">'
+        f'<div class="detail-box-top">'
+        f'<div class="detail-box-title">Leitura do matchup — {metric}</div>'
+        f'<div class="delta-pill-row">'
+        f'<span class="matchup-chip {matchup_class}">Final: {matchup_label}</span>'
+        f'</div>'
+        f'</div>'
+        f'<div class="detail-mini-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">'
+        f'<div class="detail-mini">'
+        f'<div class="detail-mini-label">Defesa geral NBA</div>'
+        f'<div class="detail-mini-value">{team_def_label}</div>'
+        f'<div class="detail-mini-label">{rank_text} • P{int(round(team_def_pct * 100))}</div>'
+        f'</div>'
+        f'<div class="detail-mini">'
+        f'<div class="detail-mini-label">Recorte vs {row.get("POSITION_GROUP", "-")}</div>'
+        f'<div class="detail-mini-value">{position_label}</div>'
+        f'<div class="detail-mini-label">score {format_signed_number(position_score, 2)}</div>'
+        f'</div>'
+        f'<div class="detail-mini">'
+        f'<div class="detail-mini-label">Histórico H2H</div>'
+        f'<div class="detail-mini-value">{h2h_value}</div>'
+        f'<div class="detail-mini-label">{h2h_label} • score {format_signed_number(h2h_score, 2)}</div>'
+        f'</div>'
+        f'<div class="detail-mini detail-mini-highlight">'
+        f'<div class="detail-mini-label">Efeito na projeção</div>'
+        f'<div class="detail-mini-value">{matchup_effect_pct:+.1f}%</div>'
+        f'<div class="detail-mini-label">score final {format_signed_number(matchup_score, 2)}</div>'
+        f'</div>'
+        f'</div>'
+        f'<div class="hero-note">'
+        f'Modelo calibrado: 55% defesa relativa entre os times da NBA, 15% recorte por posição '
+        f'e até 30% H2H. Quando não há H2H confiável, esse peso permanece neutro em vez de '
+        f'ser redistribuído para a defesa.'
+        f'</div>'
+        f'</div>'
+    )
+
+
 def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: float, use_market_line: bool) -> None:
     line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
 
@@ -1885,31 +2735,57 @@ def render_focus_summary_tiles(row: pd.Series, line_metric: str, line_value: flo
     c1, c2, c3, c4 = st.columns(4)
 
     with c1:
-        st.markdown(f"**PROJ {line_metric}**")
-        st.markdown(f"### {format_number(row.get(proj_col, 0.0))}")
+        contextual_proj = float(
+            row.get(f"PROJ_{line_metric}_V1", row.get(proj_col, 0.0)) or 0.0
+        )
+        st.markdown(f"**PROJEÇÃO {line_metric}**")
+        st.markdown(f"### {format_number(contextual_proj)}")
         st.caption(
+            f"Base {format_number(row.get(proj_col, 0.0))} • "
             f"Temp {format_number(row.get(season_col, 0.0))} • "
             f"L10 {format_number(row.get(l10_col, 0.0))}"
         )
 
     with c2:
-        st.markdown(f"**{line_context['line_source']} {line_metric}**")
-        st.markdown(f"### {format_signed_number(line_context['edge'])}")
-        st.caption(
-            f"Proj {format_number(line_context['projection'])} vs "
-            f"{format_number(line_context['line_value'])} • "
-            f"L10 {line_context['hit_l10']}"
-        )
+        if line_context.get("has_active_line", False):
+            st.markdown(f"**{line_context['line_source']} {line_metric}**")
+            st.markdown(f"### {format_signed_number(line_context['edge'])}")
+            st.caption(
+                f"Proj {format_number(line_context['projection'])} vs "
+                f"{format_number(line_context['line_value'])} • "
+                f"L10 {line_context['hit_l10']}"
+            )
+        else:
+            st.markdown(f"**{line_metric} — linha**")
+            st.markdown("### Dados insuficientes")
+            st.caption(
+                f"Proj {format_number(line_context['projection'])} • "
+                "informe uma linha para calcular Edge e Hit"
+            )
 
     with c3:
-        st.markdown("**MATCHUP V1**")
+        team_def_label = str(row.get(f"TEAM_DEF_LABEL_{line_metric}", "Neutro"))
+        team_def_pct = float(row.get(f"TEAM_DEF_PCT_{line_metric}", 0.5) or 0.5)
+        st.markdown("**MATCHUP FINAL**")
         st.markdown(f"### {matchup_label_v1}")
-        st.caption(f"Score {format_signed_number(matchup_score_v1, 2)}")
+        st.caption(
+            f"Def geral {team_def_label} • P{int(round(team_def_pct * 100))} • "
+            f"Score {format_signed_number(matchup_score_v1, 2)}"
+        )
 
     with c4:
-        st.markdown("**OSCILAÇÃO**")
-        st.markdown(f"### {row.get('OSC_CLASS', '-')}")
-        st.caption(f"{row.get('FORM_SIGNAL', '→ Estável')}")
+        metric_osc = str(
+            row.get(f"OSC_{line_metric}_CLASS", row.get("OSC_CLASS", "-"))
+        )
+        metric_form = str(
+            row.get(
+                f"FORM_{line_metric}_SIGNAL",
+                row.get("FORM_SIGNAL", "→ Estável"),
+            )
+        )
+        st.markdown("**OSCILAÇÃO / FORMA**")
+        st.markdown(f"### {metric_osc}")
+        st.caption(metric_form)
 
 def render_player_cards_grid(
     filtered_df: pd.DataFrame,
@@ -2115,6 +2991,7 @@ def main() -> None:
             home_team_name=selected_game["home_team_name"],
             season=season,
             include_market=api_key_available,
+            target_date=selected_date,
         )
     except Exception as exc:
         st.error("A NBA demorou ou falhou ao responder nas estatísticas do confronto. Tente novamente em alguns segundos ou use o botão de atualização.")
@@ -2190,8 +3067,9 @@ def main() -> None:
     st.markdown(
         """
         <div class="small-note">
-        Nota: "Titular provável" neste MVP significa os 5 jogadores com mais minutos por jogo na temporada.
-        É um atalho útil para análise, não a escalação oficial confirmada do jogo.
+        Rotação: "Estimativa por minutos" é apenas um fallback visual. Quando o feed diário da NBA
+        trouxer status projetado/confirmado, ele passa a ter prioridade. A classificação visual não
+        adiciona minutos automaticamente ao jogador.
         </div>
         """,
         unsafe_allow_html=True,
