@@ -296,3 +296,65 @@ def test_three_attempts_exceeding_total_are_flagged_not_clipped():
     assert pd.isna(logs.loc[0, "FGA"])
     assert logs.loc[0, "FG3A"] == 8
     assert "3PA_exceeds_FGA" in logs.loc[0, "SHOOTING_ISSUES"]
+
+
+
+def test_espn_real_shot_labels_do_not_confuse_fg_and_fg_percentage():
+    # Based on the public ESPN athlete gamelog labels seen for Tatum:
+    # MIN|FG|FG%|3PT|3P%|FT|FT%|REB|AST|BLK|STL|PF|TO|PTS
+    payload = {
+        "labels": [
+            "MIN", "FG", "FG%", "3PT", "3P%", "FT", "FT%",
+            "REB", "AST", "BLK", "STL", "PF", "TO", "PTS",
+        ],
+        "events": [{
+            "id": "401811023",
+            "date": "2026-04-09T23:00:00Z",
+            "homeAway": "home",
+            "opponent": {"abbreviation": "DET"},
+            "stats": [
+                "40", "7-22", "31.8", "2-10", "20.0", "8-10", "80.0",
+                "13", "8", "1", "1", "1", "6", "24",
+            ],
+        }],
+    }
+    df = _parse_espn_player_gamelog_payload(payload, 4065648)
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["FGA"] == 22
+    assert row["FG3M"] == 2
+    assert row["FG3A"] == 10
+    assert row["MIN"] == 40
+    assert row["PTS"] == 24
+    assert row["REB"] == 13
+    assert row["AST"] == 8
+    assert row["SHOOTING_ISSUES"] == ""
+
+
+def test_percentage_first_or_last_does_not_override_count_stats():
+    from api_espn import _first_stat
+
+    first = {"FG%": "31.8", "FG": "7-22", "3P%": "20.0", "3PT": "2-10"}
+    last = {"FG": "7-22", "FG%": "31.8", "3PT": "2-10", "3P%": "20.0"}
+    for stats in (first, last):
+        assert _first_stat(stats, "FG") == "7-22"
+        assert _first_stat(stats, "FG%") == "31.8"
+        assert _first_stat(stats, "3PT") == "2-10"
+        shooting = parse_espn_shooting_stats(stats)
+        assert shooting[:3] == (22.0, 2.0, 10.0)
+
+
+def test_defense_boxscore_preserves_fg_vs_fg_percent():
+    from espn_context import _stat_map, _first
+
+    stat_block = {
+        "keys": ["MIN", "FG", "FG%", "3PT", "3P%", "FT", "FT%", "PTS"]
+    }
+    athlete = {
+        "stats": ["40", "7-22", "31.8", "2-10", "20.0", "8-10", "80.0", "24"]
+    }
+    values = _stat_map(stat_block, athlete)
+    assert values["FG"] == "7-22"
+    assert values["FG%"] == "31.8"
+    assert _first(values, "FG") == "7-22"
+    assert parse_espn_shooting_stats(values)[:3] == (22.0, 2.0, 10.0)
