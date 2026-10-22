@@ -210,10 +210,8 @@ def _page_text_is_reversed(lines: list[str]) -> bool | None:
     valid = [str(line).strip() for line in lines if str(line).strip()]
     if not valid:
         return None
-    for idx, line in enumerate(valid):
-        if "Game Date" in line and "Player Name" in line:
-            return idx > len(valid) / 2
-
+    # Date/time runs are stronger evidence than header position: some PDF
+    # extractors place the title first while returning BODY rows reversed.
     # Date/time runs proceed forward in the NBA report. Prefer the report
     # date if multiple calendar dates occur on a page.
     dates: list[date] = []
@@ -233,6 +231,9 @@ def _page_text_is_reversed(lines: list[str]) -> bool | None:
             times.append(int(match.group(1)) * 60 + int(match.group(2)))
     if len(times) >= 2 and times[0] != times[-1]:
         return times[0] > times[-1]
+    for idx, line in enumerate(valid):
+        if "Game Date" in line and "Player Name" in line:
+            return idx > len(valid) / 2
     return None
 
 
