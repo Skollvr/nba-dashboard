@@ -1,5 +1,6 @@
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from html import unescape
 from urllib.parse import urljoin, urlsplit
 from datetime import date, datetime, timedelta
@@ -173,11 +174,23 @@ def fetch_latest_injury_report_pdf_url() -> str:
     unique: dict[str, datetime] = {}
     for link in candidates:
         stamp = parse_report_dt_from_url(link)
-        if stamp is not None and stamp <= now_et:
+        # A previous day's stale PDF is not a valid report for today's game.
+        if stamp is not None and now_et - timedelta(hours=12) <= stamp <= now_et:
             unique[link] = stamp
-    for url, _ in sorted(unique.items(), key=lambda item: item[1], reverse=True):
-        if _pdf_header_ok(url):
-            return url
+    ordered = [
+        url for url, _ in sorted(
+            unique.items(), key=lambda item: item[1], reverse=True
+        )
+    ]
+    # Verify candidate PDFs in short parallel batches to avoid a long sequence
+    # of Cloud network timeouts if the NBA CDN is temporarily inaccessible.
+    for start in range(0, len(ordered), 4):
+        batch = ordered[start:start + 4]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            verified = list(pool.map(_pdf_header_ok, batch))
+        for url, ok in zip(batch, verified):
+            if ok:
+                return url
     return ""
 
 
