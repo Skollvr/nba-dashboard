@@ -131,12 +131,14 @@ def _official_pdf_recent_candidates(now_et: datetime) -> list[str]:
 
 
 def _pdf_header_ok(url: str, timeout=(3, 5)) -> bool:
-    """Verify the candidate URL serves a PDF without downloading whole file."""
+    """Stream first bytes of a PDF; do not rely on CDN support for Range."""
     headers = {
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36"
+        ),
         "Accept": "application/pdf,*/*",
         "Referer": "https://official.nba.com/",
-        "Range": "bytes=0-63",
     }
     try:
         with requests.get(url, headers=headers, timeout=timeout, stream=True) as response:
