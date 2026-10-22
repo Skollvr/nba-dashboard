@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from config import NBA_TEAM_COLORS, TEAM_LOOKUP, TEAM_LOGO_URL
-from processamento import get_line_context
+from processamento import get_line_context, get_metric_projection_column
 
 
 def _e(value) -> str:
@@ -184,5 +184,127 @@ def render_player_card_refresh(
         '<div class="nova-card-footer">'
         f'MIN PROJETADOS <strong>{minutes}</strong> · {source} · {team}'
         '</div></article>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+
+def render_focus_summary_refresh(
+    row: pd.Series,
+    metric: str,
+    line_context: dict,
+) -> None:
+    """Modern focus KPIs using preexisting projections and matchup classifications."""
+    ctx_proj = row.get(f"PROJ_{metric}_V1")
+    if pd.isna(pd.to_numeric(ctx_proj, errors="coerce")):
+        ctx_proj = line_context.get("projection")
+    base = row.get(get_metric_projection_column(metric))
+    season_key = "SEASON_PRA" if metric == "PRA" else f"SEASON_{metric}"
+    l10_key = "L10_PRA" if metric == "PRA" else f"L10_{metric}"
+    active = bool(line_context.get("has_active_line", False))
+    metric_match = row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro")
+    osc = row.get(f"OSC_{metric}_CLASS", row.get("OSC_CLASS", "—"))
+    form = row.get(f"FORM_{metric}_SIGNAL", row.get("FORM_SIGNAL", "—"))
+    hit = line_context.get("hit_l10", "—") if active else "Linha não informada"
+
+    values = [
+        (
+            f"Projeção contextual · {metric}",
+            _number(ctx_proj),
+            f"Base {_number(base)} · Temp {_number(row.get(season_key))} · "
+            f"L10 {_number(row.get(l10_key))}",
+            "main",
+        ),
+        (
+            f"Linha de aposta · {metric}",
+            _number(line_context.get("line_value")) if active else "Sem linha",
+            f"Edge {_signed(line_context.get('edge'))} · Hit L10 {hit}"
+            if active else "Informe uma linha individual para comparar",
+            "",
+        ),
+        (
+            "Matchup",
+            str(metric_match),
+            f"Score {_signed(row.get(f'MATCHUP_SCORE_{metric}_V1'), 2)}",
+            "",
+        ),
+        ("Oscilação e forma", str(osc), str(form), ""),
+    ]
+    html = '<div class="nova-focus-hero">'
+    for label, value, sub, extra in values:
+        html += (
+            f'<div class="nova-focus-kpi {extra}">'
+            f'<div class="nova-focus-kpi-label">{_e(label)}</div>'
+            f'<div class="nova-focus-kpi-value">{_e(value)}</div>'
+            f'<div class="nova-focus-kpi-sub">{_e(sub)}</div>'
+            '</div>'
+        )
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_focus_comparison_refresh(row: pd.Series, metric: str) -> None:
+    """Compare baseline and contextual projections without recomputing them."""
+    base = pd.to_numeric(row.get(get_metric_projection_column(metric)), errors="coerce")
+    contextual = pd.to_numeric(row.get(f"PROJ_{metric}_V1"), errors="coerce")
+    delta = (
+        contextual - base
+        if pd.notna(contextual) and pd.notna(base) else None
+    )
+    metrics = [
+        ("Projeção padrão", _number(base), ""),
+        ("Projeção contextual", _number(contextual), "proj"),
+        ("Ajuste total", _signed(delta), ""),
+    ]
+    html = '<div class="nova-detail-compare">'
+    for label, value, style in metrics:
+        html += (
+            f'<div class="nova-compare-item {style}">'
+            f'<div class="nova-compare-label">{_e(label)} · {_e(metric)}</div>'
+            f'<div class="nova-compare-value">{_e(value)}</div>'
+            '</div>'
+        )
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_tip_card_refresh(title: str, tip: dict | None) -> None:
+    """Display an existing qualified best-line candidate without recalculation."""
+    if tip is None:
+        st.markdown(
+            '<div class="nova-empty-panel">Ainda não há outra linha '
+            'que atenda aos critérios de destaque.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    top = "top" if str(title).lower().find("melhor linha") >= 0 and "segunda" not in str(title).lower() else ""
+    stats = [
+        ("Projeção", _number(tip.get("PROJECTION"))),
+        ("Edge", _signed(tip.get("EDGE"))),
+        (f"Hit L10 {tip.get('DIRECTION', '')}", str(tip.get("HIT_TEXT") or "—")),
+    ]
+    cells = "".join(
+        '<div class="nova-tip-metric">'
+        f'<small>{_e(label)}</small><strong>{_e(value)}</strong></div>'
+        for label, value in stats
+    )
+    line = _number(tip.get("LINE"))
+    html = (
+        f'<section class="nova-tip {top}">'
+        '<div class="nova-tip-top">'
+        f'<div class="nova-tip-label">{_e(title)}</div>'
+        f'<div class="nova-tip-strength">{_e(tip.get("STRENGTH", ""))}</div>'
+        '</div>'
+        f'<div class="nova-tip-player">{_e(tip.get("PLAYER", ""))}</div>'
+        f'<div class="nova-tip-details">'
+        f'{_e(tip.get("TEAM_NAME", ""))} · '
+        f'{_e(tip.get("DIRECTION", ""))} {line} {_e(tip.get("METRIC", ""))}'
+        '</div>'
+        f'<div class="nova-tip-metrics">{cells}</div>'
+        '<div class="nova-tip-details">'
+        f'Matchup: {_e(tip.get("MATCHUP", "—"))} · '
+        f'MIN proj: {_number(tip.get("PROJ_MIN"))} · '
+        f'{_e(tip.get("LINE_SOURCE", "linha"))}'
+        '</div></section>'
     )
     st.markdown(html, unsafe_allow_html=True)
