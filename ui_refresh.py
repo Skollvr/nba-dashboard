@@ -279,6 +279,9 @@ def render_focus_summary_refresh(
     l10 = pd.to_numeric(row.get(f"L10_{metric}"), errors="coerce")
     minutes = pd.to_numeric(row.get("PROJ_MIN_V1"), errors="coerce")
     games = pd.to_numeric(row.get("SEASON_GP"), errors="coerce")
+    # A zero-game roster must not surface stale or placeholder trend stats.
+    if pd.notna(games) and games <= 0:
+        season = l5 = l10 = float("nan")
     has_projection = pd.notna(projected) and math.isfinite(float(projected))
 
     active = bool(line_context.get("has_active_line", False)) and has_projection
