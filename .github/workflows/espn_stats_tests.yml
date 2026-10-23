@@ -3,7 +3,11 @@ name: ESPN stats and projection regression tests
 on:
   push:
     branches:
+      - main
       - test/nicegui-prototype
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
