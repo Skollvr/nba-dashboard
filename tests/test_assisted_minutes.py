@@ -99,3 +99,33 @@ def test_invalid_fga_stays_missing_and_no_fake_edge_created():
     original.loc[0, "PROJ_FGA_V1"] = np.nan
     changed = apply_manual_minutes(original, {7: 34})
     assert pd.isna(changed.iloc[0].PROJ_FGA_V1)
+
+
+def test_pregame_control_is_hidden_for_old_live_and_finished_games():
+    from datetime import date
+    from app import _pregame_minutes_allowed
+
+    today = date(2026, 10, 23)
+    assert not _pregame_minutes_allowed(
+        date(2026, 10, 22), today, {"GAME_STATUS_TEXT": "Agendado"}
+    )
+    assert not _pregame_minutes_allowed(
+        today, today, {"GAME_STATUS_TEXT": "Final"}
+    )
+    assert not _pregame_minutes_allowed(
+        today, today, {"GAME_STATUS_TEXT": "In Progress"}
+    )
+    assert _pregame_minutes_allowed(
+        date(2026, 10, 25), today, {"GAME_STATUS_TEXT": "Agendado"}
+    )
+
+
+def test_pregame_control_blocks_games_after_scheduled_tipoff():
+    from datetime import date
+    from app import _pregame_minutes_allowed
+
+    passed = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=1)).isoformat()
+    assert not _pregame_minutes_allowed(
+        date(2026, 10, 23), date(2026, 10, 23),
+        {"GAME_STATUS_TEXT": "Agendado", "GAME_DATETIME_BRT": passed},
+    )
