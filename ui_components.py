@@ -437,12 +437,11 @@ def render_player_focus_panel(
     if modern_focus:
         st.markdown(
             '<div class="nova-workspace-label">'
-            'Painel de análise do jogador'
-            '<span>Projeção, forma, eficiência e histórico no mesmo lugar</span>'
+            'Análise do jogador'
+            '<span>Resumo prático primeiro · detalhamento nas outras abas</span>'
             '</div>',
             unsafe_allow_html=True,
         )
-        render_focus_summary_refresh(row, visual_metric, visual_line_context)
         overview_tab, detail_tab, visual_tab, market_tab = st.tabs(
             ["Visão geral", "Estatísticas", "Raio-X", "Mercado e H2H"]
         )
@@ -454,20 +453,37 @@ def render_player_focus_panel(
 
     with overview_tab:
         if modern_focus:
-            st.markdown(
-                '<div class="nova-section-lead">Forma recente e projeção</div>',
-                unsafe_allow_html=True,
-            )
-        render_player_support_tiles(row, visual_metric, line_value, use_market_line)
-
-        if modern_focus:
-            render_focus_comparison_refresh(row, visual_metric)
-            st.markdown(
-                '<div class="nova-section-lead">Como chegamos à projeção</div>',
-                unsafe_allow_html=True,
-            )
+            # Keep the first screen clean: the three decision KPIs are shown
+            # only in Visão geral, never redundantly above every detail tab.
+            render_focus_summary_refresh(row, visual_metric, visual_line_context)
+            with st.expander("Ver composição da projeção e critérios", expanded=False):
+                st.caption(
+                    "Detalhamento opcional. Mantém os cálculos, as amostras e "
+                    "as fontes originais; não modifica o modelo Matchup V4."
+                )
+                render_focus_comparison_refresh(row, visual_metric)
+                st.markdown(
+                    render_split_detail_box_html(row, visual_metric),
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    render_projection_detail_box_html(row),
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    render_manual_line_detail_box_html(
+                        row, line_metric, line_value, use_market_line
+                    ),
+                    unsafe_allow_html=True,
+                )
         else:
-            proj_std = float(row.get(get_metric_projection_column(visual_metric), 0.0))
+            # Preserve all existing Classic-view behavior.
+            render_player_support_tiles(
+                row, visual_metric, line_value, use_market_line
+            )
+            proj_std = float(
+                row.get(get_metric_projection_column(visual_metric), 0.0)
+            )
             proj_v1 = float(row.get(f"PROJ_{visual_metric}_V1", proj_std))
             proj_delta = proj_v1 - proj_std
             c_std, c_v1, c_delta = st.columns(3)
@@ -477,13 +493,20 @@ def render_player_focus_panel(
                 st.metric(f"PROJ V1 {visual_metric}", format_number(proj_v1))
             with c_delta:
                 st.metric("Δ V1", format_signed_number(proj_delta))
-
-        st.markdown(render_split_detail_box_html(row, visual_metric), unsafe_allow_html=True)
-        st.markdown(render_projection_detail_box_html(row), unsafe_allow_html=True)
-        st.markdown(
-        render_manual_line_detail_box_html(row, line_metric, line_value, use_market_line),
-        unsafe_allow_html=True,
-    )
+            st.markdown(
+                render_split_detail_box_html(row, visual_metric),
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                render_projection_detail_box_html(row),
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                render_manual_line_detail_box_html(
+                    row, line_metric, line_value, use_market_line
+                ),
+                unsafe_allow_html=True,
+            )
 
     with detail_tab:
         if modern_focus:
