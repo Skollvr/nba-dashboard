@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date, datetime, timedelta
 from config import (
     TEAM_LOOKUP, SORT_OPTIONS, ROLE_OPTIONS, CHART_OPTIONS, 
-    LINE_METRIC_OPTIONS, APP_TIMEZONE
+    LINE_METRIC_OPTIONS, APP_TIMEZONE, TEAM_LOGO_URL
 )
 from api_nba import get_games_for_date
 from api_lineups import clear_lineup_cache, get_daily_lineups_safe
@@ -591,24 +591,10 @@ def main():
 
         return 0
 
-    min_model_games = 10
+    # Keep sample sizes available for source integrity checks below, but
+    # avoid the large season-opening banner above the player dashboard.
     away_gp = _team_gp(away_df)
     home_gp = _team_gp(home_df)
-
-    if away_gp >= min_model_games and home_gp >= min_model_games:
-        st.success(
-            f"Amostra mínima atingida: {selected_game['away_team_name']} {away_gp} jogos • "
-            f"{selected_game['home_team_name']} {home_gp} jogos. "
-            f"O modelo está usando dados de {analysis_season}."
-        )
-    else:
-        st.warning(
-            f"Amostra inicial da temporada — referência mínima: {min_model_games} jogos por time. "
-            f"{selected_game['away_team_name']}: {away_gp}/{min_model_games} • "
-            f"{selected_game['home_team_name']}: {home_gp}/{min_model_games}. "
-            f"Base exclusiva {analysis_season}, sem misturar outras temporadas. "
-            "As projeções com amostra reduzida são experimentais, não adequadas ainda para apostas."
-        )
 
     # A completed game with no player logs is a source failure, not a true
     # zero-game roster. Surface it before any projection is interpreted.
@@ -833,12 +819,45 @@ def main():
         )
 
     def _render_players() -> None:
-        selected_team = st.segmented_control(
-            "Time em análise",
-            [selected_game["away_team_name"], selected_game["home_team_name"]],
-            default=selected_game["away_team_name"],
+        away_name = str(selected_game["away_team_name"])
+        home_name = str(selected_game["home_team_name"])
+        away_id = int(selected_game["VISITOR_TEAM_ID"])
+        home_id = int(selected_game["HOME_TEAM_ID"])
+        team_key = f"analysis_team::{selected_game_key}"
+        if st.session_state.get(team_key) not in (away_name, home_name):
+            st.session_state[team_key] = away_name
+
+        st.markdown("**Time em análise**")
+        # Native segmented-control options are text-only, so keep full team
+        # names on real Streamlit buttons with subtle official NBA logos beside
+        # each label; no HTML fake buttons and no lost selection on rerun.
+        away_area, home_area, _ = st.columns(
+            [1.45, 1.45, 3.0], gap="small", vertical_alignment="center"
         )
-        if selected_team == selected_game["away_team_name"]:
+        for area, team_name, team_id, side in (
+            (away_area, away_name, away_id, "away"),
+            (home_area, home_name, home_id, "home"),
+        ):
+            with area:
+                icon_area, button_area = st.columns(
+                    [0.19, 1], gap="small", vertical_alignment="center"
+                )
+                with icon_area:
+                    st.image(TEAM_LOGO_URL.format(team_id=team_id), width=26)
+                with button_area:
+                    if st.button(
+                        team_name,
+                        key=f"{team_key}::{side}",
+                        use_container_width=True,
+                        type=(
+                            "primary"
+                            if st.session_state[team_key] == team_name
+                            else "secondary"
+                        ),
+                    ):
+                        st.session_state[team_key] = team_name
+        selected_team = st.session_state[team_key]
+        if selected_team == away_name:
             target_df = away_df
             opp_abbr = selected_game.get("HOME_TEAM_ABBR", selected_game["home_team_name"])
         else:
