@@ -1066,10 +1066,16 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
             unsafe_allow_html=True,
         )
     with top_cols[2]:
-        st.info(
-            "Sem lineup oficial, o Top 5 por minutos aparece apenas como "
-            "'Estimativa por minutos'. Ele não recebe bônus na projeção."
-        )
+        if confirmed_count:
+            st.info(
+                f"{confirmed_count} titular(es) identificado(s) como confirmado(s) "
+                "pelo feed NBA. Os demais são projetados ou estimados."
+            )
+        else:
+            st.info(
+                "Nenhum titular confirmado automaticamente. "
+                "O Top 5 por minutos e o depth chart ESPN são apenas estimativas."
+            )
 
     view_cols = [
         "PLAYER",
