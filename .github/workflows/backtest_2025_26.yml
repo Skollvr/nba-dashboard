@@ -1,0 +1,38 @@
+name: Historical 2025-26 ESPN six-team backtest
+
+on:
+  push:
+    branches:
+      - analysis/backtest-2025-26-six-teams
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dashboard dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Check backtest syntax
+        run: python -m py_compile tools/backtest_2025_26_six_teams.py
+      - name: Historical ESPN walk-forward validation
+        run: python -u tools/backtest_2025_26_six_teams.py
+        env:
+          STREAMLIT_SERVER_HEADLESS: 'true'
+      - name: Store numerical results and coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: espn-2025-26-six-team-backtest
+          path: backtest_results/
+          if-no-files-found: warn
