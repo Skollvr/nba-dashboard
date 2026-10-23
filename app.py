@@ -437,6 +437,14 @@ def main():
                     "Linha escolhida": pd.to_numeric(
                         player_row.get(market_col), errors="coerce"
                     ) if use_market_line else float("nan"),
+                    "Odd Over": pd.to_numeric(
+                        player_row.get(f"MARKET_{line_metric}_OVER_DEC"),
+                        errors="coerce",
+                    ) if use_market_line else float("nan"),
+                    "Odd Under": pd.to_numeric(
+                        player_row.get(f"MARKET_{line_metric}_UNDER_DEC"),
+                        errors="coerce",
+                    ) if use_market_line else float("nan"),
                     "Linha manual": float("nan"),
                 }
             )
@@ -465,7 +473,10 @@ def main():
                 manual_lines_df,
                 hide_index=True,
                 use_container_width=True,
-                disabled=["Jogador", "Time", "BetMGM", "FanDuel", "Linha escolhida"],
+                disabled=[
+                    "Jogador", "Time", "BetMGM", "FanDuel",
+                    "Linha escolhida", "Odd Over", "Odd Under",
+                ],
                 column_config={
                     "_PLAYER_ID": None,
                     "Jogador": st.column_config.TextColumn("Jogador"),
@@ -478,6 +489,12 @@ def main():
                     ),
                     "Linha escolhida": st.column_config.NumberColumn(
                         "Linha prioritária", format="%.1f"
+                    ),
+                    "Odd Over": st.column_config.NumberColumn(
+                        "Odd Over", format="%.2f"
+                    ),
+                    "Odd Under": st.column_config.NumberColumn(
+                        "Odd Under", format="%.2f"
                     ),
                     "Linha manual": st.column_config.NumberColumn(
                         f"Linha manual {line_metric}",
