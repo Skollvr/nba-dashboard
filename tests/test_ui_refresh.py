@@ -7,6 +7,7 @@ import pandas as pd
 from ui_refresh import (
     render_player_card_refresh, render_matchup_header_refresh,
     render_focus_summary_refresh, render_focus_comparison_refresh,
+    render_focus_statistics_refresh,
     render_tip_card_refresh,
 )
 
@@ -563,3 +564,111 @@ def test_focus_overview_scoped_to_modern_tab_with_calculation_collapsed():
     css = __import__("pathlib").Path("style_refresh.css").read_text(encoding="utf-8")
     assert ".nova-overview-grid" in css
     assert "@media(max-width:550px)" in css
+
+
+def _statistics_player(**overrides):
+    vals = {
+        "SEASON_GP": 11, "L5_GP": 5, "L10_GP": 10,
+        "MATCHUP_LABEL_REB_V1": "Neutro",
+        "MATCHUP_SCORE_REB_V1": 0.12,
+    }
+    for metric, season, l10, l5 in (
+        ("PRA", 28, 29, 31),
+        ("PTS", 18, 19, 20),
+        ("REB", 6, 7, 8),
+        ("AST", 4, 3, 3),
+        ("3PM", 2, 2, 2),
+        ("FGA", 14, 15, 15),
+        ("3PA", 5, 6, 7),
+    ):
+        vals[f"SEASON_{metric}"] = float(season)
+        vals[f"L10_{metric}"] = float(l10)
+        vals[f"L5_{metric}"] = float(l5)
+    vals.update(overrides)
+    return pd.Series(vals)
+
+
+def _render_statistics(row, selected_metric="REB"):
+    html = []
+    with patch(
+        "ui_refresh.st.markdown",
+        side_effect=lambda value, **kw: html.append(value),
+    ):
+        render_focus_statistics_refresh(row, selected_metric)
+    assert len(html) == 1
+    return html[0]
+
+
+def test_statistics_focus_new_grid_has_seven_rows_and_selected_metric():
+    html = _render_statistics(_statistics_player())
+    assert html.count('class="nova-stats-row nova-stats-data') == 7
+    assert html.count('class="nova-stats-row nova-stats-data selected"') == 1
+    assert "L10 · 10j" in html and "L5 · 5j" in html
+    assert "Matchup · REB" in html and "Neutro" in html
+    assert "Produção por período" in html
+    assert "Temporada" in html and "Δ L5−L10" in html
+    assert ">+1.0</span>" in html
+
+
+def test_statistics_focus_new_grid_does_not_claim_trends_in_first_games():
+    html = _render_statistics(
+        _statistics_player(SEASON_GP=1, L5_GP=1, L10_GP=1)
+    )
+    assert "L10 · 1j" in html and "L5 · 1j" in html
+    assert "Amostra inicial" in html
+    # No signed trend is available when L5 and L10 share a 1-game window.
+    assert 'class="nova-stats-delta flat">—</span>' in html
+    assert "5 jogos" not in html
+
+
+def test_statistics_focus_does_not_invent_zero_game_numbers():
+    html = _render_statistics(
+        _statistics_player(SEASON_GP=0, L5_GP=0, L10_GP=0)
+    )
+    assert "Sem jogos nesta temporada" in html
+    assert "0 jogo(s) na temporada" in html
+    assert 'class="nova-stats-delta flat">—</span>' in html
+    assert ">28.0</span>" not in html
+    assert ">29.0</span>" not in html
+
+
+def test_statistics_focus_gates_failed_espn_shooting_metric():
+    html = _render_statistics(
+        _statistics_player(
+            DATA_QUALITY_3PA=False,
+            DATA_QUALITY_FGA=False,
+            DATA_QUALITY_3PM=False,
+        ), selected_metric="3PA"
+    )
+    assert "dados ESPN não validados" in html
+    for metric in ("3PA", "FGA", "3PM"):
+        marker = f'<strong>{metric}</strong>'
+        line = html.split(marker)[1].split("</div>", 2)[1]
+        assert ">—</span>" in line
+    assert 'class="nova-stats-row nova-stats-data selected"' in html
+
+
+def test_statistics_focus_escapes_untrusted_matchup_values():
+    html = _render_statistics(
+        _statistics_player(MATCHUP_LABEL_REB_V1="<img src=x onerror=alert(1)>")
+    )
+    assert "<img" not in html
+    assert "&lt;img" in html
+
+
+def test_statistics_redesign_only_affects_modern_statistics_tab():
+    import inspect
+    from ui_components import render_player_focus_panel
+    src = inspect.getsource(render_player_focus_panel)
+    begin = src.index("    with detail_tab:")
+    end = src.index("    with visual_tab:", begin)
+    details = src[begin:end]
+    assert "if modern_focus:" in details
+    assert "render_focus_statistics_refresh(row, visual_metric)" in details
+    assert 'st.expander("Ver leitura defensiva completa", expanded=False)' in details
+    assert "render_detail_metric_box_html" in details  # Classic preserved
+    assert "with overview_tab:" in src
+    assert "with visual_tab:" in src
+    css = __import__("pathlib").Path("style_refresh.css").read_text(encoding="utf-8")
+    assert ".nova-stats-row" in css
+    assert "grid-template-columns:64px repeat(3,minmax(0,1fr))" in css
