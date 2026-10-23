@@ -25,13 +25,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
       - name: Syntax check
-        run: python -m compileall -q api_espn.py api_odds.py espn_context.py processamento.py projection_validation.py assisted_minutes.py ui_components.py ui_refresh.py app.py pdf_reader.py injury_sources.py
+        run: python -m compileall -q api_espn.py api_odds.py espn_context.py processamento.py projection_validation.py assisted_minutes.py api_lineups.py lineup_rotation.py ui_components.py ui_refresh.py app.py pdf_reader.py injury_sources.py
       - name: ESPN and projection tests
         run: |
           python -m pytest -q \
             tests/test_espn_player_gamelog.py \
             tests/test_projection_validation.py \
             tests/test_assisted_minutes.py \
+            tests/test_lineup_rotation.py \
             tests/test_matchup_calibration.py \
             tests/test_analysis_season.py \
             tests/test_espn_brasilia_pregame.py \
