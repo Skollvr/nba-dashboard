@@ -34,6 +34,46 @@ def _signed(value, decimals=1) -> str:
         return "—"
 
 
+def card_market_odds(
+    row: pd.Series, metric: str, context: dict, use_market_line: bool
+) -> dict | None:
+    """Read the active bookmaker's existing decimal odds; never blend books.
+
+    Market quotations are independent of prediction sample size. An absent
+    Over/Under side must remain absent, and manual lines never inherit market
+    prices.
+    """
+    if not use_market_line:
+        return None
+    source = str(context.get("quoted_source") or context.get("line_source") or "")
+    stored_source = str(row.get(f"MARKET_{metric}_SOURCE") or "")
+    if source not in {"BetMGM", "FanDuel"} or source != stored_source:
+        return None
+
+    selected_line = pd.to_numeric(row.get(f"MARKET_{metric}_LINE"), errors="coerce")
+    quoted_line = pd.to_numeric(context.get("quoted_line"), errors="coerce")
+    if (
+        pd.isna(selected_line) or pd.isna(quoted_line)
+        or not (math.isfinite(float(selected_line)) and math.isfinite(float(quoted_line)))
+        or selected_line <= 0 or abs(float(selected_line) - float(quoted_line)) > 1e-6
+    ):
+        return None
+
+    def _valid_decimal(value):
+        candidate = pd.to_numeric(value, errors="coerce")
+        return (
+            float(candidate)
+            if pd.notna(candidate) and math.isfinite(float(candidate)) and candidate > 1
+            else None
+        )
+
+    over = _valid_decimal(row.get(f"MARKET_{metric}_OVER_DEC"))
+    under = _valid_decimal(row.get(f"MARKET_{metric}_UNDER_DEC"))
+    if over is None and under is None:
+        return None
+    return {"source": source, "over": over, "under": under}
+
+
 def _identity(row: pd.Series) -> tuple[str, int, dict]:
     raw_id = pd.to_numeric(row.get("TEAM_ID"), errors="coerce")
     team_id = int(raw_id) if pd.notna(raw_id) else 0
@@ -144,6 +184,17 @@ def render_player_card_refresh(
         if is_active else "Sem Edge · amostra insuficiente"
         if not is_valid else "Sem linha para calcular Edge"
     )
+    market_odds = card_market_odds(row, line_metric, ctx, use_market_line)
+    odds_html = ""
+    if market_odds:
+        over_text = _number(market_odds["over"], 2)
+        under_text = _number(market_odds["under"], 2)
+        odds_html = (
+            '<div class="nova-card-odds">'
+            f'<span>Over <strong>{over_text}</strong></span>'
+            f'<span>Under <strong>{under_text}</strong></span>'
+            '</div>'
+        )
 
     matchup = str(row.get(f"MATCHUP_LABEL_{line_metric}_V1", "Neutro"))
     matchup_kind = (
@@ -190,6 +241,7 @@ def render_player_card_refresh(
         f'<div class="nova-small">{_e(quote_label)}</div>'
         f'<strong>{_e(quote_value)}</strong>'
         f'<div class="nova-quote-hint">{_e(quote_note)}</div>'
+        f'{odds_html}'
         '</div></div>'
         '<div class="nova-stat-grid">'
         f'{_stat("PTS", "L10_PTS")}'
