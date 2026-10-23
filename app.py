@@ -300,6 +300,71 @@ def main():
         st.exception(exc)
         return
 
+    # Optional manual review is a post-model overlay, never a new V4 formula.
+    # Keep it game-scoped, transparent and reversible; hide for old games.
+    if selected_date >= today and "final" not in str(selected_game.get("GAME_STATUS_TEXT", "")).lower():
+        from assisted_minutes import apply_manual_minutes
+
+        editor_key = f"minutes_editor::{selected_game['GAME_ID']}::{selected_date_key}"
+        with st.expander("⏱️ Revisão pré-jogo de minutos (opcional)", expanded=False):
+            st.caption(
+                "Minutos automáticos preservados. Use Ativar somente nos jogadores "
+                "que deseja ajustar. Out/Doubtful ou sem amostra não aceitam ajustes. "
+                "Os valores alterados recalculam V4, PRA, FGA e o Edge nos cards."
+            )
+            roster = pd.concat([away_df, home_df], ignore_index=True)
+            available = (
+                pd.to_numeric(roster["SEASON_GP"], errors="coerce").fillna(0).gt(0)
+                & pd.to_numeric(roster["PROJ_MIN_V1"], errors="coerce").fillna(0).gt(0)
+                & ~roster["INJ_STATUS"].isin(["Out", "Doubtful"])
+                & ~roster["IS_UNAVAILABLE"].fillna(False).astype(bool)
+            )
+            editable = roster.loc[available, [
+                "PLAYER_ID", "PLAYER", "TEAM_NAME", "ROLE", "INJ_STATUS", "PROJ_MIN_V1"
+            ]].copy()
+            editable = editable.rename(columns={
+                "PLAYER": "Jogador", "TEAM_NAME": "Time", "ROLE": "Escalação",
+                "INJ_STATUS": "Lesão", "PROJ_MIN_V1": "Min. automáticos",
+            })
+            editable["Ativar"] = False
+            editable["Min. manuais"] = editable["Min. automáticos"].round(1)
+            if st.button("Restaurar todos os minutos automáticos", key=editor_key + "::reset"):
+                st.session_state.pop(editor_key, None)
+                st.rerun()
+            selected = st.data_editor(
+                editable,
+                key=editor_key,
+                hide_index=True,
+                use_container_width=True,
+                disabled=["PLAYER_ID", "Jogador", "Time", "Escalação",
+                          "Lesão", "Min. automáticos"],
+                column_config={
+                    "PLAYER_ID": None,
+                    "Ativar": st.column_config.CheckboxColumn("Ativar ajuste"),
+                    "Min. manuais": st.column_config.NumberColumn(
+                        "Minutos esperados", min_value=1.0, max_value=48.0,
+                        step=0.5, format="%.1f"),
+                },
+            )
+            selected["Min. manuais"] = pd.to_numeric(
+                selected["Min. manuais"], errors="coerce"
+            )
+            active = selected[
+                selected["Ativar"].fillna(False)
+                & selected["Min. manuais"].between(1, 48)
+            ]
+            overrides = dict(zip(
+                active["PLAYER_ID"].astype(int), active["Min. manuais"].astype(float)
+            ))
+            if overrides:
+                st.caption(
+                    f"{len(overrides)} ajuste(s) manual(is) nesta sessão • "
+                    f"consulta em {datetime.now(APP_TIMEZONE).strftime('%d/%m/%Y %H:%M')} BRT • "
+                    "validação humana, não confirmação de escalação."
+                )
+            away_df = apply_manual_minutes(away_df, overrides)
+            home_df = apply_manual_minutes(home_df, overrides)
+
     render_matchup_header(selected_game)
 
     def _team_gp(df: pd.DataFrame) -> int:
