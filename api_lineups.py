@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import Any
 
 import pandas as pd
@@ -134,8 +135,14 @@ def _lineup_status_from_item(item: dict[str, Any]) -> tuple[str, bool | None, st
     status_text = str(raw_status or "").strip()
     status_lower = status_text.lower()
 
-    if confirmed is True or "confirm" in status_lower:
-        return "Titular confirmado", True if starter is None else starter, status_text
+    # "confirmed" alone does NOT prove this specific player starts.
+    # A positive starter flag is mandatory, and "unconfirmed" never counts.
+    confirmation_explicit = confirmed is True or status_lower in {
+        "confirmed", "confirmed starter", "confirmed starters",
+        "lineup confirmed", "starting lineup confirmed",
+    }
+    if confirmation_explicit and starter is True:
+        return "Titular confirmado", True, status_text
 
     if starter is True:
         if any(word in status_lower for word in ["project", "probable", "expected"]):
@@ -260,9 +267,20 @@ def get_daily_lineups(target_date: date) -> pd.DataFrame:
     return normalize_daily_lineups(fetch_daily_lineups_raw(target_date))
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_daily_lineups_safe(target_date: date) -> tuple[pd.DataFrame, str, str]:
+    """Cache successful reads AND failures, avoiding timeouts on every UI rerun."""
+    checked_at = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d/%m/%Y %H:%M")
+    try:
+        return get_daily_lineups(target_date), "Consulta NBA", checked_at
+    except Exception as exc:
+        # No lineup status should be guessed from an unavailable NBA source.
+        return pd.DataFrame(), f"Feed NBA indisponível ({type(exc).__name__})", checked_at
+
+
 def clear_lineup_cache() -> None:
     """Limpa apenas o feed diário de lineups."""
-    for cached_fn in [fetch_daily_lineups_raw, get_daily_lineups]:
+    for cached_fn in [fetch_daily_lineups_raw, get_daily_lineups, get_daily_lineups_safe]:
         try:
             cached_fn.clear()
         except Exception:
