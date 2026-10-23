@@ -1013,9 +1013,9 @@ def render_injury_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
 
 def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
     st.markdown(
-        '<div class="section-note">Rotação projetada pelo depth chart da ESPN. '
-        'Depth 1 em cada posição é tratado como Titular projetado; isso não equivale a '
-        'lineup confirmado. O status visual não adiciona bônus artificial aos minutos.</div>',
+        '<div class="section-note">Escalações: confirmação explícita da NBA quando disponível; '
+        'sem confirmação, o depth chart ESPN informa apenas titulares projetados. '
+        'Nenhum status de titularidade altera automaticamente os minutos.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1075,6 +1075,8 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
         "PLAYER",
         "POSITION",
         "ROLE",
+        "LINEUP_SOURCE",
+        "LINEUP_CHECKED_BRT",
         "PROJ_MIN_V1",
         "MINUTES_SOURCE",
         "SAMPLE_STATUS",
@@ -1097,6 +1099,8 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
             "PLAYER": "Jogador",
             "POSITION": "Pos",
             "ROLE": "Status lineup",
+            "LINEUP_SOURCE": "Fonte escalação",
+            "LINEUP_CHECKED_BRT": "Consulta BRT",
             "PROJ_MIN_V1": "MIN proj",
             "MINUTES_SOURCE": "Fonte MIN",
             "SAMPLE_STATUS": "Amostra",
@@ -1119,6 +1123,8 @@ def render_lineup_report_tab(team_df: pd.DataFrame, team_name: str) -> None:
             "PLAYER": "Jogador",
             "POSITION": "Pos",
             "ROLE": "Status lineup",
+            "LINEUP_SOURCE": "Fonte escalação",
+            "LINEUP_CHECKED_BRT": "Consulta BRT",
             "PROJ_MIN_V1": "MIN proj",
             "MINUTES_SOURCE": "Fonte MIN",
             "SAMPLE_STATUS": "Amostra",
