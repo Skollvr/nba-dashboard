@@ -891,6 +891,7 @@ def build_form_context(
         scalar_defaults[f"H2H_{metric}"] = 0.0
 
     list_defaults = {
+        "RECENT_MIN_L10": [],
         "RECENT_PRA_L10": [],
         "RECENT_PTS_L10": [],
         "RECENT_REB_L10": [],
@@ -965,6 +966,13 @@ def build_form_context(
             "L10_MIN_MED": float(recent10["MIN"].median()) if "MIN" in recent10.columns and not recent10.empty else 0.0,
             "L5_MIN_MED": float(recent5["MIN"].median()) if "MIN" in recent5.columns and not recent5.empty else 0.0,
             "MIN_STD_L10": float(recent10["MIN"].std(ddof=0)) if "MIN" in recent10.columns and len(recent10) > 1 else 0.0,
+            # Observed minutes only, newest first. This supplements rather
+            # than replaces the original production-minute calculations.
+            "RECENT_MIN_L10": (
+                pd.to_numeric(recent10["MIN"], errors="coerce")
+                .dropna().loc[lambda vals: vals > 0].round(1).tolist()
+                if "MIN" in recent10.columns else []
+            ),
             "H2H_GP": float(len(h2h_logs)),
         }
 
