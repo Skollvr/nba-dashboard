@@ -856,6 +856,7 @@ def render_team_section_v2(
     cards_per_row: int,
     opp_abbr,
     season_scope: str = "Regular Season",
+    show_today_lineups: bool = False,
 ) -> None:
     if team_df.empty:
         st.warning(f"Não encontrei dados para {team_name}.")
@@ -936,6 +937,18 @@ def render_team_section_v2(
         # Reuse the SAME injury data that influenced projections. Refetching
         # ESPN here previously overwrote the official status on this tab.
         enriched_team_df = team_df.copy()
+        # This is a manual official-source reference, NOT an automatically
+        # confirmed lineup feed. The site may still list projected starters.
+        if show_today_lineups:
+            st.link_button(
+                "🏀 Conferir quintetos iniciais na NBA",
+                "https://www.nba.com/players/todays-lineups",
+                help="Site oficial da NBA. Verifique se o quinteto de cada equipe está confirmado ou apenas projetado.",
+            )
+            st.caption(
+                f"Consulte {team_name} na página de escalações de hoje. "
+                "Esta consulta é manual: titulares projetados não são titulares confirmados no aplicativo."
+            )
         ir_tab, lineup_tab = st.tabs(["Lesões NBA / ESPN", "Rotação ESPN"])
         with ir_tab:
             render_injury_report_tab(enriched_team_df, team_name)
