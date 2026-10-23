@@ -284,7 +284,9 @@ def test_focus_summary_preserves_line_even_if_player_has_no_game_sample():
         render_focus_summary_refresh(row, "PTS", ctx)
     assert "Linha BetMGM" in html[0]
     assert "27.5" in html[0]
-    assert "Cotação existente; projeção ainda indisponível" in html[0]
+    assert "Linha disponível · Edge sem amostra" in html[0]
+    assert "nova-overview" in html[0]
+    assert 'class="nova-overview-number">—</div>' in html[0]
 
 
 def _book_row(**overrides):
@@ -486,3 +488,78 @@ def test_no_sportsbooks_keeps_manual_market_balloons():
     )
     assert line == "Linha ativa: REB • manual"
     assert mode == "Modo mercado: Manual"
+
+
+def test_focus_overview_only_contains_three_essential_decision_cards():
+    html = []
+    player = _player(
+        PROJ_PTS=22.0, PROJ_PTS_V1=21.7,
+        L5_PTS=23.2, L10_PTS=22.4,
+        SEASON_PTS=22.1, SEASON_GP=3,
+        PROJ_MIN_V1=34.1, MINUTES_SOURCE="Modelo interno",
+        MATCHUP_LABEL_PTS_V1="Neutro",
+    )
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_focus_summary_refresh(player, "PTS", _context(21.7, True))
+    assert len(html) == 1
+    assert html[0].count('class="nova-overview-card') == 3
+    assert 'class="nova-overview-grid"' in html[0]
+    assert "Projeção contextual · PTS" in html[0]
+    assert "21.7" in html[0]
+    assert "Linha BetMGM" in html[0] and "20.5" in html[0]
+    assert "Edge" in html[0] and "+1.5" in html[0]
+    assert "Média últimos 10 · PTS" in html[0] and "22.4" in html[0]
+    assert "L5 <b>23.2</b>" in html[0]
+    assert "Matchup Neutro" in html[0]
+    assert "34.1 min estimados" in html[0]
+
+
+def test_focus_overview_absent_quote_does_not_invent_edge():
+    html = []
+    ctx = _context(21.7, False)
+    player = _player(PROJ_PTS_V1=21.7, L5_PTS=23.0)
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_focus_summary_refresh(player, "PTS", ctx)
+    assert "Sem linha ativa para comparação" in html[0]
+    assert "Informe uma linha para comparar" in html[0]
+    assert 'class="nova-overview-edge' not in html[0]
+
+
+def test_focus_overview_clears_recent_stats_for_zero_game_sample():
+    html = []
+    player = _player(
+        SEASON_GP=0, SEASON_PTS=22.1, L5_PTS=24.4, L10_PTS=22.4,
+        PROJ_PTS_V1=float("nan"),
+    )
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_focus_summary_refresh(player, "PTS", _context(float("nan"), False))
+    assert "0 jogos na temporada" in html[0]
+    assert "22.4" not in html[0] and "24.4" not in html[0]
+
+
+def test_focus_overview_uses_html_escape_for_external_names():
+    html = []
+    player = _player(
+        MINUTES_SOURCE="<script>alert(1)</script>",
+        MATCHUP_LABEL_PTS_V1="<b>inventado</b>",
+    )
+    with patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)):
+        render_focus_summary_refresh(player, "PTS", _context(21.7, True))
+    assert "<script>" not in html[0]
+    assert "&lt;script&gt;" in html[0]
+    assert "<b>inventado</b>" not in html[0]
+
+
+def test_focus_overview_scoped_to_modern_tab_with_calculation_collapsed():
+    import inspect
+    from ui_components import render_player_focus_panel
+    source = inspect.getsource(render_player_focus_panel)
+    assert 'with overview_tab:' in source
+    assert 'if modern_focus:' in source
+    assert 'with st.expander("Ver composição da projeção e critérios", expanded=False):' in source
+    assert 'render_focus_summary_refresh(row, visual_metric, visual_line_context)' in source
+    assert source.index('with overview_tab:') < source.index('render_focus_summary_refresh(')
+    assert source.index('render_focus_summary_refresh(') < source.index('with detail_tab:')
+    css = __import__("pathlib").Path("style_refresh.css").read_text(encoding="utf-8")
+    assert ".nova-overview-grid" in css
+    assert "@media(max-width:550px)" in css
