@@ -190,9 +190,9 @@ def render_player_card_refresh(
         over_text = _number(market_odds["over"], 2)
         under_text = _number(market_odds["under"], 2)
         odds_html = (
-            '<div class="nova-card-odds">'
-            f'<span>Over <strong>{over_text}</strong></span>'
-            f'<span>Under <strong>{under_text}</strong></span>'
+            '<div class="nova-card-odds" aria-label="Odds decimais da linha">'
+            f'<span class="nova-odd-over">Over {over_text}</span>'
+            f'<span class="nova-odd-under">Under {under_text}</span>'
             '</div>'
         )
 
