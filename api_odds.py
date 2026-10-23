@@ -1,5 +1,5 @@
 import os
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from zoneinfo import ZoneInfo
 import requests
 import time
@@ -105,7 +105,7 @@ def _request_events_page(params: dict, api_key: str):
 # ==========================================
 def _brasilia_utc_window(selected_date: date) -> tuple[str, str]:
     """Events can cross midnight UTC while still belonging to a BRT game day."""
-    start = datetime.combine(selected_date, time.min, tzinfo=ZoneInfo("America/Sao_Paulo"))
+    start = datetime.combine(selected_date, datetime_time.min, tzinfo=ZoneInfo("America/Sao_Paulo"))
     end = start + timedelta(days=1)
     return (
         start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
