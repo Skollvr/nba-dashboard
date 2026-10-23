@@ -319,8 +319,8 @@ def test_market_odds_present_beside_correct_active_fanduel_line():
     ):
         render_player_card_refresh(row, "PTS", None, True)
     assert "Linha FanDuel" in html[0]
-    assert "Over <strong>1.87</strong>" in html[0]
-    assert "Under <strong>1.95</strong>" in html[0]
+    assert '<span class="nova-odd-over">Over 1.87</span>' in html[0]
+    assert '<span class="nova-odd-under">Under 1.95</span>' in html[0]
     assert "Edge +2.5" in html[0]
 
 
@@ -381,7 +381,7 @@ def test_market_quotes_visible_even_without_valid_player_projection():
         patch("ui_refresh.get_line_context", return_value=context),
     ):
         render_player_card_refresh(row, "PTS", None, True)
-    assert "Over <strong>1.87</strong>" in html[0]
+    assert '<span class="nova-odd-over">Over 1.87</span>' in html[0]
     assert "Sem Edge" in html[0]
 
 
@@ -403,3 +403,24 @@ def test_large_early_season_banner_removed_but_data_quality_checks_remain():
     assert "Amostra inicial da temporada — referência mínima" not in source
     assert "Os dados de game logs" not in source or "mas não retornou game logs" in source
     assert "mas não retornou game logs" in source
+
+
+def test_odds_are_inline_and_use_distinct_over_under_colors():
+    """Regression for long cards caused by strong tags wrapping vertically."""
+    from pathlib import Path
+    from ui_refresh import render_player_card_refresh
+    html = []
+    with (
+        patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)),
+        patch("ui_refresh.get_line_context", return_value=_book_context()),
+    ):
+        render_player_card_refresh(_book_row(), "PTS", None, True)
+    fragment = html[0].split('class="nova-card-odds"')[1].split("</div>")[0]
+    assert "<strong>" not in fragment
+    assert '<span class="nova-odd-over">Over 1.87</span>' in fragment
+    assert '<span class="nova-odd-under">Under 1.95</span>' in fragment
+    assert fragment.index("nova-odd-over") < fragment.index("nova-odd-under")
+    css = Path("style_refresh.css").read_text(encoding="utf-8")
+    assert "flex-wrap:nowrap !important" in css
+    assert ".nova-odd-over { color:#70e4a5 !important; }" in css
+    assert ".nova-odd-under { color:#ff8990 !important; }" in css
