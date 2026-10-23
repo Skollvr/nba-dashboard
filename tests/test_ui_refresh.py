@@ -280,3 +280,126 @@ def test_focus_summary_preserves_line_even_if_player_has_no_game_sample():
     assert "Linha BetMGM" in html[0]
     assert "27.5" in html[0]
     assert "Cotação existente; projeção ainda indisponível" in html[0]
+
+
+def _book_row(**overrides):
+    kwargs = {
+        "MARKET_PTS_LINE": 28.5,
+        "MARKET_PTS_SOURCE": "FanDuel",
+        "MARKET_PTS_OVER_DEC": 1.87,
+        "MARKET_PTS_UNDER_DEC": 1.95,
+    }
+    kwargs.update(overrides)
+    return _player(**kwargs)
+
+
+def _book_context(**overrides):
+    context = {
+        "projection": 31.0, "has_active_line": True,
+        "has_market_line": True,
+        "line_value": 28.5,
+        "quoted_line": 28.5,
+        "quoted_source": "FanDuel",
+        "line_source": "FanDuel",
+        "edge": 2.5,
+    }
+    context.update(overrides)
+    return context
+
+
+def test_market_odds_present_beside_correct_active_fanduel_line():
+    from ui_refresh import card_market_odds
+    row = _book_row()
+    odds = card_market_odds(row, "PTS", _book_context(), True)
+    assert odds == {"source": "FanDuel", "over": 1.87, "under": 1.95}
+    html = []
+    with (
+        patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)),
+        patch("ui_refresh.get_line_context", return_value=_book_context()),
+    ):
+        render_player_card_refresh(row, "PTS", None, True)
+    assert "Linha FanDuel" in html[0]
+    assert "Over <strong>1.87</strong>" in html[0]
+    assert "Under <strong>1.95</strong>" in html[0]
+    assert "Edge +2.5" in html[0]
+
+
+def test_betmgm_quote_is_shown_not_fanduel_value():
+    from ui_refresh import card_market_odds
+    row = _book_row(
+        MARKET_PTS_SOURCE="BetMGM",
+        MARKET_PTS_OVER_DEC=2.15,
+        MARKET_PTS_UNDER_DEC=1.71,
+    )
+    ctx = _book_context(quoted_source="BetMGM", line_source="BetMGM")
+    odds = card_market_odds(row, "PTS", ctx, True)
+    assert odds == {"source": "BetMGM", "over": 2.15, "under": 1.71}
+
+
+def test_manual_line_cannot_inherit_bookmaker_odds():
+    from ui_refresh import card_market_odds
+    assert card_market_odds(
+        _book_row(), "PTS",
+        _book_context(quoted_source="Manual", line_source="Manual"),
+        True
+    ) is None
+    assert card_market_odds(_book_row(), "PTS", _book_context(), False) is None
+
+
+def test_odds_must_match_selected_book_and_line():
+    from ui_refresh import card_market_odds
+    assert card_market_odds(
+        _book_row(), "PTS",
+        _book_context(quoted_source="BetMGM", line_source="BetMGM"),
+        True,
+    ) is None
+    assert card_market_odds(
+        _book_row(), "PTS", _book_context(quoted_line=29.5), True
+    ) is None
+
+
+def test_partial_odds_are_not_fabricated_and_missing_both_are_hidden():
+    from ui_refresh import card_market_odds
+    row = _book_row(MARKET_PTS_UNDER_DEC=float("nan"))
+    odds = card_market_odds(row, "PTS", _book_context(), True)
+    assert odds == {"source": "FanDuel", "over": 1.87, "under": None}
+    assert card_market_odds(
+        _book_row(MARKET_PTS_OVER_DEC=None, MARKET_PTS_UNDER_DEC=None),
+        "PTS", _book_context(), True
+    ) is None
+
+
+def test_market_quotes_visible_even_without_valid_player_projection():
+    from ui_refresh import card_market_odds
+    context = _book_context(
+        projection=float("nan"), has_active_line=False, line_source="Dados ESPN incompletos",
+    )
+    row = _book_row(SEASON_GP=0, PROJ_PTS_V1=float("nan"))
+    html = []
+    with (
+        patch("ui_refresh.st.markdown", side_effect=lambda body, **kw: html.append(body)),
+        patch("ui_refresh.get_line_context", return_value=context),
+    ):
+        render_player_card_refresh(row, "PTS", None, True)
+    assert "Over <strong>1.87</strong>" in html[0]
+    assert "Sem Edge" in html[0]
+
+
+def test_selection_uses_small_official_team_shields_and_preserves_names():
+    import inspect
+    import app
+    source = inspect.getsource(app.main)
+    assert 'TEAM_LOGO_URL.format(team_id=team_id)' in source
+    assert 'st.image(TEAM_LOGO_URL.format(team_id=team_id), width=26)' in source
+    assert 'st.session_state[team_key] = team_name' in source
+    assert 'st.button(' in source
+    assert 'st.segmented_control(\n            "Time em análise"' not in source
+
+
+def test_large_early_season_banner_removed_but_data_quality_checks_remain():
+    import inspect
+    import app
+    source = inspect.getsource(app.main)
+    assert "Amostra inicial da temporada — referência mínima" not in source
+    assert "Os dados de game logs" not in source or "mas não retornou game logs" in source
+    assert "mas não retornou game logs" in source
