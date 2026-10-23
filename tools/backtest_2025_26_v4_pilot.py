@@ -108,7 +108,16 @@ def _past_player_logs(roster, full_rows, date_str):
                     rows.append(part)
             except Exception as exc:
                 print("ATHLETE_LOG_FAILURE", pid, repr(exc), flush=True)
-    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+    history = pd.concat(rows, ignore_index=True)
+    # ESPN athlete gamelogs contain player IDs and results but do not include
+    # PLAYER_NAME/TEAM_ID; the dashboard's normal provider supplies these.
+    # Use ONLY the player's pregame roster identity, not a future roster.
+    roster_by_id = roster.drop_duplicates("PLAYER_ID").set_index("PLAYER_ID")
+    history["PLAYER_NAME"] = history["PLAYER_ID"].map(roster_by_id["PLAYER"].to_dict())
+    history["TEAM_ID"] = int(roster["TEAM_ID"].iloc[0])
+    return history
 
 def _roster_provider(team_id, season):
     return ACTIVE["roster"].copy()
