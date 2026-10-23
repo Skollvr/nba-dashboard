@@ -1530,7 +1530,7 @@ def merge_betmgm_odds(
     """Merge one bookmaker's props, preserving the other bookmaker columns."""
     if team_df.empty:
         return team_df
-    if bookmaker_id not in {"betmgm", "stake"}:
+    if bookmaker_id not in {"betmgm", "fanduel"}:
         raise ValueError("Casa não suportada.")
     prefix = bookmaker_id.upper() + "_"
     enriched = team_df.copy()
@@ -1594,7 +1594,7 @@ def select_bookmaker_lines(
             )
             valid = values.notna() & (values > 0) & chosen.isna()
             chosen.loc[valid] = values.loc[valid]
-            source.loc[valid] = "Stake" if book == "stake" else "BetMGM"
+            source.loc[valid] = "FanDuel" if book == "fanduel" else "BetMGM"
             for field in ("OVER_DEC", "UNDER_DEC"):
                 original = f"{prefix}_{metric}_{field}"
                 out.loc[valid, f"MARKET_{metric}_{field}"] = pd.to_numeric(
@@ -1913,7 +1913,7 @@ def get_matchup_context(
     season: str,
     include_market: bool,
     season_scope: str = "Regular Season",
-    include_stake: bool = False,
+    include_fanduel: bool = False,
     bookmaker_priority: str = "betmgm",
     roster_season: str | None = None,
     target_date: date | None = None,
@@ -2019,10 +2019,10 @@ def get_matchup_context(
     # both houses, with per-metric quotes selected according to user priority.
     enabled_books = tuple(
         book for book, enabled in (
-            ("betmgm", include_market), ("stake", include_stake)
+            ("betmgm", include_market), ("fanduel", include_fanduel)
         ) if enabled
     )
-    book_frames = {"betmgm": pd.DataFrame(), "stake": pd.DataFrame()}
+    book_frames = {"betmgm": pd.DataFrame(), "fanduel": pd.DataFrame()}
     market_status_parts = []
     if enabled_books:
         if not get_odds_api_key():
@@ -2032,9 +2032,9 @@ def get_matchup_context(
         else:
             report("Consultando odds: " + ", ".join(enabled_books) + "...")
             # Treat each sportsbook as an isolated data source. A forbidden
-            # Stake request must not erase an otherwise working BetMGM market.
+            # FanDuel request must not erase an otherwise working BetMGM market.
             for book in enabled_books:
-                label = "Stake" if book == "stake" else "BetMGM"
+                label = "FanDuel" if book == "fanduel" else "BetMGM"
                 try:
                     odds_events = fetch_nba_odds_events(
                         target_date=target_date,
@@ -2085,10 +2085,10 @@ def get_matchup_context(
                     )
 
     else:
-        market_status_parts.append("BetMGM e Stake desativadas — modo manual")
+        market_status_parts.append("BetMGM e FanDuel desativadas — modo manual")
 
     report("Finalizando projeções e cards...")
-    for book in ("betmgm", "stake"):
+    for book in ("betmgm", "fanduel"):
         away_df = merge_betmgm_odds(
             away_df, book_frames[book], bookmaker_id=book
         )

@@ -126,13 +126,13 @@ def fetch_nba_odds_events(
     api_key = get_odds_api_key()
     if not api_key or not bookmaker_ids:
         return []
-    if not set(bookmaker_ids).issubset({"betmgm", "stake"}):
+    if not set(bookmaker_ids).issubset({"betmgm", "fanduel"}):
         raise ValueError("Bookmaker inválida para o dashboard.")
 
     params = {
         "leagueID": "NBA",
         "bookmakerID": ",".join(
-            book for book in ("betmgm", "stake") if book in bookmaker_ids
+            book for book in ("betmgm", "fanduel") if book in bookmaker_ids
         ),
         "oddsAvailable": "true",
         "limit": 100,
@@ -213,7 +213,7 @@ def extract_betmgm_player_props(
     event: Optional[dict], bookmaker_id: str = "betmgm",
 ) -> pd.DataFrame:
     """Read only the chosen bookmaker's player props, not consensus odds."""
-    if bookmaker_id not in {"betmgm", "stake"}:
+    if bookmaker_id not in {"betmgm", "fanduel"}:
         raise ValueError("Casa não suportada.")
     prefix = bookmaker_id.upper()
     if not event:

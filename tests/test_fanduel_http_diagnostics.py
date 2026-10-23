@@ -1,4 +1,4 @@
-"""Diagnose blocked Stake odds without disrupting valid BetMGM lines."""
+"""Diagnose blocked FanDuel odds without disrupting valid BetMGM lines."""
 from datetime import date
 from unittest.mock import patch
 
@@ -33,7 +33,7 @@ def test_http_403_preserved_without_retry_or_exposing_key():
         patch("api_odds.time.sleep") as sleep,
     ):
         with pytest.raises(SportsGameOddsHTTPError) as error:
-            _request_events_page({"bookmakerID": "stake"}, "never-display-this")
+            _request_events_page({"bookmakerID": "fanduel"}, "never-display-this")
     assert error.value.status_code == 403
     assert "never-display-this" not in str(error.value)
     get.assert_called_once()
@@ -43,7 +43,7 @@ def test_http_403_preserved_without_retry_or_exposing_key():
 def test_http_400_is_classified_separately_from_no_lines():
     with patch("api_odds.requests.get", return_value=fake_http_response(400)):
         with pytest.raises(SportsGameOddsHTTPError) as error:
-            _request_events_page({"bookmakerID": "stake"}, "secret-key")
+            _request_events_page({"bookmakerID": "fanduel"}, "secret-key")
     assert error.value.status_code == 400
 
 
@@ -55,7 +55,7 @@ def test_http_429_retries_only_once_then_returns_success():
         ) as get,
         patch("api_odds.time.sleep") as sleep,
     ):
-        response = _request_events_page({"bookmakerID": "stake"}, "key")
+        response = _request_events_page({"bookmakerID": "fanduel"}, "key")
     assert response.status_code == 200
     assert get.call_count == 2
     sleep.assert_called_once()
@@ -97,9 +97,9 @@ def _betmgm_event():
     }
 
 
-def test_stake_forbidden_preserves_betmgm_player_line():
+def test_fanduel_forbidden_preserves_betmgm_player_line():
     def odds_fetch(target_date, bookmaker_ids):
-        if bookmaker_ids == ("stake",):
+        if bookmaker_ids == ("fanduel",):
             raise SportsGameOddsHTTPError(403)
         assert bookmaker_ids == ("betmgm",)
         return [_betmgm_event()]
@@ -118,14 +118,14 @@ def test_stake_forbidden_preserves_betmgm_player_line():
             1610612739, 1610612755,
             "Cleveland Cavaliers", "Philadelphia 76ers",
             "2026-27", include_market=True,
-            include_stake=True,
+            include_fanduel=True,
             target_date=date(2026, 10, 23),
         )
 
     assert fetch.call_count == 2
     assert home.iloc[0]["BETMGM_PTS_LINE"] == 28.5
-    assert pd.isna(home.iloc[0]["STAKE_PTS_LINE"])
+    assert pd.isna(home.iloc[0]["FANDUEL_PTS_LINE"])
     assert home.iloc[0]["MARKET_PTS_SOURCE"] == "BetMGM"
     assert home.iloc[0]["MARKET_PTS_LINE"] == 28.5
-    assert "Stake: HTTP 403" in home.iloc[0]["ODDS_FETCH_STATUS"]
+    assert "FanDuel: HTTP 403" in home.iloc[0]["ODDS_FETCH_STATUS"]
     assert "BetMGM: 1 jogador(es) com props" in home.iloc[0]["ODDS_FETCH_STATUS"]

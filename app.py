@@ -67,7 +67,7 @@ def main():
             '<span>● Temporada 2026/27 disponível</span>'
             '<span>Dados ESPN + boletim oficial NBA</span>'
             '<span>Horários de Brasília</span>'
-            '<span>Linhas BetMGM / manual</span>'
+            '<span>BetMGM + FanDuel / manual</span>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -93,7 +93,7 @@ def main():
         )
         st.caption(
             "Dados de jogo: ESPN · Lesões: boletim oficial NBA · "
-            "Linhas: BetMGM quando disponíveis, com opção manual."
+            "Linhas: BetMGM e FanDuel quando disponíveis, com opção manual."
         )
 
     today = get_brasilia_today()
@@ -161,19 +161,19 @@ def main():
             "Usar BetMGM", value=True,
             help="Busca linhas e odds BetMGM pela SportsGameOdds.",
         )
-        enable_stake = st.toggle(
-            "Usar Stake (teste)", value=False,
-            help="Consulta Stake (stake) pela SportsGameOdds; depende do plano e dos mercados disponíveis.",
+        enable_fanduel = st.toggle(
+            "Usar FanDuel", value=False,
+            help="Consulta FanDuel (fanduel) pela SportsGameOdds, incluída no plano gratuito; disponibilidade varia por partida e mercado.",
         )
-        use_market_line = enable_betmgm or enable_stake
-        if enable_betmgm and enable_stake:
+        use_market_line = enable_betmgm or enable_fanduel
+        if enable_betmgm and enable_fanduel:
             priority_label = st.radio(
                 "Casa prioritária quando ambas tiverem linha",
-                ["BetMGM", "Stake"], horizontal=True,
+                ["BetMGM", "FanDuel"], horizontal=True,
             )
             bookmaker_priority = priority_label.lower()
         else:
-            bookmaker_priority = "stake" if enable_stake else "betmgm"
+            bookmaker_priority = "fanduel" if enable_fanduel else "betmgm"
         if not api_key_available and use_market_line:
             st.caption(
                 "SportsGameOdds sem chave: configure SPORTSGAMEODDS_API_KEY "
@@ -263,7 +263,7 @@ def main():
         f"{selected_game['GAME_ID']}::"
         f"{season_scope}::"
         f"{analysis_season}::"
-        f"{int(enable_betmgm)}::{int(enable_stake)}::{bookmaker_priority}"
+        f"{int(enable_betmgm)}::{int(enable_fanduel)}::{bookmaker_priority}"
     )
 
     if st.session_state.get("loaded_matchup_key") != selected_game_key:
@@ -282,7 +282,7 @@ def main():
                 analysis_season,
                 enable_betmgm,
                 season_scope=season_scope,
-                include_stake=enable_stake,
+                include_fanduel=enable_fanduel,
                 bookmaker_priority=bookmaker_priority,
                 roster_season=season,
                 target_date=selected_date,
@@ -381,7 +381,7 @@ def main():
             else "Odds não confirmadas para este confronto"
         )
         st.caption(fetch_status)
-        for book, active in (("BetMGM", enable_betmgm), ("Stake", enable_stake)):
+        for book, active in (("BetMGM", enable_betmgm), ("FanDuel", enable_fanduel)):
             if not active:
                 continue
             col = f"{book.upper()}_{line_metric}_LINE"
@@ -431,11 +431,19 @@ def main():
                     "BetMGM": pd.to_numeric(
                         player_row.get(f"BETMGM_{line_metric}_LINE"), errors="coerce"
                     ) if enable_betmgm else float("nan"),
-                    "Stake": pd.to_numeric(
-                        player_row.get(f"STAKE_{line_metric}_LINE"), errors="coerce"
-                    ) if enable_stake else float("nan"),
+                    "FanDuel": pd.to_numeric(
+                        player_row.get(f"FANDUEL_{line_metric}_LINE"), errors="coerce"
+                    ) if enable_fanduel else float("nan"),
                     "Linha escolhida": pd.to_numeric(
                         player_row.get(market_col), errors="coerce"
+                    ) if use_market_line else float("nan"),
+                    "Odd Over": pd.to_numeric(
+                        player_row.get(f"MARKET_{line_metric}_OVER_DEC"),
+                        errors="coerce",
+                    ) if use_market_line else float("nan"),
+                    "Odd Under": pd.to_numeric(
+                        player_row.get(f"MARKET_{line_metric}_UNDER_DEC"),
+                        errors="coerce",
                     ) if use_market_line else float("nan"),
                     "Linha manual": float("nan"),
                 }
@@ -465,7 +473,10 @@ def main():
                 manual_lines_df,
                 hide_index=True,
                 use_container_width=True,
-                disabled=["Jogador", "Time", "BetMGM", "Stake", "Linha escolhida"],
+                disabled=[
+                    "Jogador", "Time", "BetMGM", "FanDuel",
+                    "Linha escolhida", "Odd Over", "Odd Under",
+                ],
                 column_config={
                     "_PLAYER_ID": None,
                     "Jogador": st.column_config.TextColumn("Jogador"),
@@ -473,11 +484,17 @@ def main():
                     "BetMGM": st.column_config.NumberColumn(
                         "Linha BetMGM", format="%.1f"
                     ),
-                    "Stake": st.column_config.NumberColumn(
-                        "Linha Stake", format="%.1f"
+                    "FanDuel": st.column_config.NumberColumn(
+                        "Linha FanDuel", format="%.1f"
                     ),
                     "Linha escolhida": st.column_config.NumberColumn(
                         "Linha prioritária", format="%.1f"
+                    ),
+                    "Odd Over": st.column_config.NumberColumn(
+                        "Odd Over", format="%.2f"
+                    ),
+                    "Odd Under": st.column_config.NumberColumn(
+                        "Odd Under", format="%.2f"
                     ),
                     "Linha manual": st.column_config.NumberColumn(
                         f"Linha manual {line_metric}",

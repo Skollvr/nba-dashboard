@@ -35,5 +35,5 @@ jobs:
             tests/test_nba_pdf_recovery.py \
             tests/test_ui_refresh.py \
             tests/test_betmgm_odds.py \
-            tests/test_stake_odds.py \
-            tests/test_stake_http_diagnostics.py
+            tests/test_fanduel_odds.py \
+            tests/test_fanduel_http_diagnostics.py
