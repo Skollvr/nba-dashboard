@@ -214,7 +214,11 @@ def main():
         min_games = st.slider("Min Jogos", 0, 82, 0 if early_2627_test else 5)
         min_minutes = st.slider("Min Minutos", 0, 40, 0 if early_2627_test else 15)
         role_filter = st.pills("Jogadores", ROLE_OPTIONS, default="Todos")
-        line_metric = st.pills("Métrica", LINE_METRIC_OPTIONS, default="PTS")
+        # One metric control now lives just above the player cards. Read its
+        # Streamlit session state here so manual lines and Panorama stay synced.
+        line_metric = st.session_state.get("dashboard_line_metric", "PTS")
+        if line_metric not in LINE_METRIC_OPTIONS:
+            line_metric = "PTS"
         line_value = None
         api_key_available = bool(get_odds_api_key())
         enable_betmgm = st.toggle(
@@ -874,6 +878,12 @@ def main():
             chart_mode, line_metric, line_value, use_market_line,
             cards_per_row, opp_abbr, season_scope=season_scope,
             show_today_lineups=(selected_date == today),
+            preferred_bookmaker=bookmaker_priority,
+            enabled_bookmakers=tuple(
+                book for book, enabled in (
+                    ("betmgm", enable_betmgm), ("fanduel", enable_fanduel)
+                ) if enabled
+            ),
         )
 
     if st.session_state["dashboard_visual_mode"] == "Renovado":
