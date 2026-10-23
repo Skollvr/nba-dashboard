@@ -258,6 +258,21 @@ def main():
     game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
+    # The NBA's public page covers today's entire schedule, not a guaranteed
+    # per-game confirmed feed. It must not overwrite ESPN projected starters
+    # or mark the selected roster as officially confirmed.
+    if selected_date == today:
+        st.link_button(
+            "🏀 Consultar escalações de hoje na NBA",
+            "https://www.nba.com/players/todays-lineups",
+            help="Abre o site oficial da NBA. Confira as duas equipes e se o quinteto está confirmado ou projetado.",
+        )
+        st.caption(
+            f"Confira {selected_game['away_team_name']} x "
+            f"{selected_game['home_team_name']} na página da NBA. "
+            "Titular projetado não significa titular confirmado."
+        )
+
     selected_game_key = (
         f"{selected_date.isoformat()}::"
         f"{selected_game['GAME_ID']}::"
