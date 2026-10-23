@@ -852,6 +852,54 @@ def render_player_focus_panel(
                     st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
             else:
                 st.error("Erro ao carregar log do jogador.")            
+def player_market_header_labels(
+    team_df: pd.DataFrame,
+    metric: str,
+    use_market_line: bool,
+    preferred_bookmaker: str = "betmgm",
+    enabled_bookmakers: tuple[str, ...] = (),
+) -> tuple[str, str]:
+    """Accurate market labels for the team cards, without changing quotes.
+
+    Prioritized bookmaker is user-selected. Actual player quotes can fall back
+    to the second enabled bookmaker; do not silently label those BetMGM quotes
+    as FanDuel (or vice versa).
+    """
+    if not use_market_line:
+        return f"Linha ativa: {metric} • manual", "Modo mercado: Manual"
+
+    names = {"betmgm": "BetMGM", "fanduel": "FanDuel"}
+    enabled = [name for name in enabled_bookmakers if name in names]
+    priority = str(preferred_bookmaker).strip().lower()
+    if priority not in enabled:
+        priority = enabled[0] if enabled else (
+            priority if priority in names else "betmgm"
+        )
+    primary = names[priority]
+    fallbacks = [names[name] for name in enabled if name != priority]
+
+    col = f"MARKET_{metric}_SOURCE"
+    sources = set()
+    if team_df is not None and not team_df.empty and col in team_df.columns:
+        sources = set(team_df[col].fillna("").astype(str).str.strip().tolist())
+    used_fallbacks = [fallback for fallback in fallbacks if fallback in sources]
+
+    if used_fallbacks:
+        active = f"{primary} / {' / '.join(used_fallbacks)} por jogador"
+    elif primary in sources:
+        active = f"{primary} por jogador"
+    else:
+        active = f"{primary} quando houver"
+
+    mode = f"Modo mercado: {primary}"
+    if fallbacks:
+        mode += " prioritária"
+        if used_fallbacks:
+            mode += f" • alternativa {' / '.join(used_fallbacks)}"
+
+    return f"Linha ativa: {metric} • {active}", mode
+
+
 def render_team_section_v2(
     team_name: str,
     team_df: pd.DataFrame,
@@ -869,6 +917,8 @@ def render_team_section_v2(
     opp_abbr,
     season_scope: str = "Regular Season",
     show_today_lineups: bool = False,
+    preferred_bookmaker: str = "betmgm",
+    enabled_bookmakers: tuple[str, ...] = (),
 ) -> None:
     if team_df.empty:
         st.warning(f"Não encontrei dados para {team_name}.")
@@ -889,16 +939,27 @@ def render_team_section_v2(
     else:
         st.markdown(f"### {team_name}")
 
-    line_info_text = (
-        f"Linha ativa: {line_metric} • mercado por jogador (BetMGM quando houver)"
-        if use_market_line
-        else f"Linha ativa: {line_metric} {format_number(line_value)} • manual"
+    line_info_text, mode_info_text = player_market_header_labels(
+        filtered_df, line_metric, use_market_line,
+        preferred_bookmaker=preferred_bookmaker,
+        enabled_bookmakers=enabled_bookmakers,
     )
-
     st.markdown(
-        f'<div><span class="info-pill">Jogadores: {len(filtered_df)}</span><span class="info-pill">{line_info_text}</span><span class="info-pill">Modo mercado: {"BetMGM quando houver" if use_market_line else "Manual"}</span></div>',
+        f'<div><span class="info-pill">Jogadores: {len(filtered_df)}</span>'
+        f'<span class="info-pill">{escape_html(line_info_text)}</span>'
+        f'<span class="info-pill">{escape_html(mode_info_text)}</span></div>',
         unsafe_allow_html=True,
     )
+
+    # The only global metric selector lives just above the player cards.
+    # Its session-state value is read at the start of app.main() so the
+    # pre-card manual-line editor and the Panorama use this same metric.
+    chosen_metric = st.pills(
+        "Métrica", LINE_METRIC_OPTIONS, default="PTS",
+        key="dashboard_line_metric",
+    )
+    if chosen_metric is not None and chosen_metric != line_metric:
+        st.rerun()
 
     st.markdown(
         '<div class="section-note">Cards curtos no topo e painel detalhado do jogador sob demanda.</div>',
