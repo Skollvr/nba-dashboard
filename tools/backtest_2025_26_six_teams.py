@@ -50,6 +50,27 @@ def summarize(df: pd.DataFrame, group: list[str]) -> pd.DataFrame:
     return df.groupby(group, dropna=False).apply(per_group, include_groups=False).reset_index()
 
 
+def player_cluster_uncertainty(details: pd.DataFrame) -> pd.DataFrame:
+    """Bootstrapped paired MAE benefit, sampling PLAYER groups not individual games."""
+    rng = np.random.default_rng(2026)
+    records = []
+    for metric, part in details.groupby("METRICA"):
+        group = part.assign(GAIN=part["ERRO_L10"] - part["ERRO_ABS"]).groupby("PLAYER_ID")["GAIN"].agg(["sum", "count"])
+        sums = group["sum"].to_numpy(dtype=float)
+        counts = group["count"].to_numpy(dtype=float)
+        indices = rng.integers(0, len(group), size=(2500, len(group)))
+        estimates = sums[indices].sum(axis=1) / counts[indices].sum(axis=1)
+        lower, upper = np.quantile(estimates, [0.025, 0.975])
+        records.append({
+            "METRICA": metric,
+            "GAIN_MAE": round(float(sums.sum() / counts.sum()), 4),
+            "CI95_JOGADOR_INF": round(float(lower), 4),
+            "CI95_JOGADOR_SUP": round(float(upper), 4),
+            "JOGADORES": len(group),
+        })
+    return pd.DataFrame(records).sort_values("METRICA")
+
+
 def fetch_historical_boxscores() -> tuple[pd.DataFrame, list[dict]]:
     blocks, coverage = [], []
     for abbr, team_id in TEAMS.items():
@@ -90,6 +111,11 @@ def fetch_historical_boxscores() -> tuple[pd.DataFrame, list[dict]]:
     all_games = all_games.dropna(subset=["PLAYER_ID", "GAME_DATE", "GAME_ID"])
     all_games = all_games[all_games["GAME_ID"].astype(str).str.strip().ne("")]
     all_games = all_games.drop_duplicates(["PLAYER_ID", "GAME_ID"]).copy()
+    # ESPN's NYK 2025 schedule includes the NBA Cup championship as a
+    # 'regular-season' event, but the final is explicitly excluded from
+    # official regular-season totals. Do not evaluate OR train on that game.
+    # NBA Cup final 2025-12-16: SAS @ NYK; ESPN event 401809839.
+    all_games = all_games[all_games["GAME_ID"].astype(str).ne("401809839")].copy()
     for metric in ("MIN", "PTS", "REB", "AST", "FG3M", "FGA", "FG3A"):
         all_games[metric] = pd.to_numeric(all_games[metric], errors="coerce")
     all_games = all_games.dropna(subset=["MIN", "PTS", "REB", "AST"])
@@ -176,7 +202,10 @@ def main() -> None:
         overall.to_csv(OUT / "metrics.csv", index=False)
         monthly.to_csv(OUT / "metrics_by_month.csv", index=False)
         teams.to_csv(OUT / "metrics_by_team.csv", index=False)
+        uncertainty = player_cluster_uncertainty(details)
+        uncertainty.to_csv(OUT / "cluster_uncertainty.csv", index=False)
         print("\nOVERALL CORE BACKTEST (NOT FULL V4):\n", overall.to_string(index=False), flush=True)
+        print("\nPAIRED MAE BENEFIT, BOOTSTRAP RESAMPLED BY PLAYER:\n", uncertainty.to_string(index=False), flush=True)
         print("\nPTS BY MONTH:\n", monthly[monthly["METRICA"].eq("PTS")].to_string(index=False), flush=True)
 
     manifest = {
@@ -187,6 +216,7 @@ def main() -> None:
         "games": int(logs["GAME_ID"].nunique()),
         "players": int(logs["PLAYER_ID"].nunique()),
         "predictions": int(len(details)),
+        "excluded_2025_nba_cup_championship": "401809839 (NYK vs SAS 2025-12-16; does not count regular season)",
         "evaluates_live_matchup_v4": False,
         "evaluates_historical_injuries": False,
         "evaluates_historical_bookmaker_quotes": False,
