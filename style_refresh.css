@@ -224,17 +224,26 @@
   color:#abc2d8 !important; font-size:.63rem;
   font-weight:670; line-height:1.3;
 }
-.nova-card-odds {
-  display:flex; justify-content:flex-end; flex-wrap:wrap; gap:5px 12px;
-  padding-top:6px; margin-top:6px;
-  border-top:1px solid rgba(172,194,220,.18);
-  color:#bcd0e6 !important; font-size:.73rem; font-weight:650;
+/* Compact inline decimal prices next to the selected market line.
+   Never use <strong> inside this row: classic typography forces block flow. */
+.nova-pred-aside .nova-card-odds {
+  display:flex !important;
+  flex-direction:row !important;
+  flex-wrap:nowrap !important;
+  justify-content:flex-end;
+  align-items:center;
+  gap:10px;
+  white-space:nowrap;
+  margin-top:4px;
+  padding:0;
+  border:0;
+  font-size:.68rem;
+  font-weight:800;
+  line-height:1.15;
 }
-.nova-card-odds span { white-space:nowrap; }
-.nova-pred-aside .nova-card-odds strong {
-  display:inline; font-size:.76rem; margin:0; color:#f5faff !important;
-  font-weight:850;
-}
+.nova-pred-aside .nova-card-odds span { display:inline !important; white-space:nowrap; }
+.nova-pred-aside .nova-card-odds .nova-odd-over { color:#70e4a5 !important; }
+.nova-pred-aside .nova-card-odds .nova-odd-under { color:#ff8990 !important; }
 .nova-data-warning { color:#ecc38d !important; font-weight:760; font-size:.75rem; }
 .nova-stat-grid {
   display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
