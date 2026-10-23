@@ -410,6 +410,77 @@
   color:#f3f8ff !important; font-weight:820; font-size:1.02rem;
   margin:1.0rem 0 .7rem; letter-spacing:-.025em;
 }
+
+/* Player focus / Overview only: calm, compact, decision-first.
+   Other tabs and cards retain their existing layout and CSS. */
+.nova-overview { margin:4px 0 12px; }
+.nova-overview-heading {
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:7px 13px;
+  margin:3px 1px 12px;
+}
+.nova-overview-heading strong {
+  color:#eef7ff !important; font-size:1.02rem; font-weight:850;
+}
+.nova-overview-heading span {
+  color:#93abc3 !important; font-size:.77rem;
+}
+.nova-overview-grid {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px; align-items:stretch;
+}
+.nova-overview-card {
+  min-width:0; min-height:139px; border:1px solid #30445d;
+  border-radius:13px; padding:17px 17px 14px;
+  background:linear-gradient(135deg,#18273a,#122034);
+  display:flex; flex-direction:column;
+}
+.nova-overview-card.primary {
+  border-color:#357d72;
+  background:linear-gradient(140deg,#194440,#14343b);
+}
+.nova-overview-label {
+  color:#a9bfda !important; font-size:.68rem; letter-spacing:.055em;
+  font-weight:780; text-transform:uppercase;
+}
+.nova-overview-number {
+  color:#f7faff !important; margin:9px 0 7px;
+  font-size:clamp(1.55rem,2.15vw,2.05rem);
+  line-height:1.1; font-weight:890; letter-spacing:-.045em;
+}
+.nova-overview-sub {
+  color:#c1d0e0 !important; font-size:.78rem;
+  line-height:1.38; overflow-wrap:anywhere;
+}
+.nova-overview-edge {
+  font-size:.83rem; font-weight:850;
+}
+.nova-overview-edge.positive { color:#72e4ab !important; }
+.nova-overview-edge.negative { color:#ffa2a9 !important; }
+.nova-overview-edge.neutral { color:#c4d1df !important; }
+.nova-overview-foot {
+  margin-top:auto; padding-top:10px; font-size:.7rem;
+  line-height:1.32; color:#93abc3 !important;
+}
+.nova-overview-recent {
+  display:flex; gap:7px; flex-wrap:wrap; align-items:center;
+}
+.nova-overview-recent b { color:#e6f1fd !important; font-weight:850; }
+.nova-overview-recent span { color:#5e7995 !important; }
+@media(max-width:830px) {
+  .nova-overview-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .nova-overview-card:last-child { grid-column:span 2; min-height:112px; }
+  .nova-overview-card { padding:13px 14px; min-height:127px; }
+}
+@media(max-width:550px) {
+  .nova-overview-grid { grid-template-columns:1fr; gap:8px; }
+  .nova-overview-card, .nova-overview-card:last-child {
+    grid-column:auto; min-height:0; padding:13px 14px;
+  }
+  .nova-overview-number { font-size:1.65rem; margin:5px 0; }
+  .nova-overview-foot { padding-top:6px; margin-top:0; }
+  .nova-overview-heading span { font-size:.71rem; }
+}
+
 .nova-market-hint {
   background:#172b3e; border:1px solid #2d4c68;
   padding:11px 14px; border-radius:12px;
