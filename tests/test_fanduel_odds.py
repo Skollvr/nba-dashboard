@@ -127,3 +127,36 @@ def test_fanduel_without_a_market_never_uses_consensus_line():
         item["byBookmaker"]["fanduel"]["available"] = False
         item["bookOverUnder"] = "19.5"
     assert extract_betmgm_player_props(evt, bookmaker_id="fanduel").empty
+
+
+
+def test_fanduel_selected_price_is_not_taken_from_betmgm():
+    row = attach_and_select(priority="fanduel").iloc[0]
+    # FanDuel -115, BetMGM -110; the two books must not share odds.
+    assert round(row["MARKET_PTS_OVER_DEC"], 2) == 1.87
+    assert round(row["MARKET_PTS_UNDER_DEC"], 2) == 1.87
+    assert row["MARKET_PTS_SOURCE"] == "FanDuel"
+
+
+def test_fanduel_shows_on_modern_player_card_without_valid_projection():
+    from ui_refresh import render_player_card_refresh
+
+    row = attach_and_select(priority="fanduel").iloc[0].copy()
+    row["SEASON_GP"] = 0
+    row["PROJ_PTS_V1"] = float("nan")
+    row["TEAM_ID"] = 1610612755
+    row["TEAM_NAME"] = "Philadelphia 76ers"
+    row["TEAM_ABBR"] = "PHI"
+    row["POSITION"] = "G"
+    row["ROLE"] = "Titular projetado"
+    row["INJ_STATUS"] = "Available"
+    seen = []
+    with patch(
+        "ui_refresh.st.markdown",
+        side_effect=lambda html, **kwargs: seen.append(html),
+    ):
+        render_player_card_refresh(row, "PTS", None, use_market_line=True)
+    assert "Linha FanDuel" in seen[0]
+    assert "28.5 PTS" in seen[0]
+    assert "Sem Edge" in seen[0]
+    assert 'class="nova-pred-value">—</div>' in seen[0]
