@@ -56,10 +56,11 @@ def merge_nba_lineup_evidence(
         status = str(entry.get("LINEUP_STATUS", ""))
         starter = entry.get("IS_STARTER")
         # A recorded status without affirmative starter evidence is insufficient.
-        if status == "Titular confirmado" and starter is True:
+        starter_true = isinstance(starter, (bool, np.bool_)) and bool(starter)
+        if status == "Titular confirmado" and starter_true:
             out.at[idx, "ROLE"] = "Titular confirmado"
             out.at[idx, "LINEUP_STATUS"] = "Titular confirmado"
-        elif status == "Titular projetado" and starter is True:
+        elif status == "Titular projetado" and starter_true:
             # Never downgrade an already confirmed player.
             if out.at[idx, "ROLE"] != "Titular confirmado":
                 out.at[idx, "ROLE"] = "Titular projetado"
