@@ -3,7 +3,7 @@ from html import escape as escape_html
 from ui_refresh import (
     render_player_card_refresh, render_matchup_header_refresh,
     render_focus_summary_refresh, render_focus_comparison_refresh,
-    render_tip_card_refresh,
+    render_tip_card_refresh, card_market_odds,
 )
 import pandas as pd
 import numpy as np
@@ -210,8 +210,20 @@ def render_player_card(row: pd.Series, line_metric: str, line_value: float, use_
         # Tiles de suporte e informações de linha originais
         render_player_support_tiles(row, line_metric, line_value, use_market_line)
         line_context = get_line_context(row, line_metric, line_value, use_market_line=use_market_line)
-        if line_context["has_market_line"] and line_context["over_dec"] and line_context["under_dec"]:
-            st.caption(f"BetMGM • Linha {format_number(line_context['line_value'])} • Over {format_number(line_context['over_dec'], 2)} • Under {format_number(line_context['under_dec'], 2)}")
+        market_odds = card_market_odds(row, line_metric, line_context, use_market_line)
+        if market_odds:
+            over = (
+                format_number(market_odds["over"], 2)
+                if market_odds["over"] is not None else "—"
+            )
+            under = (
+                format_number(market_odds["under"], 2)
+                if market_odds["under"] is not None else "—"
+            )
+            st.caption(
+                f'{market_odds["source"]} • Linha {format_number(line_context["quoted_line"])} '
+                f'• Over {over} • Under {under}'
+            )
         else:
             st.caption("Detalhamento completo no painel abaixo.")
 
