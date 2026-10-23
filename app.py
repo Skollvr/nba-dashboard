@@ -11,6 +11,7 @@ from espn_context import clear_espn_pregame_cache
 from api_odds import get_odds_api_key, clear_odds_cache
 from pdf_reader import get_season_string, clear_injury_cache
 from processamento import get_matchup_context
+from assisted_minutes import apply_manual_minutes
 
 # Importando as funções do ui_components.py
 from ui_components import (
@@ -42,6 +43,64 @@ def get_analysis_season(selected_date: date, today: date) -> str:
     visible and labeled as preliminary instead of switching seasons.
     """
     return get_season_string(selected_date)
+
+def _pregame_minutes_allowed(selected_date, today, game) -> bool:
+    """Manual adjustments are only for games not yet started (BRT)."""
+    if selected_date < today:
+        return False
+    status = str(game.get("GAME_STATUS_TEXT", "") or "").lower()
+    blocked = (
+        "final", "finished", "in progress", "live", "halftime",
+        "half time", "end of", "1st q", "2nd q", "3rd q", "4th q",
+        "1st quarter", "2nd quarter", "3rd quarter", "4th quarter",
+        "ot ", "encerrado", "intervalo", "ao vivo", "andamento",
+    )
+    if any(token in status for token in blocked):
+        return False
+    kickoff = pd.to_datetime(game.get("GAME_DATETIME_BRT"), errors="coerce", utc=True)
+    if pd.notna(kickoff) and kickoff <= pd.Timestamp.now(tz="UTC"):
+        return False
+    return True
+
+
+def _save_minute_edit(scope_key: str, audit_key: str, pid: int, input_key: str):
+    """Streamlit callback runs before rerun, so widget state is safe to read."""
+    try:
+        minutes = float(st.session_state[input_key])
+    except (KeyError, ValueError, TypeError):
+        return
+    if not 0 < minutes <= 48:
+        return
+    edits = dict(st.session_state.get(scope_key, {}))
+    edits[int(pid)] = minutes
+    st.session_state[scope_key] = edits
+    audit = dict(st.session_state.get(audit_key, {}))
+    audit[int(pid)] = datetime.now(APP_TIMEZONE).strftime("%d/%m/%Y %H:%M")
+    st.session_state[audit_key] = audit
+
+
+def _reset_minute_edit(
+    scope_key: str, audit_key: str, pid: int, input_key: str, automatic: float
+):
+    edits = dict(st.session_state.get(scope_key, {}))
+    edits.pop(int(pid), None)
+    st.session_state[scope_key] = edits
+    audit = dict(st.session_state.get(audit_key, {}))
+    audit.pop(int(pid), None)
+    st.session_state[audit_key] = audit
+    st.session_state[input_key] = float(automatic)
+
+
+def _reset_all_minute_edits(
+    scope_key: str, audit_key: str, automatic_by_player: dict, input_prefix: str
+):
+    st.session_state[scope_key] = {}
+    st.session_state[audit_key] = {}
+    for player_id, automatic in automatic_by_player.items():
+        key = f"{input_prefix}{int(player_id)}"
+        if key in st.session_state:
+            st.session_state[key] = float(automatic)
+
 
 def main():
     st.set_page_config(page_title="NBA Props Dashboard", page_icon="🏀", layout="wide")
@@ -301,6 +360,140 @@ def main():
         return
 
     render_matchup_header(selected_game)
+
+    # One match-wide control, before Players/Panorama/Edge consumption.
+    # Never show manual controls for finished games or historical replays.
+    if _pregame_minutes_allowed(selected_date, today, selected_game):
+        scope_key = f"manual_minutes::{selected_date_key}::{selected_game['GAME_ID']}"
+        audit_key = scope_key + "::timestamps"
+        input_prefix = scope_key + "::editor::"
+        overrides = dict(st.session_state.get(scope_key, {}))
+        roster = pd.concat([away_df, home_df], ignore_index=True)
+        eligible = (
+            pd.to_numeric(roster["SEASON_GP"], errors="coerce").fillna(0).gt(0)
+            & pd.to_numeric(roster["PROJ_MIN_V1"], errors="coerce").fillna(0).gt(0)
+            & ~roster["INJ_STATUS"].astype(str).isin(["Out", "Doubtful"])
+            & ~roster["IS_UNAVAILABLE"].fillna(False).astype(bool)
+        )
+        editable_roster = roster.loc[eligible].drop_duplicates("PLAYER_ID")
+        editable_roster = editable_roster.sort_values(
+            ["TEAM_NAME", "PLAYER"], kind="stable"
+        )
+        automatic_by_player = {
+            int(row["PLAYER_ID"]): float(row["PROJ_MIN_V1"])
+            for _, row in editable_roster.iterrows()
+        }
+        player_names = {
+            int(row["PLAYER_ID"]): (
+                f"{row['PLAYER']} — {row['TEAM_NAME']}"
+            )
+            for _, row in editable_roster.iterrows()
+        }
+        with st.expander("⏱️ Revisão pré-jogo de minutos", expanded=False):
+            st.caption(
+                "Ajuste opcional por jogador, mantendo o valor automático. "
+                "A alteração repercute em PTS, REB, AST, PRA, 3PM, FGA, 3PA, "
+                "Edge e rankings. Só vale nesta sessão e neste confronto."
+            )
+            if not automatic_by_player:
+                st.info("Nenhum jogador elegível com projeção de minutos validada.")
+            else:
+                selected_pid = st.selectbox(
+                    "Jogador a revisar",
+                    list(automatic_by_player),
+                    format_func=lambda player_id: player_names[player_id],
+                    key=scope_key + "::selected_player",
+                )
+                player = editable_roster[
+                    pd.to_numeric(editable_roster["PLAYER_ID"], errors="coerce")
+                    == selected_pid
+                ].iloc[0]
+                automatic = automatic_by_player[selected_pid]
+                input_key = f"{input_prefix}{selected_pid}"
+                auto_seen = input_key + "::auto_seen"
+                if selected_pid not in overrides and (
+                    input_key not in st.session_state
+                    or st.session_state.get(auto_seen) != automatic
+                ):
+                    st.session_state[input_key] = automatic
+                st.session_state[auto_seen] = automatic
+
+                status = str(player.get("ROLE", "Informação não confirmada"))
+                injury = str(player.get("INJ_STATUS", "—"))
+                source = str(player.get("MINUTES_SOURCE", "Modelo interno"))
+                st.caption(
+                    f"Escalação: {status} • Lesão: {injury} • "
+                    f"Fonte dos minutos automáticos: {source}"
+                )
+                left, right = st.columns(2)
+                with left:
+                    st.metric("Minutos automáticos", f"{automatic:.1f}")
+                with right:
+                    st.number_input(
+                        "Minutos esperados por você",
+                        min_value=1.0,
+                        max_value=48.0,
+                        step=0.5,
+                        format="%.1f",
+                        key=input_key,
+                    )
+                save, reset = st.columns(2)
+                with save:
+                    st.button(
+                        "Aplicar ajuste",
+                        key=scope_key + "::save",
+                        type="primary",
+                        use_container_width=True,
+                        on_click=_save_minute_edit,
+                        args=(scope_key, audit_key, selected_pid, input_key),
+                    )
+                with reset:
+                    st.button(
+                        "Restaurar automático",
+                        key=scope_key + "::reset_one",
+                        use_container_width=True,
+                        on_click=_reset_minute_edit,
+                        args=(scope_key, audit_key, selected_pid, input_key, automatic),
+                    )
+                active_ids = [pid for pid in overrides if pid in automatic_by_player]
+                if active_ids:
+                    st.markdown("**Minutos ajustados neste confronto**")
+                    stamps = st.session_state.get(audit_key, {})
+                    st.dataframe(
+                        pd.DataFrame([
+                            {
+                                "Jogador": player_names[pid],
+                                "Automático": round(automatic_by_player[pid], 1),
+                                "Manual": round(float(overrides[pid]), 1),
+                                "Editado (BRT)": stamps.get(pid, ""),
+                            }
+                            for pid in active_ids
+                        ]),
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                    st.button(
+                        "Restaurar todos os minutos automáticos",
+                        key=scope_key + "::reset_all",
+                        on_click=_reset_all_minute_edits,
+                        args=(scope_key, audit_key, automatic_by_player, input_prefix),
+                    )
+        # Read current session state after widget events, ensuring all tabs
+        # and line calculations receive the same consistent model output.
+        live_overrides = dict(st.session_state.get(scope_key, {}))
+        away_df = apply_manual_minutes(away_df, live_overrides)
+        home_df = apply_manual_minutes(home_df, live_overrides)
+        changed_count = sum(
+            int(df["MANUAL_MINUTES_ACTIVE"].sum())
+            for df in (away_df, home_df)
+            if "MANUAL_MINUTES_ACTIVE" in df.columns
+        )
+        if changed_count:
+            st.caption(
+                f"✏️ {changed_count} jogador(es) com minutos ajustados "
+                "manualmente neste confronto • restante: projeção automática."
+            )
+
 
     def _team_gp(df: pd.DataFrame) -> int:
         if df is None or df.empty:
