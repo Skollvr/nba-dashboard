@@ -114,12 +114,18 @@ def _injury_links_from_html(html: str, page_url: str) -> list[str]:
         html, flags=re.IGNORECASE,
     )
     result: list[str] = []
+    seen_paths: set[str] = set()
     for raw in links:
         url = urljoin(page_url, unescape(raw.strip()))
         pathname = urlsplit(url).path.lower()
         if "injury" in pathname and "report" in pathname and pathname.endswith(".pdf"):
-            if url not in result:
+            # The same PDF can occur once in href (with a query string) and
+            # again in the raw URL regex (without it). Preserve the original
+            # first URL, but never fetch the same report twice.
+            canonical_path = pathname.rsplit("/", 1)[-1]
+            if canonical_path not in seen_paths:
                 result.append(url)
+                seen_paths.add(canonical_path)
     return result
 
 
