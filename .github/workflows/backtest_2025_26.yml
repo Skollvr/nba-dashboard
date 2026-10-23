@@ -28,6 +28,7 @@ jobs:
       - name: Historical ESPN walk-forward validation
         run: python -u tools/backtest_2025_26_six_teams.py
         env:
+          PYTHONPATH: .
           STREAMLIT_SERVER_HEADLESS: 'true'
       - name: Store numerical results and coverage report
         if: always()
