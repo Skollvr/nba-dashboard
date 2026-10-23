@@ -508,6 +508,80 @@
   margin-top:5px; line-height:1.1;
 }
 
+/* Player focus: Statistics tab only. Compact, scannable seven-row grid. */
+.nova-stats-intro {
+  display:flex; align-items:center; justify-content:space-between;
+  gap:10px; flex-wrap:wrap; margin:8px 0 12px;
+}
+.nova-stats-title {
+  font-weight:850; font-size:1.06rem; color:#f1f7ff !important;
+}
+.nova-stats-description {
+  font-size:.76rem; color:#9bafc8 !important; margin-top:3px;
+}
+.nova-stats-sample {
+  color:#bdd8ea !important; background:#1b2b40;
+  border:1px solid #34495e; border-radius:8px;
+  padding:6px 10px; font-size:.73rem; font-weight:730;
+}
+.nova-stats-scroll {
+  border:1px solid #34475b; border-radius:13px; overflow:hidden;
+  background:#111f30;
+}
+.nova-stats-row {
+  display:grid;
+  grid-template-columns:minmax(115px,1.25fr) repeat(3,minmax(68px,.82fr)) minmax(95px,.85fr);
+  align-items:center; gap:9px; padding:11px 14px;
+  border-bottom:1px solid rgba(114,140,164,.15);
+}
+.nova-stats-row:last-child { border-bottom:0; }
+.nova-stats-row > :not(:first-child) { text-align:right; }
+.nova-stats-header {
+  background:#1b2b40; color:#99b5cf !important;
+  font-size:.67rem; font-weight:760; letter-spacing:.035em;
+  text-transform:uppercase;
+}
+.nova-stats-data {
+  color:#e9f1fc !important; font-size:.86rem; font-weight:790;
+}
+.nova-stats-data:nth-child(even) { background:rgba(170,203,229,.028); }
+.nova-stats-data.selected {
+  background:rgba(58,139,127,.20); box-shadow:inset 3px 0 #55c7b0;
+}
+.nova-stats-metric {
+  display:flex; gap:9px; align-items:center; min-width:0;
+}
+.nova-stats-metric strong { font-size:.85rem; color:#eef6ff !important; }
+.nova-stats-metric small {
+  font-size:.59rem; color:#83dec9 !important; font-weight:690;
+}
+.nova-stats-delta { color:#91aac5 !important; font-variant-numeric:tabular-nums; }
+.nova-stats-delta.up { color:#80dcc7 !important; }
+.nova-stats-delta.down { color:#c4b9ce !important; }
+.nova-stats-matchup {
+  display:flex; gap:8px 14px; align-items:center; flex-wrap:wrap;
+  margin-top:12px; padding:10px 13px;
+  background:#152738; border:1px solid #30485f; border-radius:10px;
+}
+.nova-stats-matchup span {
+  color:#9ab6d2 !important; font-size:.73rem; font-weight:790;
+}
+.nova-stats-matchup strong { color:#f0f8ff !important; font-size:.88rem; }
+.nova-stats-matchup small { color:#92a9be !important; font-size:.7rem; }
+.nova-stats-note {
+  font-size:.72rem; line-height:1.4;
+  color:#91a9be !important; margin:9px 1px 8px;
+}
+@media(max-width:640px) {
+  .nova-stats-row { grid-template-columns:64px repeat(3,minmax(0,1fr)); gap:5px; padding:11px 8px; }
+  .nova-stats-header { font-size:.58rem; letter-spacing:0; }
+  .nova-stats-data { font-size:.78rem; }
+  .nova-stats-metric small { display:none; }
+  .nova-stats-row .nova-stats-delta { display:none; }
+  .nova-stats-sample { font-size:.65rem; }
+  .nova-stats-matchup { gap:5px 10px; }
+}
+
 /* Nested tabs: clear active state and touch targets */
 .stApp [data-testid="stTabs"] [data-baseweb="tab-list"] {
   gap:4px !important;
