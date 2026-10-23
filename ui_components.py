@@ -3,6 +3,7 @@ from html import escape as escape_html
 from ui_refresh import (
     render_player_card_refresh, render_matchup_header_refresh,
     render_focus_summary_refresh, render_focus_comparison_refresh,
+    render_focus_statistics_refresh,
     render_tip_card_refresh, card_market_odds,
 )
 import pandas as pd
@@ -510,59 +511,56 @@ def render_player_focus_panel(
 
     with detail_tab:
         if modern_focus:
-            st.markdown(
-                '<div class="nova-section-lead">Médias da temporada e recortes recentes</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                '<div class="nova-workspace-sub">Compare a temporada com os últimos '
-                '5 e 10 jogos. O painel continua identificando amostras pequenas.</div>',
-                unsafe_allow_html=True,
-            )
-        first_cols = st.columns(2)
-        second_cols = st.columns(2)
-
-        detail_items = [
-            ("PRA", row["SEASON_PRA"], row["L5_PRA"], row["L10_PRA"]),
-            ("PTS", row["SEASON_PTS"], row["L5_PTS"], row["L10_PTS"]),
-            ("REB", row["SEASON_REB"], row["L5_REB"], row["L10_REB"]),
-            ("AST", row["SEASON_AST"], row["L5_AST"], row["L10_AST"]),
-        ]
-
-        for col, item in zip([*first_cols, *second_cols], detail_items):
-            with col:
+            render_focus_statistics_refresh(row, visual_metric)
+            with st.expander("Ver leitura defensiva completa", expanded=False):
                 st.markdown(
-                    render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                    render_matchup_detail_box_html(row, visual_metric),
                     unsafe_allow_html=True,
                 )
+        else:
+            first_cols = st.columns(2)
+            second_cols = st.columns(2)
 
-        extra_cols = st.columns(3)
-        extra_detail_items = [
-            ("3PM", row["SEASON_3PM"], row["L5_3PM"], row["L10_3PM"]),
-            ("FGA", row["SEASON_FGA"], row["L5_FGA"], row["L10_FGA"]),
-            ("3PA", row["SEASON_3PA"], row["L5_3PA"], row["L10_3PA"]),
-        ]
+            detail_items = [
+                ("PRA", row["SEASON_PRA"], row["L5_PRA"], row["L10_PRA"]),
+                ("PTS", row["SEASON_PTS"], row["L5_PTS"], row["L10_PTS"]),
+                ("REB", row["SEASON_REB"], row["L5_REB"], row["L10_REB"]),
+                ("AST", row["SEASON_AST"], row["L5_AST"], row["L10_AST"]),
+            ]
 
-        for col, item in zip(extra_cols, extra_detail_items):
-            with col:
-                quality_column = f"DATA_QUALITY_{item[0]}"
-                if quality_column in row.index and not bool(row.get(quality_column)):
-                    st.info(
-                        f"{item[0]} indisponível: dados de arremesso da ESPN "
-                        "não passaram na validação da amostra."
-                    )
-                else:
+            for col, item in zip([*first_cols, *second_cols], detail_items):
+                with col:
                     st.markdown(
                         render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
                         unsafe_allow_html=True,
                     )
 
-        if modern_focus:
+            extra_cols = st.columns(3)
+            extra_detail_items = [
+                ("3PM", row["SEASON_3PM"], row["L5_3PM"], row["L10_3PM"]),
+                ("FGA", row["SEASON_FGA"], row["L5_FGA"], row["L10_FGA"]),
+                ("3PA", row["SEASON_3PA"], row["L5_3PA"], row["L10_3PA"]),
+            ]
+
+            for col, item in zip(extra_cols, extra_detail_items):
+                with col:
+                    quality_column = f"DATA_QUALITY_{item[0]}"
+                    if quality_column in row.index and not bool(row.get(quality_column)):
+                        st.info(
+                            f"{item[0]} indisponível: dados de arremesso da ESPN "
+                            "não passaram na validação da amostra."
+                        )
+                    else:
+                        st.markdown(
+                            render_detail_metric_box_html(item[0], item[1], item[2], item[3]),
+                            unsafe_allow_html=True,
+                        )
+
+
             st.markdown(
-                '<div class="nova-section-lead">Leitura de matchup</div>',
+                render_matchup_detail_box_html(row, visual_metric),
                 unsafe_allow_html=True,
             )
-        st.markdown(render_matchup_detail_box_html(row, visual_metric), unsafe_allow_html=True)
 
     with visual_tab:
         if modern_focus:
