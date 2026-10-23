@@ -180,7 +180,12 @@ def test_qualified_tip_card_preserves_existing_strength_and_line():
 def test_default_pts_and_separate_panorama_remain_selected():
     from pathlib import Path
     app_text = Path("app.py").read_text(encoding="utf-8")
-    assert 'st.pills("Métrica", LINE_METRIC_OPTIONS, default="PTS")' in app_text
+    assert 'line_metric = st.session_state.get("dashboard_line_metric", "PTS")' in app_text
+    assert 'st.pills("Métrica", LINE_METRIC_OPTIONS, default="PTS")' not in app_text
+    from pathlib import Path as _Path
+    team_view = _Path("ui_components.py").read_text(encoding="utf-8")
+    assert 'key="dashboard_line_metric"' in team_view
+    assert team_view.index('key="dashboard_line_metric"') < team_view.index("    render_player_cards_grid(", team_view.index("def render_team_section_v2("))
     assert 'st.tabs(["🏀 Jogadores", "📊 Panorama do confronto"])' in app_text
     assert 'key="dashboard_visual_mode"' in app_text
 
@@ -424,3 +429,60 @@ def test_odds_are_inline_and_use_distinct_over_under_colors():
     assert "flex-wrap:nowrap !important" in css
     assert ".nova-odd-over { color:#70e4a5 !important; }" in css
     assert ".nova-odd-under { color:#ff8990 !important; }" in css
+
+
+def test_market_balloons_follow_fanduel_selection_without_betmgm_mentions():
+    from ui_components import player_market_header_labels
+    df = pd.DataFrame({"MARKET_PTS_SOURCE": ["FanDuel", "FanDuel", ""]})
+    headline, mode = player_market_header_labels(
+        df, "PTS", True, preferred_bookmaker="fanduel",
+        enabled_bookmakers=("fanduel",),
+    )
+    assert "FanDuel" in headline and "FanDuel" in mode
+    assert "BetMGM" not in headline + mode
+    assert "PTS" in headline
+
+
+def test_market_balloons_follow_betmgm_selection():
+    from ui_components import player_market_header_labels
+    df = pd.DataFrame({"MARKET_3PM_SOURCE": ["BetMGM", "", "BetMGM"]})
+    headline, mode = player_market_header_labels(
+        df, "3PM", True, preferred_bookmaker="betmgm",
+        enabled_bookmakers=("betmgm",),
+    )
+    assert "BetMGM" in headline and "BetMGM" in mode
+    assert "FanDuel" not in headline + mode
+
+
+def test_both_selected_books_show_actual_fallback_without_false_labels():
+    from ui_components import player_market_header_labels
+    df = pd.DataFrame({"MARKET_PTS_SOURCE": ["BetMGM", "FanDuel", ""]})
+    headline, mode = player_market_header_labels(
+        df, "PTS", True, preferred_bookmaker="fanduel",
+        enabled_bookmakers=("betmgm", "fanduel"),
+    )
+    assert "FanDuel / BetMGM por jogador" in headline
+    assert "FanDuel prioritária" in mode
+    assert "alternativa BetMGM" in mode
+
+
+def test_selected_fanduel_only_without_price_does_not_claim_market_quote():
+    from ui_components import player_market_header_labels
+    df = pd.DataFrame({"MARKET_PTS_SOURCE": ["", None]})
+    headline, mode = player_market_header_labels(
+        df, "PTS", True, preferred_bookmaker="fanduel",
+        enabled_bookmakers=("fanduel",),
+    )
+    assert "FanDuel quando houver" in headline
+    assert "Modo mercado: FanDuel" == mode
+
+
+def test_no_sportsbooks_keeps_manual_market_balloons():
+    from ui_components import player_market_header_labels
+    line, mode = player_market_header_labels(
+        pd.DataFrame(), "REB", False,
+        preferred_bookmaker="betmgm",
+        enabled_bookmakers=(),
+    )
+    assert line == "Linha ativa: REB • manual"
+    assert mode == "Modo mercado: Manual"
