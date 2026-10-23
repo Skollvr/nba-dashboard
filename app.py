@@ -6,7 +6,8 @@ from config import (
     LINE_METRIC_OPTIONS, APP_TIMEZONE
 )
 from api_nba import get_games_for_date
-from api_lineups import clear_lineup_cache
+from api_lineups import clear_lineup_cache, get_daily_lineups_safe
+from lineup_rotation import merge_nba_lineup_evidence, summarize_recent_rotation
 from espn_context import clear_espn_pregame_cache
 from api_odds import get_odds_api_key, clear_odds_cache
 from pdf_reader import get_season_string, clear_injury_cache
@@ -359,6 +360,23 @@ def main():
         st.exception(exc)
         return
 
+    # Today's live NBA lineup feed is OPTIONAL and informational.
+    # Fail closed: keep ESPN projected statuses when the feed is missing.
+    nba_lineup_note = "ESPN Depth Chart (estimativa)"
+    nba_lineup_checked = ""
+    if selected_date == today and _pregame_minutes_allowed(
+        selected_date, today, selected_game
+    ):
+        nba_rows, nba_lineup_note, nba_lineup_checked = get_daily_lineups_safe(selected_date)
+        away_df = merge_nba_lineup_evidence(
+            away_df, nba_rows, int(selected_game["VISITOR_TEAM_ID"]),
+            checked_brt=nba_lineup_checked,
+        )
+        home_df = merge_nba_lineup_evidence(
+            home_df, nba_rows, int(selected_game["HOME_TEAM_ID"]),
+            checked_brt=nba_lineup_checked,
+        )
+
     render_matchup_header(selected_game)
 
     # One match-wide control, before Players/Panorama/Edge consumption.
@@ -395,6 +413,31 @@ def main():
                 "A alteração repercute em PTS, REB, AST, PRA, 3PM, FGA, 3PA, "
                 "Edge e rankings. Só vale nesta sessão e neste confronto."
             )
+            confirmed = int(roster["ROLE"].eq("Titular confirmado").sum())
+            projected = int(roster["ROLE"].eq("Titular projetado").sum())
+            st.caption(
+                f"Escalações: {confirmed} titular(es) confirmado(s) • "
+                f"{projected} projetado(s) • Fonte NBA: {nba_lineup_note}"
+                + (f" • Consulta: {nba_lineup_checked} BRT" if nba_lineup_checked else "")
+            )
+            if confirmed == 0:
+                st.caption(
+                    "Sem confirmação de titulares pelo feed oficial neste confronto. "
+                    "Depth chart e Top 5 por minutos são somente estimativas."
+                )
+            with st.expander("Ver situação do elenco", expanded=False):
+                columns = [
+                    "PLAYER", "TEAM_NAME", "ROLE", "LINEUP_SOURCE",
+                    "INJ_STATUS", "L5_MIN", "L10_MIN", "PROJ_MIN_V1",
+                ]
+                table = roster[[col for col in columns if col in roster.columns]].copy()
+                table = table.rename(columns={
+                    "PLAYER": "Jogador", "TEAM_NAME": "Time",
+                    "ROLE": "Escalação", "LINEUP_SOURCE": "Fonte",
+                    "INJ_STATUS": "Lesão", "L5_MIN": "MIN L5",
+                    "L10_MIN": "MIN L10", "PROJ_MIN_V1": "MIN automático",
+                })
+                st.dataframe(table, use_container_width=True, hide_index=True)
             if not automatic_by_player:
                 st.info("Nenhum jogador elegível com projeção de minutos validada.")
             else:
@@ -421,10 +464,47 @@ def main():
                 status = str(player.get("ROLE", "Informação não confirmada"))
                 injury = str(player.get("INJ_STATUS", "—"))
                 source = str(player.get("MINUTES_SOURCE", "Modelo interno"))
+                lineup_source = str(player.get("LINEUP_SOURCE", "Modelo interno"))
                 st.caption(
-                    f"Escalação: {status} • Lesão: {injury} • "
+                    f"Escalação: {status} ({lineup_source}) • Lesão: {injury} • "
                     f"Fonte dos minutos automáticos: {source}"
                 )
+
+                rotation = summarize_recent_rotation(player)
+                st.markdown("**Rotação recente (ESPN)**")
+                if rotation["sample"]:
+                    r1, r2, r3, r4 = st.columns(4)
+                    def minute_text(value):
+                        return "—" if value is None else f"{value:.1f}"
+                    with r1:
+                        st.metric("Média L5", minute_text(rotation["l5_mean"]))
+                    with r2:
+                        st.metric("Média L10", minute_text(rotation["l10_mean"]))
+                    with r3:
+                        st.metric("Último jogo", minute_text(rotation["last_game"]))
+                    with r4:
+                        st.metric("Variação L5 − L10", minute_text(rotation["l5_vs_l10"]))
+                    if len(rotation["values_oldest_first"]) >= 2:
+                        plotted = pd.DataFrame({
+                            "Minutos": rotation["values_oldest_first"]
+                        })
+                        plotted.index = range(1, len(plotted) + 1)
+                        st.line_chart(plotted, height=155)
+                    st.caption(
+                        f"{rotation['sample']} jogo(s) registrado(s) • "
+                        f"mín/máx: {rotation['minimum']:.1f} / "
+                        f"{rotation['maximum']:.1f} min • "
+                        "ordem do gráfico: mais antigo → mais recente. "
+                        "Não significa titularidade nos jogos anteriores."
+                    )
+                    if rotation["sample"] < 5:
+                        st.caption(
+                            "Amostra reduzida da temporada. "
+                            "Compare com cautela antes de ajustar os minutos."
+                        )
+                else:
+                    st.caption("Sem sequência recente de minutos utilizável nesta temporada.")
+
                 left, right = st.columns(2)
                 with left:
                     st.metric("Minutos automáticos", f"{automatic:.1f}")
