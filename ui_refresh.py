@@ -266,62 +266,91 @@ def render_focus_summary_refresh(
     metric: str,
     line_context: dict,
 ) -> None:
-    """Modern focus KPIs using preexisting projections and matchup classifications."""
-    ctx_proj = row.get(f"PROJ_{metric}_V1")
-    if pd.isna(pd.to_numeric(ctx_proj, errors="coerce")):
-        ctx_proj = line_context.get("projection")
-    base = row.get(get_metric_projection_column(metric))
-    season_key = "SEASON_PRA" if metric == "PRA" else f"SEASON_{metric}"
-    l10_key = "L10_PRA" if metric == "PRA" else f"L10_{metric}"
-    active = bool(line_context.get("has_active_line", False))
-    quoted_line = pd.to_numeric(
-        line_context.get("quoted_line", line_context.get("line_value") if active else None),
-        errors="coerce",
-    )
-    has_quote = bool(pd.notna(quoted_line) and float(quoted_line) > 0)
-    quote_source = str(line_context.get("quoted_source") or (
-        line_context.get("line_source") if active else "Linha"
-    ))
-    metric_match = row.get(f"MATCHUP_LABEL_{metric}_V1", "Neutro")
-    osc = row.get(f"OSC_{metric}_CLASS", row.get("OSC_CLASS", "—"))
-    form = row.get(f"FORM_{metric}_SIGNAL", row.get("FORM_SIGNAL", "—"))
-    hit = line_context.get("hit_l10", "—") if active else "Linha não informada"
+    """Concise decision-oriented overview, with no change to V4 calculations.
 
-    values = [
-        (
-            f"Projeção contextual · {metric}",
-            _number(ctx_proj),
-            f"Base {_number(base)} · Temp {_number(row.get(season_key))} · "
-            f"L10 {_number(row.get(l10_key))}",
-            "main",
-        ),
-        (
-            f"Linha {quote_source} · {metric}" if has_quote
-            else f"Linha de aposta · {metric}",
-            _number(quoted_line) if has_quote else "Indisponível",
-            f"Edge {_signed(line_context.get('edge'))} · Hit L10 {hit}"
-            if active else "Cotação existente; projeção ainda indisponível"
-            if has_quote else "Abra Gerar linha manual para comparar",
-            "",
-        ),
-        (
-            "Matchup",
-            str(metric_match),
-            f"Score {_signed(row.get(f'MATCHUP_SCORE_{metric}_V1'), 2)}",
-            "",
-        ),
-        ("Oscilação e forma", str(osc), str(form), ""),
-    ]
-    html = '<div class="nova-focus-hero">'
-    for label, value, sub, extra in values:
-        html += (
-            f'<div class="nova-focus-kpi {extra}">'
-            f'<div class="nova-focus-kpi-label">{_e(label)}</div>'
-            f'<div class="nova-focus-kpi-value">{_e(value)}</div>'
-            f'<div class="nova-focus-kpi-sub">{_e(sub)}</div>'
-            '</div>'
-        )
-    html += '</div>'
+    One projection, one market comparison, one recent-form panel. Technical
+    decomposition is accessible in a collapsed disclosure in the caller.
+    """
+    projected = pd.to_numeric(row.get(f"PROJ_{metric}_V1"), errors="coerce")
+    if pd.isna(projected):
+        projected = pd.to_numeric(line_context.get("projection"), errors="coerce")
+    season = pd.to_numeric(row.get(f"SEASON_{metric}"), errors="coerce")
+    l5 = pd.to_numeric(row.get(f"L5_{metric}"), errors="coerce")
+    l10 = pd.to_numeric(row.get(f"L10_{metric}"), errors="coerce")
+    minutes = pd.to_numeric(row.get("PROJ_MIN_V1"), errors="coerce")
+    games = pd.to_numeric(row.get("SEASON_GP"), errors="coerce")
+    has_projection = pd.notna(projected) and math.isfinite(float(projected))
+
+    active = bool(line_context.get("has_active_line", False)) and has_projection
+    quoted = pd.to_numeric(
+        line_context.get(
+            "quoted_line", line_context.get("line_value") if active else None
+        ), errors="coerce",
+    )
+    has_quote = pd.notna(quoted) and math.isfinite(float(quoted)) and quoted > 0
+    source = str(line_context.get("quoted_source") or (
+        line_context.get("line_source") if active else ""
+    ) or "Mercado")
+    edge = pd.to_numeric(line_context.get("edge"), errors="coerce") if active else None
+    edge_label = _signed(edge) if active else "—"
+    edge_tone = (
+        "positive" if active and pd.notna(edge) and edge > 0
+        else "negative" if active and pd.notna(edge) and edge < 0
+        else "neutral"
+    )
+
+    matchup = str(row.get(f"MATCHUP_LABEL_{metric}_V1") or "Sem avaliação")
+    hit = str(line_context.get("hit_l10") or "—") if active else "—"
+    sample = (
+        f"{int(games)} jogo{'s' if int(games) != 1 else ''} na temporada"
+        if pd.notna(games) and games >= 0 else "Amostra não disponível"
+    )
+    minute_source = str(row.get("MINUTES_SOURCE") or "Modelo interno")
+
+    projection_info = (
+        f"{_number(minutes)} min estimados · {_e(minute_source)}"
+        if has_projection else "Projeção indisponível nesta amostra"
+    )
+    market_info = (
+        f'Edge <span class="nova-overview-edge {edge_tone}">{_e(edge_label)}</span>'
+        if active else "Linha disponível · Edge sem amostra"
+        if has_quote else "Sem linha ativa para comparação"
+    )
+    hit_info = f"Acima da linha no L10: {_e(hit)}" if active else (
+        "Aguardando dados de projeção" if has_quote
+        else "Informe uma linha para comparar"
+    )
+    recent_info = (
+        f'L5 <b>{_number(l5)}</b><span>·</span>'
+        f'Temporada <b>{_number(season)}</b>'
+    )
+
+    html = (
+        '<section class="nova-overview">'
+        '<div class="nova-overview-heading">'
+        '<strong>Leitura rápida</strong>'
+        '<span>O essencial para avaliar a projeção atual</span>'
+        '</div>'
+        '<div class="nova-overview-grid">'
+        '<article class="nova-overview-card primary">'
+        f'<div class="nova-overview-label">Projeção contextual · {_e(metric)}</div>'
+        f'<div class="nova-overview-number">{_number(projected)}</div>'
+        f'<div class="nova-overview-sub">{projection_info}</div>'
+        '</article>'
+        '<article class="nova-overview-card">'
+        f'<div class="nova-overview-label">Linha {_e(source) if has_quote else "de mercado"} · {_e(metric)}</div>'
+        f'<div class="nova-overview-number">{_number(quoted) if has_quote else "—"}</div>'
+        f'<div class="nova-overview-sub">{market_info}</div>'
+        f'<div class="nova-overview-foot">{hit_info}</div>'
+        '</article>'
+        '<article class="nova-overview-card">'
+        f'<div class="nova-overview-label">Média últimos 10 · {_e(metric)}</div>'
+        f'<div class="nova-overview-number">{_number(l10)}</div>'
+        f'<div class="nova-overview-sub nova-overview-recent">{recent_info}</div>'
+        f'<div class="nova-overview-foot">{_e(sample)} · Matchup {_e(matchup)}</div>'
+        '</article>'
+        '</div></section>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
