@@ -123,10 +123,19 @@ Abra o endereço local informado pelo Streamlit.
 
 Na navegação principal, **Desempenho do Modelo** permite acompanhar, por métrica,
 as projeções V4 **registradas antes** dos jogos e seus resultados posteriores da
-ESPN. A avaliação principal verifica a **taxa de metas atingidas** (resultado real
-maior ou igual à projeção) e o **déficit médio** por previsão, calculado como
-`max(projeção − resultado, 0)`. Assim, superar a projeção equivale a **meta
-atingida** com déficit zero; apenas ficar abaixo gera déficit positivo.
+ESPN. A avaliação principal considera a **parte inteira da projeção como
+meta mínima**, pois PTS, REB, AST, PRA, 3PM, FGA e 3PA são contagens inteiras.
+Por exemplo, **27,4 PTS exige 27 pontos**; **25,4 PTS exige 25 pontos**;
+**4,7 AST exige 4 assistências**. A regra é truncar a parte decimal
+(`floor`), **não arredondar para o inteiro mais próximo**.
+
+A **taxa de metas atingidas** usa `resultado real >= floor(projeção)`.
+O **déficit médio** usa `max(floor(projeção) − resultado real, 0)`:
+atingir ou superar a meta inteira gera déficit zero.
+
+A projeção decimal **continua inalterada no modelo** e nas comparações
+com as linhas de mercado. O recorte inteiro serve apenas para avaliar
+cumprimento de metas, nunca para modificar Edge ou Over/Under das casas.
 
 O **MAE tradicional** e o **viés** continuam disponíveis separadamente como
 diagnósticos da precisão numérica do modelo: eles consideram a diferença entre
