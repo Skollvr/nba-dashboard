@@ -253,3 +253,27 @@ def test_unsettled_snapshots_do_not_count_as_attained_integer_targets():
     assert pd.isna(frame.loc[0, "target_reached"])
     assert pd.isna(frame.loc[0, "shortfall"])
     assert model_performance_metrics(frame)["count"] == 0
+
+
+def test_monitor_dates_accept_brazilian_snapshots_and_iso_without_dropping_games():
+    from model_tracking_ui import parse_tracking_dates
+
+    dates = pd.Series([
+        "26/10/2026", "05/11/2026", "2026-10-26", "2026-11-05",
+        "sem data",
+    ])
+    result = parse_tracking_dates(dates)
+    assert result.notna().sum() == 4
+    assert result.iloc[0].strftime("%Y-%m-%d") == "2026-10-26"
+    assert result.iloc[1].strftime("%Y-%m-%d") == "2026-11-05"
+    assert result.iloc[2].strftime("%Y-%m-%d") == "2026-10-26"
+    assert result.iloc[3].strftime("%Y-%m-%d") == "2026-11-05"
+    assert pd.isna(result.iloc[4])
+
+
+def test_new_snapshots_store_canonical_local_game_date():
+    now, game = _sample_game()
+    game["GAME_DATE_BRT"] = "26/10/2026"
+    records = snapshot_game(game, _sample_team(), pd.DataFrame(), now)
+    assert records
+    assert all(record["game_date_brt"] == "2026-10-26" for record in records)
