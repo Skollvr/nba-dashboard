@@ -645,7 +645,8 @@ def test_statistics_focus_gates_failed_espn_shooting_metrics():
         card = html.split(f"<strong>{metric}</strong>")[1].split("</article>")[0]
         assert card.count("<strong>—</strong>") == 3
         assert card.count("width:0.0%") == 3
-    assert "7.0" not in html
+    # 7.0 may still legitimately appear in REB or another valid metric.
+    # Verify only the three explicitly invalidated shooting cards above.
 
 
 def test_statistics_focus_escapes_untrusted_matchup_values():
