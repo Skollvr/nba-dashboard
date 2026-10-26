@@ -92,7 +92,9 @@ def test_settlement_requires_completed_espn_boxscore_and_skip_dnp():
     assert len(results) == 2
     pts = next(item for item in results if item["key"].endswith(":PTS"))
     assert pts["actual"] == 24.0
-    assert pts["absolute_error"] == 2.3
+    assert pts["absolute_error"] == 2.3  # Numeric MAE is still tracked.
+    assert pts["target_reached"] is True
+    assert pts["shortfall"] == 0.0  # Above projection is a met target.
     assert pts["market_outcome"] == "Over"
     assert pts["direction_hit"] is True
     assert results[0]["settled_utc"]
@@ -126,3 +128,77 @@ def test_dashboard_without_snapshots_does_not_render_made_up_metrics():
     ):
         render_model_performance()
     assert "Nenhuma projeção pré-jogo registrada" in notice.call_args.args[0]
+
+
+def test_target_attainment_counts_overperformance_as_success_not_failure():
+    samples = pd.DataFrame([
+        {
+            "game_id": "a", "projection": 27.4, "actual": 31.0,
+            "direction_hit": None,
+        },
+        {
+            "game_id": "b", "projection": 27.4, "actual": 27.4,
+            "direction_hit": None,
+        },
+        {
+            "game_id": "c", "projection": 27.4, "actual": 24.0,
+            "direction_hit": None,
+        },
+    ])
+    metrics = model_performance_metrics(samples)
+    assert metrics["count"] == 3
+    assert metrics["target_count"] == 2
+    assert metrics["miss_count"] == 1
+    assert round(metrics["target_rate"], 6) == round(2 / 3, 6)
+    assert round(metrics["shortfall_avg"], 6) == round(3.4 / 3, 6)
+    assert round(metrics["shortfall_on_misses"], 6) == 3.4
+    # MAE stays a separate symmetrical technical diagnostic.
+    assert round(metrics["mae"], 6) == round((3.6 + 0 + 3.4) / 3, 6)
+
+
+def test_target_outcomes_settled_below_projection_have_positive_shortfall():
+    now, game = _sample_game()
+    records = snapshot_game(game, _sample_team(), pd.DataFrame(), now)
+    completed = {"header": {"competitions": [
+        {"status": {"type": {"completed": True}}}
+    ]}}
+    with patch("api_espn._extract_summary_rows", return_value=[{
+        "PLAYER_ID": 11, "TEAM_ID": 1610612738,
+        "PTS": 19.0, "REB": 6.3, "AST": 4.0,
+    }]):
+        settled = result_game(records, completed)
+    pts = next(item for item in settled if item["key"].endswith(":PTS"))
+    assert pts["target_reached"] is False
+    assert pts["shortfall"] == 2.7
+    assert pts["absolute_error"] == 2.7
+    reb = next(item for item in settled if item["key"].endswith(":REB"))
+    assert reb["target_reached"] is True
+    assert reb["shortfall"] == 0.0
+
+
+def test_unresolved_results_never_count_as_achieved_goals():
+    samples = pd.DataFrame([
+        {"game_id": "a", "projection": 27.4, "actual": float("nan")},
+        {"game_id": "b", "projection": 20.5, "actual": 25},
+        {"game_id": "c", "projection": 30.0, "actual": None},
+    ])
+    metric = model_performance_metrics(samples)
+    assert metric["count"] == 1
+    assert metric["target_count"] == 1
+    assert metric["miss_count"] == 0
+    assert metric["target_rate"] == 1
+    assert metric["shortfall_avg"] == 0
+
+
+def test_new_tracking_view_prioritizes_targets_but_keeps_mae_for_diagnostics():
+    import inspect
+    from model_tracking_ui import render_model_performance
+
+    source = inspect.getsource(render_model_performance)
+    assert '"Metas atingidas"' in source
+    assert '"Déficit médio · ' in source
+    assert 'with st.expander("Ver precisão estatística tradicional (MAE e viés)"' in source
+    assert '"Meta atingida"' in source
+    assert '"Abaixo da meta"' in source
+    assert '"Erro abs."' not in source
+    assert '"Evolução do déficit médio por previsão"' in source
