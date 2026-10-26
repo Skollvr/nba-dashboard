@@ -8,7 +8,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from model_tracking import METRICS, RESULTS, SNAPSHOTS, load_jsonl, tracking_frame
+from model_tracking import (
+    METRICS, RESULTS, SNAPSHOTS, load_jsonl, tracking_frame,
+    projection_target,
+)
 
 BRT = ZoneInfo("America/Sao_Paulo")
 
@@ -16,7 +19,8 @@ BRT = ZoneInfo("America/Sao_Paulo")
 def model_performance_metrics(frame: pd.DataFrame) -> dict:
     """Assess target attainment separately from conventional forecast accuracy.
 
-    Target met: actual >= projection; shortfall: max(projection-actual, 0).
+    Target met: actual >= floor(projection), using whole-count NBA stats;
+    shortfall: max(floor(projection) - actual, 0).
     MAE stays as a technical measure of numerical forecast accuracy.
     Unresolved and nonnumeric observations must never count as successes.
     """
@@ -33,12 +37,14 @@ def model_performance_metrics(frame: pd.DataFrame) -> dict:
     evaluated["actual"] = pd.to_numeric(evaluated["actual"], errors="coerce")
     evaluated = evaluated.replace([float("inf"), -float("inf")], float("nan"))
     evaluated = evaluated.dropna(subset=["actual", "projection"]).copy()
+    evaluated["target_minimum"] = evaluated["projection"].map(projection_target)
+    evaluated = evaluated.dropna(subset=["target_minimum"]).copy()
     if evaluated.empty:
         return model_performance_metrics(pd.DataFrame())
 
     difference = evaluated["projection"] - evaluated["actual"]
-    shortfall = difference.clip(lower=0)
-    reached = evaluated["actual"] >= evaluated["projection"]
+    shortfall = (evaluated["target_minimum"] - evaluated["actual"]).clip(lower=0)
+    reached = evaluated["actual"] >= evaluated["target_minimum"]
     misses = ~reached
     edge_decisions = (
         evaluated.loc[
@@ -120,19 +126,26 @@ def render_model_performance() -> None:
     c3.metric(
         "Metas atingidas",
         f'{summary["target_rate"]:.1%}' if summary["target_rate"] is not None else "—",
-        help="Resultado maior ou igual à projeção V4 original. Não é o acerto de uma linha de aposta.",
+        help=(
+            "Resultado real igual ou superior à parte inteira da projeção V4: "
+            "27,4 exige 27; 4,7 exige 4. Não é o acerto de uma linha de aposta."
+        ),
     )
     c4.metric(
         f"Déficit médio · {metric}",
         f'{summary["shortfall_avg"]:.2f}'
         if summary["shortfall_avg"] is not None else "—",
-        help="Média de max(projeção - resultado, 0). Superar a meta gera déficit zero.",
+        help=(
+            "Média de max(parte inteira da projeção − resultado real, 0). "
+            "Atingir ou superar a meta inteira gera déficit zero."
+        ),
     )
     st.caption(
         f"Metas cumpridas: {summary['target_count']} · "
         f"Abaixo da meta: {summary['miss_count']} · "
         f"Jogos avaliados: {summary['games']} · "
         f"Aguardando resultado: {len(frame) - summary['count']}. "
+        "Meta mínima = parte inteira da projeção (sem arredondar para cima). "
         "Este critério mede alcance da meta, não precisão da previsão ou ganho em apostas."
     )
     with st.expander("Ver precisão estatística tradicional (MAE e viés)", expanded=False):
@@ -176,10 +189,13 @@ def render_model_performance() -> None:
         return
 
     confirmed["absolute_error"] = (confirmed["projection"] - confirmed["actual"]).abs()
+    confirmed["target_minimum"] = confirmed["projection"].map(projection_target)
     confirmed["shortfall"] = (
-        confirmed["projection"] - confirmed["actual"]
+        confirmed["target_minimum"] - confirmed["actual"]
     ).clip(lower=0)
-    confirmed["target_reached"] = confirmed["actual"] >= confirmed["projection"]
+    confirmed["target_reached"] = (
+        confirmed["actual"] >= confirmed["target_minimum"]
+    )
     confirmed["status"] = confirmed["target_reached"].map({
         True: "Meta atingida", False: "Abaixo da meta"
     })
@@ -207,7 +223,8 @@ def render_model_performance() -> None:
     table = confirmed.sort_values(["date", "game_id"], ascending=False).head(60)
     cols = {
         "date": "Data", "player": "Jogador", "projection": "Proj.",
-        "actual": "Real", "status": "Meta", "shortfall": "Déficit",
+        "actual": "Real", "target_minimum": "Meta mínima",
+        "status": "Situação", "shortfall": "Déficit",
         "season_gp": "Jogos na época", "line": "Linha", "line_source": "Casa",
     }
     display = table[[k for k in cols if k in table]].rename(columns=cols).copy()
