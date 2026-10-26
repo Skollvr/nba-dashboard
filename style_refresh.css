@@ -812,3 +812,42 @@
   .nova-focus-player-heading img { width:39px;height:39px;max-width:39px!important; }
   .summary-card { min-height:137px; }
 }
+
+
+/* Raio-X Renovado: dashboard compacto de leitura rápida com mobile legível. */
+.xray-title {display:flex;align-items:baseline;justify-content:space-between;
+  gap:8px 15px;flex-wrap:wrap;margin:12px 0 12px}
+.xray-title strong {font-size:1.22rem;font-weight:900;color:#f2f9ff}
+.xray-title span,.xray-section-head span {font-size:.73rem;color:#92b0c8}
+.xray-stat-grid {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;margin:6px 0 18px}
+.xray-stat {min-width:0;border:1px solid color-mix(in srgb,var(--xray-accent) 34%,#223952);
+  border-radius:13px;padding:13px 15px;background:linear-gradient(150deg,#172940,#0e1e32);
+  display:flex;flex-direction:column;gap:5px}
+.xray-stat span {font-size:.66rem;font-weight:770;color:var(--xray-accent)}
+.xray-stat strong {font-size:clamp(1.4rem,2.3vw,1.9rem);font-weight:900;
+  color:#f4faff;line-height:1.18}
+.xray-stat small {font-size:.64rem;color:#8eaac3}
+.xray-section-head {display:flex;align-items:baseline;justify-content:space-between;
+  flex-wrap:wrap;gap:7px;margin:13px 0 6px}
+.xray-section-head strong {font-size:1.0rem;color:#f0f7ff;font-weight:850}
+.xray-period-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:4px 0 16px}
+.xray-period {min-width:0;background:linear-gradient(120deg,#172c42,#112235);
+  border:1px solid #334a62;border-radius:11px;padding:12px 14px;
+  display:flex;flex-direction:column;gap:5px;border-left:3px solid var(--xray-accent)}
+.xray-period span {color:#a8c1d7;font-size:.73rem}
+.xray-period strong {color:#f2faff;font-weight:850;font-size:1.4rem}
+.xray-period small {color:#8ea9c0;font-size:.69rem}
+@media(max-width:768px) {
+  .xray-stat-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .xray-stat {padding:11px 12px}
+  .xray-stat strong {font-size:1.45rem}
+  .xray-period-grid {gap:6px}
+  .xray-period {padding:10px 8px}
+  .xray-period span {font-size:.66rem}
+  .xray-period strong {font-size:1.2rem}
+}
+@media(max-width:400px) {
+  .xray-period strong {font-size:1.05rem}
+  .xray-title strong {font-size:1.08rem}
+}
