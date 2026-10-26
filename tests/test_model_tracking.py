@@ -277,3 +277,85 @@ def test_new_snapshots_store_canonical_local_game_date():
     records = snapshot_game(game, _sample_team(), pd.DataFrame(), now)
     assert records
     assert all(record["game_date_brt"] == "2026-10-26" for record in records)
+
+
+def test_monitor_audit_counts_real_new_forecasts_and_games():
+    from monitor_audit import assess
+
+    old = {
+        "snapshots": 721, "results": 0,
+        "games": 4, "game_ids": ["a", "b", "c", "d"],
+        "snapshot_keys": ["a:1:PTS", "b:1:PTS"],
+        "result_keys": [],
+    }
+    now = {
+        "snapshots": 728, "results": 0, "games": 5,
+        "game_ids": ["a", "b", "c", "d", "e"],
+        "snapshot_keys": ["a:1:PTS", "b:1:PTS", "e:1:PTS"],
+        "result_keys": [],
+    }
+    summary = assess(old, now, expected_snapshots=7)
+    assert summary["new_snapshots"] == 7
+    assert summary["new_games"] == 1
+    assert summary["new_game_ids"] == ["e"]
+    assert summary["snapshots_total"] == 728
+
+
+def test_monitor_audit_rejects_false_success_and_duplicate_keys():
+    import pytest
+    from monitor_audit import assess
+
+    baseline = {
+        "snapshots": 2, "results": 0, "games": 1, "game_ids": ["x"],
+        "snapshot_keys": ["x:1:PTS", "x:1:AST"], "result_keys": [],
+    }
+    with pytest.raises(ValueError, match="Capture claimed 3 new rows"):
+        assess(baseline, baseline, expected_snapshots=3)
+    duplicates = dict(baseline, snapshots=3,
+                      snapshot_keys=["x:1:PTS", "x:1:AST", "x:1:AST"])
+    with pytest.raises(ValueError, match="duplicated"):
+        assess(baseline, duplicates, expected_snapshots=1)
+    missing = dict(baseline, snapshots=1, snapshot_keys=["x:1:PTS"])
+    with pytest.raises(ValueError, match="disappeared"):
+        assess(baseline, missing)
+
+
+def test_monitor_audit_noop_warning_does_not_pretend_new_data():
+    from monitor_audit import assess, _summary
+
+    before = {
+        "snapshots": 721, "results": 0, "games": 4,
+        "game_ids": ["a", "b", "c", "d"],
+        "snapshot_keys": ["a:1:PTS"], "result_keys": [],
+    }
+    report = assess(before, before, expected_snapshots=0)
+    assert report["new_snapshots"] == 0
+    assert report["new_games"] == 0
+    text = _summary(report, snapshot_checked=True, settlement_checked=False)
+    assert "Captura sem novos registros" in text
+    assert "não garante" in text
+
+
+def test_monitor_audit_parses_capture_and_settlement_reported_counts(tmp_path):
+    from monitor_audit import _reported_count
+
+    captured = tmp_path / "capture.log"
+    captured.write_text("Captured game 1: 175 predictions\\nsnapshot: 175 new rows\\n",
+                        encoding="utf-8")
+    assert _reported_count(captured, "snapshot") == 175
+    assert _reported_count(captured, "settle") is None
+    assert _reported_count(tmp_path / "missing.log", "snapshot") is None
+
+
+def test_monitor_schedule_uses_staggered_utc_crons_and_audit_steps():
+    from pathlib import Path
+
+    workflow = (Path(__file__).resolve().parents[1] /
+                ".github/workflows/model_tracking.yml").read_text(encoding="utf-8")
+    assert 'cron: "47 19 * * *"' in workflow  # 16:47 BRT
+    assert 'cron: "17 1,4,22 * * *"' in workflow  # 01:17, 22:17, 19:17 BRT
+    assert 'cron: "13 11,15 * * *"' in workflow  # 08:13 and 12:13 BRT
+    assert 'cron: "0 1,4,19,22 * * *"' not in workflow
+    assert "python monitor_audit.py before" in workflow
+    assert "python monitor_audit.py after" in workflow
+    assert "set -o pipefail" in workflow
