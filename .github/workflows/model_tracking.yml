@@ -2,10 +2,12 @@ name: Monitor V4 - pregame snapshots and results
 
 on:
   schedule:
-    # GitHub Actions cron runs in UTC: 16h, 19h, 22h, 01h in Brazil.
-    - cron: "0 1,4,19,22 * * *"
-    # Settlement at 08h and 12h Brazil (covers late west-coast games).
-    - cron: "0 11,15 * * *"
+    # GitHub cron uses UTC. Move away from minute :00 to reduce queue contention.
+    # Snapshot at 16:47, 19:17, 22:17 and 01:17 (Brasilia, UTC-03).
+    - cron: "47 19 * * *"
+    - cron: "17 1,4,22 * * *"
+    # Check completed ESPN box scores at 08:13 and 12:13 Brasilia.
+    - cron: "13 11,15 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -40,14 +42,22 @@ jobs:
       - name: Dependencies
         run: |
           python -m pip install -r requirements.txt
+      - name: Baseline recorded data for this run
+        run: python monitor_audit.py before
       - name: Capture immutable predictions before tipoff
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'snapshot') || github.event_name == 'schedule' && github.event.schedule == '0 1,4,19,22 * * *' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'snapshot') || github.event_name == 'schedule' && (github.event.schedule == '47 19 * * *' || github.event.schedule == '17 1,4,22 * * *') }}
         env:
           SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
-        run: python model_tracking.py snapshot
+        run: |
+          set -o pipefail
+          python model_tracking.py snapshot | tee capture.log
       - name: Resolve finished ESPN games
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'settle') || github.event_name == 'schedule' && github.event.schedule == '0 11,15 * * *' }}
-        run: python model_tracking.py settle
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'settle') || github.event_name == 'schedule' && github.event.schedule == '13 11,15 * * *' }}
+        run: |
+          set -o pipefail
+          python model_tracking.py settle | tee settle.log
+      - name: Verify captured records and create GitHub run summary
+        run: python monitor_audit.py after
       - name: Persist only collected source records
         run: |
           git config user.name "github-actions[bot]"
