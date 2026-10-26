@@ -511,6 +511,24 @@ def calculate_projection(season_value: float, l10_value: float, l5_value: float,
     )
     return max(0.0, projection)
 
+def classify_line_result(value: float, line: float) -> str:
+    """Classify a settled player's statistic without treating a push as Over.
+
+    Strict comparison is important for integer market lines (e.g. 6 REB).
+    """
+    value_num = pd.to_numeric(value, errors="coerce")
+    line_num = pd.to_numeric(line, errors="coerce")
+    if (pd.isna(value_num) or pd.isna(line_num)
+            or not np.isfinite(float(value_num))
+            or not np.isfinite(float(line_num))):
+        return "Indisponível"
+    if float(value_num) > float(line_num):
+        return "Over"
+    if float(value_num) < float(line_num):
+        return "Under"
+    return "Push"
+
+
 def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_market_line: bool = False) -> dict:
     projection_col = get_metric_projection_column(metric)
     projection_v1_col = f"PROJ_{metric}_V1"
@@ -602,23 +620,39 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
             ),
             "hit_l5": "-",
             "under_l5": "-",
+            "push_l10": "-",
+            "push_l5": "-",
+            "push_sequence": "",
         }
 
     edge = projection - active_line
     recent_values = row.get(recent_list_col, [])
     if not isinstance(recent_values, list):
         recent_values = []
+    recent_values = [
+        float(v) for v in recent_values
+        if pd.notna(pd.to_numeric(v, errors="coerce"))
+        and np.isfinite(float(v))
+    ]
 
-    hit_l10 = sum(float(v) >= active_line for v in recent_values)
-    hit_l5 = sum(float(v) >= active_line for v in recent_values[:5])
-    under_l10 = sum(float(v) < active_line for v in recent_values)
-    under_l5 = sum(float(v) < active_line for v in recent_values[:5])
-
+    states = [classify_line_result(v, active_line) for v in recent_values]
+    last5_states = states[:5]
+    hit_l10 = states.count("Over")
+    hit_l5 = last5_states.count("Over")
+    under_l10 = states.count("Under")
+    under_l5 = last5_states.count("Under")
+    push_l10 = states.count("Push")
+    push_l5 = last5_states.count("Push")
     hit_sequence = "".join(
-        ["✅" if float(v) >= active_line else "❌" for v in reversed(recent_values)]
+        "✅" if state == "Over" else "⏸️" if state == "Push" else "❌"
+        for state in reversed(states)
     )
     under_sequence = "".join(
-        ["✅" if float(v) < active_line else "❌" for v in reversed(recent_values)]
+        "✅" if state == "Under" else "⏸️" if state == "Push" else "❌"
+        for state in reversed(states)
+    )
+    push_sequence = "".join(
+        "⏸️" if state == "Push" else "·" for state in reversed(states)
     )
 
     tooltip = f"Calculado com linha {source_name} ({active_line})"
@@ -647,6 +681,9 @@ def get_line_context(row: pd.Series, metric: str, line_value: float | None, use_
         "under_l10_html": under_l10_html,
         "hit_sequence": hit_sequence,
         "under_sequence": under_sequence,
+        "push_sequence": push_sequence,
+        "push_l10": format_ratio_text(push_l10, len(recent_values)),
+        "push_l5": format_ratio_text(push_l5, min(len(recent_values), 5)),
         "icon": icon,
         "tooltip": tooltip,
         "hit_l5": format_ratio_text(hit_l5, min(len(recent_values), 5)),
