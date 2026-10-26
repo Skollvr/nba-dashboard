@@ -105,7 +105,7 @@ def test_performance_metrics_are_computed_only_from_observed_outcomes():
     result = model_performance_metrics(frame)
     assert result["count"] == 1
     assert result["games"] == 1
-    assert result["mae"] == 2.3
+    assert round(result["mae"], 6) == 2.3
     assert result["direction_n"] == 1
     assert result["direction_rate"] == 1.0
 
