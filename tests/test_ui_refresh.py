@@ -599,40 +599,40 @@ def _render_statistics(row, selected_metric="REB"):
     return html[0]
 
 
-def test_statistics_focus_new_grid_has_seven_rows_and_selected_metric():
+def test_statistics_focus_renders_seven_visual_cards_with_featured_metric():
     html = _render_statistics(_statistics_player())
-    assert html.count('class="nova-stats-row nova-stats-data') == 7
-    assert html.count('class="nova-stats-row nova-stats-data selected"') == 1
+    assert html.count('<article class="nova-statcard') == 7
+    assert html.count('class="nova-statcard featured"') == 1
+    assert 'class="nova-statcards-grid"' in html
+    assert "Desempenho do jogador" in html
     assert "L10 · 10j" in html and "L5 · 5j" in html
     assert "Matchup · REB" in html and "Neutro" in html
-    assert "Produção por período" in html
-    assert "Temporada" in html and "Δ L5−L10" in html
-    assert ">+1.0</span>" in html
+    assert "Pontos" in html and "Tentativas de 3 pontos" in html
+    assert "Δ L5 − L10  +1.0" in html
+    assert html.index("<strong>REB</strong>") < html.index("<strong>PRA</strong>")
 
 
-def test_statistics_focus_new_grid_does_not_claim_trends_in_first_games():
+def test_statistics_focus_cards_do_not_invent_early_season_trend():
     html = _render_statistics(
         _statistics_player(SEASON_GP=1, L5_GP=1, L10_GP=1)
     )
     assert "L10 · 1j" in html and "L5 · 1j" in html
-    assert "Amostra inicial" in html
-    # No signed trend is available when L5 and L10 share a 1-game window.
-    assert 'class="nova-stats-delta flat">—</span>' in html
-    assert "5 jogos" not in html
+    assert "Amostra curta" in html
+    assert html.count("Δ L5 − L10  +") == 0
+    assert 'class="nova-statcard-delta insufficient"' in html
 
 
-def test_statistics_focus_does_not_invent_zero_game_numbers():
+def test_statistics_focus_cards_do_not_invent_zero_game_stats():
     html = _render_statistics(
         _statistics_player(SEASON_GP=0, L5_GP=0, L10_GP=0)
     )
-    assert "Sem jogos nesta temporada" in html
-    assert "0 jogo(s) na temporada" in html
-    assert 'class="nova-stats-delta flat">—</span>' in html
-    assert ">28.0</span>" not in html
-    assert ">29.0</span>" not in html
+    assert "Sem jogos na temporada" in html
+    assert "0 jogo(s) nesta temporada" in html
+    assert "28.0" not in html and "29.0" not in html
+    assert '<strong>—</strong>' in html
 
 
-def test_statistics_focus_gates_failed_espn_shooting_metric():
+def test_statistics_focus_gates_failed_espn_shooting_metrics():
     html = _render_statistics(
         _statistics_player(
             DATA_QUALITY_3PA=False,
@@ -640,12 +640,12 @@ def test_statistics_focus_gates_failed_espn_shooting_metric():
             DATA_QUALITY_3PM=False,
         ), selected_metric="3PA"
     )
-    assert "dados ESPN não validados" in html
+    assert html.count('class="nova-statcard featured"') == 1
     for metric in ("3PA", "FGA", "3PM"):
-        marker = f'<strong>{metric}</strong>'
-        line = html.split(marker)[1].split("</div>", 2)[1]
-        assert ">—</span>" in line
-    assert 'class="nova-stats-row nova-stats-data selected"' in html
+        card = html.split(f"<strong>{metric}</strong>")[1].split("</article>")[0]
+        assert card.count("<strong>—</strong>") == 3
+        assert card.count("width:0.0%") == 3
+    assert "7.0" not in html
 
 
 def test_statistics_focus_escapes_untrusted_matchup_values():
@@ -656,7 +656,17 @@ def test_statistics_focus_escapes_untrusted_matchup_values():
     assert "&lt;img" in html
 
 
-def test_statistics_redesign_only_affects_modern_statistics_tab():
+def test_statistics_focus_bars_have_local_metric_scales():
+    html = _render_statistics(_statistics_player())
+    selected = html.split('<article class="nova-statcard featured">')[1].split("</article>")[0]
+    # REB = 6/7/8, so the relative widths are 75%, 87.5%, 100%.
+    assert 'width:75.0%' in selected
+    assert 'width:87.5%' in selected
+    assert 'width:100.0%' in selected
+    assert 'aria-hidden="true"' in selected
+
+
+def test_statistics_redesign_affects_modern_statistics_tab_only():
     import inspect
     from ui_components import render_player_focus_panel
     src = inspect.getsource(render_player_focus_panel)
@@ -667,8 +677,9 @@ def test_statistics_redesign_only_affects_modern_statistics_tab():
     assert "render_focus_statistics_refresh(row, visual_metric)" in details
     assert 'st.expander("Ver leitura defensiva completa", expanded=False)' in details
     assert "render_detail_metric_box_html" in details  # Classic preserved
-    assert "with overview_tab:" in src
-    assert "with visual_tab:" in src
+    assert "with overview_tab:" in src and "with visual_tab:" in src
     css = __import__("pathlib").Path("style_refresh.css").read_text(encoding="utf-8")
-    assert ".nova-stats-row" in css
-    assert "grid-template-columns:64px repeat(3,minmax(0,1fr))" in css
+    assert ".nova-statcards-grid" in css
+    assert ".nova-statcard.featured" in css
+    assert "@media(max-width:620px)" in css
+    assert ".nova-stats-row" not in css
