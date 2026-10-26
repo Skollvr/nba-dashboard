@@ -17,8 +17,16 @@ BRT = ZoneInfo("America/Sao_Paulo")
 
 
 def parse_tracking_dates(values: pd.Series) -> pd.Series:
-    """Parse both Brazilian DD/MM/YYYY and canonical ISO dates without ambiguity."""
-    return pd.to_datetime(values, format="mixed", dayfirst=True, errors="coerce")
+    """Parse Brazilian and ISO dates without reinterpreting ISO months/days."""
+    raw = values.astype("string").str.strip()
+    is_iso = raw.str.fullmatch(r"\\d{4}-\\d{2}-\\d{2}").fillna(False)
+    iso_dates = pd.to_datetime(
+        raw.where(is_iso), format="%Y-%m-%d", errors="coerce"
+    )
+    br_dates = pd.to_datetime(
+        raw.where(~is_iso), format="%d/%m/%Y", errors="coerce"
+    )
+    return iso_dates.fillna(br_dates)
 
 
 def model_performance_metrics(frame: pd.DataFrame) -> dict:
