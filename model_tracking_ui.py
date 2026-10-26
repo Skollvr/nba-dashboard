@@ -16,6 +16,11 @@ from model_tracking import (
 BRT = ZoneInfo("America/Sao_Paulo")
 
 
+def parse_tracking_dates(values: pd.Series) -> pd.Series:
+    """Parse both Brazilian DD/MM/YYYY and canonical ISO dates without ambiguity."""
+    return pd.to_datetime(values, format="mixed", dayfirst=True, errors="coerce")
+
+
 def model_performance_metrics(frame: pd.DataFrame) -> dict:
     """Assess target attainment separately from conventional forecast accuracy.
 
@@ -97,9 +102,7 @@ def render_model_performance() -> None:
     # ESPN schedules currently return DD/MM/YYYY while other sources and
     # tests use ISO dates. Both must remain readable without rewriting the
     # immutable pregame snapshots already committed to GitHub.
-    dates = pd.to_datetime(
-        frame["game_date_brt"], format="mixed", dayfirst=True, errors="coerce"
-    )
+    dates = parse_tracking_dates(frame["game_date_brt"])
     frame = frame.loc[dates.notna()].copy()
     if frame.empty:
         st.warning("Os registros disponíveis não contêm datas válidas.")
