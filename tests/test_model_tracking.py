@@ -250,6 +250,6 @@ def test_unsettled_snapshots_do_not_count_as_attained_integer_targets():
     frame = tracking_frame(rows, [])
     assert frame.loc[0, "target_minimum"] == 4
     assert pd.isna(frame.loc[0, "actual"])
-    assert frame.loc[0, "target_reached"] is None
+    assert pd.isna(frame.loc[0, "target_reached"])
     assert pd.isna(frame.loc[0, "shortfall"])
     assert model_performance_metrics(frame)["count"] == 0
