@@ -1,0 +1,62 @@
+name: Monitor V4 - pregame snapshots and results
+
+on:
+  schedule:
+    # GitHub Actions cron runs in UTC: 16h, 19h, 22h, 01h in Brazil.
+    - cron: "0 1,4,19,22 * * *"
+    # Settlement at 08h and 12h Brazil (covers late west-coast games).
+    - cron: "0 11,15 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run: both, snapshot or settle"
+        required: true
+        type: choice
+        default: both
+        options:
+          - both
+          - snapshot
+          - settle
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nba-v4-monitor-main
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Dependencies
+        run: |
+          python -m pip install -r requirements.txt
+      - name: Capture immutable predictions before tipoff
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'snapshot') || github.event_name == 'schedule' && github.event.schedule == '0 1,4,19,22 * * *' }}
+        env:
+          SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
+        run: python model_tracking.py snapshot
+      - name: Resolve finished ESPN games
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'settle') || github.event_name == 'schedule' && github.event.schedule == '0 11,15 * * *' }}
+        run: python model_tracking.py settle
+      - name: Persist only collected source records
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/model_snapshots.jsonl data/model_results.jsonl 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No new validated snapshots or completed games"
+          else
+            git commit -m "data: append recorded pregame V4 forecasts and results [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
