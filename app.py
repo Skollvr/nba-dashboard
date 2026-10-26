@@ -13,6 +13,7 @@ from api_odds import get_odds_api_key, clear_odds_cache
 from pdf_reader import get_season_string, clear_injury_cache
 from processamento import get_matchup_context
 from assisted_minutes import apply_manual_minutes
+from model_tracking_ui import render_model_performance
 
 # Importando as funções do ui_components.py
 from ui_components import (
@@ -155,6 +156,14 @@ def main():
             "Dados de jogo: ESPN · Lesões: boletim oficial NBA · "
             "Linhas: BetMGM e FanDuel quando disponíveis, com opção manual."
         )
+
+    section = st.segmented_control(
+        "Seção", ["🏀 Analisar jogos", "📈 Desempenho do Modelo"],
+        default="🏀 Analisar jogos", key="main_section",
+    )
+    if section == "📈 Desempenho do Modelo":
+        render_model_performance()
+        return
 
     today = get_brasilia_today()
     if "selected_game_date" not in st.session_state:
