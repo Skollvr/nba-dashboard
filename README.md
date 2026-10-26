@@ -151,13 +151,16 @@ automaticamente pelo navegador; a captura roda no GitHub Actions.
 ### Como os registros são feitos
 
 - O workflow [Monitor V4](.github/workflows/model_tracking.yml) procura jogos
-  futuros nos horários **16h47, 19h17, 22h17 e 1h17 (Brasília)**, calcula
+  futuros nos horários **16h47, 19h17 e 22h17 (Brasília)**, calcula
   a previsão **pré-jogo**, congela os valores e grava em
   `data/model_snapshots.jsonl`. Os horários foram deslocados do minuto zero
   para reduzir a chance de atrasos do GitHub Actions. Capturas são imutáveis
   e nunca sobrescritas após a partida.
-- Após a conclusão dos jogos, às **8h13 e 12h13 (Brasília)**, a ESPN
-  fornece os box scores usados para preencher `data/model_results.jsonl`.
+- Após a conclusão dos jogos, a rotina consulta os box scores da ESPN às
+  **1h17, 8h13 e 12h13 (Brasília)** para preencher `data/model_results.jsonl`.
+  A consulta da 1h17 é uma **conferência antecipada**, apenas para jogos que
+  já terminaram; não cria nem modifica projeções. Jogos ainda em andamento
+  serão verificados novamente pela manhã.
   Jogadores sem estatística observada utilizável não são contabilizados como
   erros de zero.
 - Cada execução registra uma linha de base e compara a quantidade de
