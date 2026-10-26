@@ -19,7 +19,7 @@ BRT = ZoneInfo("America/Sao_Paulo")
 def parse_tracking_dates(values: pd.Series) -> pd.Series:
     """Parse Brazilian and ISO dates without reinterpreting ISO months/days."""
     raw = values.astype("string").str.strip()
-    is_iso = raw.str.fullmatch(r"\\d{4}-\\d{2}-\\d{2}").fillna(False)
+    is_iso = raw.str.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}").fillna(False)
     iso_dates = pd.to_datetime(
         raw.where(is_iso), format="%Y-%m-%d", errors="coerce"
     )
