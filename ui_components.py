@@ -18,6 +18,7 @@ from config import (
 )
 from processamento import (
     get_line_context,
+    classify_line_result,
     get_matchup_chip_class,
     get_metric_matchup_context,
     merge_injury_report,
@@ -28,6 +29,7 @@ from processamento import (
     get_metric_allowed_column
 )
 from api_nba import get_player_log
+from espn_context import _cutoff_timestamp, _pregame_date_mask
 from pdf_reader import parse_injury_report_timestamp_from_url
 
 from datetime import timedelta
@@ -314,6 +316,24 @@ def render_summary_cards(away_df: pd.DataFrame, home_df: pd.DataFrame, min_games
         )
         st.markdown(html_ast, unsafe_allow_html=True)
         
+def filter_player_log_before_game(
+    logs: pd.DataFrame, selected_date=None
+) -> pd.DataFrame:
+    """Exclude the selected NBA game day and all later games in Brasilia.
+
+    An absent date permits ordinary general browsing; a specified date fails
+    closed for rows without a valid timestamp, avoiding hindsight in H2H.
+    """
+    if logs is None or logs.empty:
+        return logs.copy() if isinstance(logs, pd.DataFrame) else pd.DataFrame()
+    if selected_date is None:
+        return logs.copy()
+    cutoff = _cutoff_timestamp(selected_date)
+    if cutoff is None or "GAME_DATE" not in logs.columns:
+        return logs.iloc[0:0].copy()
+    return logs.loc[_pregame_date_mask(logs["GAME_DATE"], cutoff)].copy()
+
+
 def render_player_focus_panel(
     row: pd.Series,
     line_metric: str,
@@ -323,6 +343,7 @@ def render_player_focus_panel(
     chart_mode: str,
     opp_abbr: str,
     season_scope: str = "Regular Season",
+    target_date=None,
 ) -> None:
     # --- RASTREADOR DE CORES (GSW/CHA FIX) ---
     t_name = str(row.get('TEAM_NAME', '')).upper()
@@ -813,21 +834,38 @@ def render_player_focus_panel(
                     current_opp = abbr
                     break
             
-            log = get_player_log(int(row["PLAYER_ID"]), season)
-            
+            log = filter_player_log_before_game(
+                get_player_log(
+                    int(row["PLAYER_ID"]), season, season_scope=season_scope
+                ),
+                target_date,
+            )
+
             if not log.empty:
                 log['PRA'] = log['PTS'] + log['REB'] + log['AST']
                 log['3PM'] = log.get('FG3M', 0)
                 log['3PA'] = log.get('FG3A', 0)
                 
-                h2h_log = log[log['MATCHUP'].str.contains(current_opp, case=False, na=False)].copy()
-                
+                h2h_log = log[
+                    log["MATCHUP"].str.contains(
+                        current_opp, case=False, regex=False, na=False
+                    )
+                ].copy()
+                target_col = visual_metric
+                h2h_log[target_col] = pd.to_numeric(
+                    h2h_log.get(target_col), errors="coerce"
+                )
+                h2h_log = h2h_log.dropna(subset=[target_col])
+
                 if not h2h_log.empty:
                     target_col = visual_metric
                     h2h_display = h2h_log[['GAME_DATE', 'MATCHUP', 'WL', 'MIN', target_col]].copy()
                     h2h_display['Data'] = h2h_display['GAME_DATE'].dt.strftime('%d/%m/%Y')
                     h2h_display['Linha'] = active_line
-                    
+                    h2h_display["Resultado"] = h2h_display[target_col].apply(
+                        lambda value: classify_line_result(value, active_line)
+                    )
+
                     real_col_name = f'Real ({visual_metric})'
                     h2h_display = h2h_display.rename(columns={
                         'MATCHUP': 'Confronto',
@@ -836,15 +874,18 @@ def render_player_focus_panel(
                         target_col: real_col_name
                     })
                     
-                    final_table = h2h_display[['Data', 'Confronto', 'Res', 'Min', 'Linha', real_col_name]]
+                    final_table = h2h_display[
+                        ['Data', 'Confronto', 'Res', 'Min', 'Linha', real_col_name, 'Resultado']
+                    ]
                     
                     def style_hit_miss(val):
                         try:
                             num = float(val)
-                            if num >= active_line:
+                            if num > active_line:
                                 return 'background-color: rgba(34,197,94,0.15); color: #86efac; font-weight: bold; border-left: 4px solid #22c55e;'
-                            else:
+                            if num < active_line:
                                 return 'background-color: rgba(239,68,68,0.15); color: #fca5a5; font-weight: bold; border-left: 4px solid #ef4444;'
+                            return 'background-color: rgba(148,163,184,0.14); color: #cbd5e1; font-weight: bold; border-left: 4px solid #94a3b8;'
                         except:
                             return ''
 
@@ -859,20 +900,31 @@ def render_player_focus_panel(
                     
                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
                     
-                    hits = (h2h_log[target_col] >= active_line).sum()
-                    total = len(h2h_log)
-                    pct = int((hits / total) * 100) if total > 0 else 0
-                    
-                    st.markdown(f"""
-                        <div style="padding: 15px; background: rgba(15,23,42,0.6); border-radius: 10px; border-left: 5px solid #38bdf8; margin-top: 10px;">
-                            🎯 <b>Taxa de Acerto vs {current_opp}:</b> {hits}/{total} ({pct}%) 
-                            <br><small style="opacity: 0.8;">Jogador cumpriu a linha de <b>{active_line:.1f} {visual_metric}</b> em {hits} dos últimos {total} jogos contra este time.</small>
-                        </div>
-                    """, unsafe_allow_html=True)
+                    values = h2h_log[target_col]
+                    over_count = int(values.gt(active_line).sum())
+                    under_count = int(values.lt(active_line).sum())
+                    push_count = int(values.eq(active_line).sum())
+                    settled = over_count + under_count
+                    rate = f"{over_count / settled * 100:.0f}%" if settled else "—"
+                    st.markdown(
+                        f'<div style="padding: 15px; background: rgba(15,23,42,0.6); '
+                        f'border-radius: 10px; border-left: 5px solid #38bdf8; margin-top: 10px;">'
+                        f'🎯 <b>Over vs {escape_html(str(current_opp))}:</b> '
+                        f'{over_count}/{settled} decisões ({rate}) '
+                        f'· Under {under_count} · Push {push_count}'
+                        f'<div style="font-size:.8rem;opacity:.75;">'
+                        f'Linha {active_line:.1f} {escape_html(visual_metric)} '
+                        f'· {len(h2h_log)} jogo(s) com estatística válida'
+                        f'</div></div>',
+                        unsafe_allow_html=True,
+                    )
                 else:
-                    st.info(f"Nenhum jogo de {row['PLAYER']} contra {current_opp} encontrado nesta temporada.")
+                    st.info(
+                        f"Nenhum confronto anterior com {current_opp} e estatística "
+                        "válida foi encontrado no recorte selecionado."
+                    )
             else:
-                st.error("Erro ao carregar log do jogador.")            
+                st.info("Sem jogos anteriores utilizáveis para este jogador e data.")            
 def player_market_header_labels(
     team_df: pd.DataFrame,
     metric: str,
@@ -940,6 +992,7 @@ def render_team_section_v2(
     show_today_lineups: bool = False,
     preferred_bookmaker: str = "betmgm",
     enabled_bookmakers: tuple[str, ...] = (),
+    target_date=None,
 ) -> None:
     if team_df.empty:
         st.warning(f"Não encontrei dados para {team_name}.")
@@ -1019,6 +1072,7 @@ def render_team_section_v2(
             chart_mode,
             opp_abbr,
             season_scope=season_scope,
+            target_date=target_date,
         )
 
     st.divider()
