@@ -119,6 +119,54 @@ Abra o endereço local informado pelo Streamlit.
 5. Em **Jogador em foco**, explore **Visão geral**, **Estatísticas**, **Raio-X** e **Mercado e H2H**.
 6. Abra o **Panorama do confronto** para comparar jogadores e rankings.
 
+## 📈 Desempenho do Modelo (novo)
+
+Na navegação principal, **Desempenho do Modelo** permite acompanhar, por métrica,
+as projeções V4 **registradas antes** dos jogos e seus resultados posteriores da
+ESPN: quantidade de previsões, **MAE**, viés médio, evolução diária e registros
+conferidos. Quando houver linhas da mesma cotação capturada, também é possível
+verificar a direção do Edge, sem confundir essa taxa com retorno financeiro.
+
+O histórico é **prospectivo**, não retroativo: **nenhuma previsão de jogos já
+encerrados será fabricada**. No início a tela permanece vazia até a primeira
+coleta válida. Projeções existentes na sessão do Streamlit não são gravadas
+automaticamente pelo navegador; a captura roda no GitHub Actions.
+
+### Como os registros são feitos
+
+- O workflow [Monitor V4](.github/workflows/model_tracking.yml) procura jogos
+  futuros várias vezes por dia (horário de Brasília), calcula a previsão
+  **pré-jogo**, congela os valores e grava em `data/model_snapshots.jsonl`.
+  Capturas são imutáveis e nunca sobrescritas após a partida.
+- Após a conclusão dos jogos, a ESPN fornece os box scores usados para
+  preencher `data/model_results.jsonl`. Jogadores sem estatística observada
+  utilizável não são contabilizados como erros de zero.
+- O monitor usa o **V4 automático**, sem ajustes manuais da sessão. Os pesos e
+  o comportamento do motor de projeção não são alterados.
+- A rotina utiliza a permissão `contents: write` do `GITHUB_TOKEN` para
+  persistir os dados no repositório. Verifique se as configurações de
+  **Actions → General → Workflow permissions** permitem escrita caso a
+  atualização dos dados falhe.
+- A chave `SPORTSGAMEODDS_API_KEY` é **opcional** também nos Secrets do
+  GitHub Actions; sem ela, as previsões e seus erros são registrados, mas
+  não há histórico verificável das linhas/odds. Os Secrets do Streamlit e
+  do GitHub são configurações separadas.
+- Execuções agendadas no GitHub Actions podem atrasar. Jogos iniciados antes
+  de uma captura válida são ignorados; não se cria previsão após o início.
+  A cobertura completa de todas as partidas não é garantida.
+
+É possível executar o workflow manualmente pela aba **Actions**, mas isso
+**não** autoriza recalcular jogos antigos como previsões anteriores à partida.
+
+## 🔎 Raio-X renovado
+
+No visual **Renovado**, o Raio-X traz cartões rápidos de PTS/REB/AST/PRA,
+gráfico dos jogos recentes, médias por período, distribuição observada,
+Over/Under/Push contra a linha ativa (quando disponível) e dispersão de produção
+versus minutos. Os gráficos usam valores reais da fonte, com a barra de
+ferramentas desativada para evitar a sobreposição de números no celular. O
+visual **Clássico** permanece disponível.
+
 ## 🧰 Tecnologias e organização
 
 **Stack:** Python, Streamlit, Pandas, NumPy, Plotly, Requests, `nba_api`, PyPDF e CSS responsivo.
