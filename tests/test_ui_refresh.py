@@ -711,3 +711,59 @@ def test_h2h_uses_strict_outcome_and_labels_push_neutrally():
     assert 'if num < active_line:' in source
     assert 'push_count = int(values.eq(active_line).sum())' in source
     assert 'get_player_log(' in source and 'season_scope=season_scope' in source
+
+
+def test_raiox_compact_and_full_charts_preserve_visible_value_labels():
+    from contextlib import nullcontext
+    from ui_components import render_player_chart, RAIOX_PLOTLY_CONFIG
+
+    logs = pd.DataFrame({
+        "GAME_DATE": pd.to_datetime(["2026-10-20", "2026-10-23"]),
+        "PTS": [21, 18],
+        "REB": [5, 6],
+        "AST": [3, 2],
+        "FGA": [12, 11],
+        "FG3M": [1, 2],
+        "FG3A": [5, 6],
+    })
+    assert RAIOX_PLOTLY_CONFIG["displayModeBar"] is False
+    assert RAIOX_PLOTLY_CONFIG["responsive"] is True
+
+    for chart_mode in ("Compacto", "Completo"):
+        charts = []
+        with (
+            patch("ui_components.get_player_log", return_value=logs),
+            patch("ui_components.st.columns", return_value=(nullcontext(), nullcontext())),
+            patch("ui_components.st.image"),
+            patch("ui_components.st.markdown"),
+            patch("ui_components.st.caption"),
+            patch("ui_components.st.session_state", {"dashboard_visual_mode": "Renovado"}),
+            patch("ui_components.st.plotly_chart", side_effect=lambda fig, **kw: charts.append((fig, kw))),
+        ):
+            render_player_chart(
+                "Jogador teste", 123, "2026-27", chart_mode, "AST",
+                season_scope="Regular Season",
+            )
+
+        assert len(charts) == 1
+        figure, opts = charts[0]
+        assert opts["config"]["displayModeBar"] is False
+        assert opts["use_container_width"] is True
+        assert figure.layout.yaxis.range[0] == 0
+        assert figure.layout.yaxis.range[1] >= 3.6
+        assert figure.layout.margin.t >= 45
+        assert figure.data[0].cliponaxis is False
+        assert "outside" in str(figure.data[0].textposition) or (
+            figure.data[0].textposition == "top center"
+        )
+
+
+def test_raiox_other_plots_also_disable_overlay_toolbar():
+    import inspect
+    from ui_components import render_player_focus_panel
+
+    source = inspect.getsource(render_player_focus_panel)
+    visual = source.split("    with visual_tab:", 1)[1].split(
+        "    with market_tab:", 1
+    )[0]
+    assert visual.count("config=RAIOX_PLOTLY_CONFIG") == 2
