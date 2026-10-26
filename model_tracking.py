@@ -109,7 +109,9 @@ def snapshot_game(game: pd.Series, away: pd.DataFrame, home: pd.DataFrame,
                 records.append({
                     "key": f"{gid}:{int(pid)}:{metric}",
                     "game_id": gid,
-                    "game_date_brt": str(game.get("GAME_DATE_BRT") or tipoff.tz_convert(BRT).date()),
+                    # Normalize new records to ISO, even if source sends DD/MM/YYYY.
+                    # Existing snapshots remain immutable and are parsed in the UI.
+                    "game_date_brt": tipoff.tz_convert(BRT).date().isoformat(),
                     "tipoff_utc": tipoff.isoformat(),
                     "captured_utc": captured_utc.isoformat(),
                     "version": VERSION,
