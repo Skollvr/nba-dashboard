@@ -3,10 +3,12 @@ name: Monitor V4 - pregame snapshots and results
 on:
   schedule:
     # GitHub cron uses UTC. Move away from minute :00 to reduce queue contention.
-    # Snapshot at 16:47, 19:17, 22:17 and 01:17 (Brasilia, UTC-03).
+    # Capture only before NBA tipoff: 16:47, 19:17 and 22:17 (Brasilia, UTC-03).
     - cron: "47 19 * * *"
-    - cron: "17 1,4,22 * * *"
-    # Check completed ESPN box scores at 08:13 and 12:13 Brasilia.
+    - cron: "17 1,22 * * *"
+    # 01:17 is now settlement, never a pregame capture.
+    # Try early results at 01:17; complete follow-ups at 08:13 and 12:13 BRT.
+    - cron: "17 4 * * *"
     - cron: "13 11,15 * * *"
   workflow_dispatch:
     inputs:
@@ -45,14 +47,14 @@ jobs:
       - name: Baseline recorded data for this run
         run: python monitor_audit.py before
       - name: Capture immutable predictions before tipoff
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'snapshot') || github.event_name == 'schedule' && (github.event.schedule == '47 19 * * *' || github.event.schedule == '17 1,4,22 * * *') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'snapshot') || github.event_name == 'schedule' && (github.event.schedule == '47 19 * * *' || github.event.schedule == '17 1,22 * * *') }}
         env:
           SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
         run: |
           set -o pipefail
           python model_tracking.py snapshot | tee capture.log
       - name: Resolve finished ESPN games
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'settle') || github.event_name == 'schedule' && github.event.schedule == '13 11,15 * * *' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.mode == 'both' || inputs.mode == 'settle') || github.event_name == 'schedule' && (github.event.schedule == '17 4 * * *' || github.event.schedule == '13 11,15 * * *') }}
         run: |
           set -o pipefail
           python model_tracking.py settle | tee settle.log
