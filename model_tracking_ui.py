@@ -94,12 +94,17 @@ def render_model_performance() -> None:
         return
 
     frame = tracking_frame(snapshots, results)
-    dates = pd.to_datetime(frame["game_date_brt"], errors="coerce")
+    # ESPN schedules currently return DD/MM/YYYY while other sources and
+    # tests use ISO dates. Both must remain readable without rewriting the
+    # immutable pregame snapshots already committed to GitHub.
+    dates = pd.to_datetime(
+        frame["game_date_brt"], format="mixed", dayfirst=True, errors="coerce"
+    )
     frame = frame.loc[dates.notna()].copy()
     if frame.empty:
         st.warning("Os registros disponíveis não contêm datas válidas.")
         return
-    frame["date"] = pd.to_datetime(frame["game_date_brt"], errors="coerce")
+    frame["date"] = dates.loc[frame.index]
     today = datetime.now(BRT).date()
     timeframe = st.segmented_control(
         "Período de avaliação", ["Últimos 7 dias", "Últimos 30 dias", "Tudo"],
