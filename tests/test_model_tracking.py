@@ -356,10 +356,21 @@ def test_monitor_schedule_uses_staggered_utc_crons_and_audit_steps():
 
     workflow = (Path(__file__).resolve().parents[1] /
                 ".github/workflows/model_tracking.yml").read_text(encoding="utf-8")
-    assert 'cron: "47 19 * * *"' in workflow  # 16:47 BRT
-    assert 'cron: "17 1,4,22 * * *"' in workflow  # 01:17, 22:17, 19:17 BRT
-    assert 'cron: "13 11,15 * * *"' in workflow  # 08:13 and 12:13 BRT
+    assert 'cron: "47 19 * * *"' in workflow  # capture 16:47 BRT
+    assert 'cron: "17 1,22 * * *"' in workflow  # capture 22:17 & 19:17 BRT
+    assert 'cron: "17 4 * * *"' in workflow  # early settlement 01:17 BRT
+    assert 'cron: "13 11,15 * * *"' in workflow  # settle 08:13 & 12:13 BRT
+    assert 'cron: "17 1,4,22 * * *"' not in workflow
     assert 'cron: "0 1,4,19,22 * * *"' not in workflow
+    # A 01:17 scheduled run must never collect forecasts after tipoff.
+    capture_condition = workflow.split("Capture immutable predictions before tipoff", 1)[1].split(
+        "env:", 1
+    )[0]
+    settle_condition = workflow.split("Resolve finished ESPN games", 1)[1].split(
+        "run:", 1
+    )[0]
+    assert "github.event.schedule == '17 4 * * *'" not in capture_condition
+    assert "github.event.schedule == '17 4 * * *'" in settle_condition
     assert "python monitor_audit.py before" in workflow
     assert "python monitor_audit.py after" in workflow
     assert "set -o pipefail" in workflow
