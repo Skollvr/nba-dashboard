@@ -1,41 +1,160 @@
-NBA Props Dashboard (v3.1)
+# 🏀 NBA Props Dashboard
 
-![Streamlit App](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+**Análise de desempenho, projeções e linhas de NBA Player Props em uma interface interativa.**
 
-Uma solução avançada de análise preditiva para NBA Player Props consolidando estatísticas oficiais, tendências de mercado e monitoramento de saúde dos atletas em uma única interface responsiva.
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?logo=streamlit&logoColor=white)
+![Status](https://img.shields.io/badge/Temporada-2026%2F27-246a68)
+![License: GPL v3](https://img.shields.io/badge/Licen%C3%A7a-GPL--3.0-blue)
 
-Funcionalidades de Elite
+O **NBA Props Dashboard** reúne estatísticas da temporada, forma recente, contexto defensivo, rotação, lesões e cotações de mercado para apoiar a leitura de confrontos da NBA. Desenvolvido em **Python + Streamlit**, oferece visual escuro responsivo e uma experiência orientada à comparação entre projeção e linha de aposta.
 
-O sistema processa dados em tempo real para oferecer insights que vão além das médias básicas:
+> **Estado do projeto — outubro de 2026:** a temporada **2026/27** está disponível. O aplicativo usa os dados correspondentes à temporada selecionada, sem preencher artificialmente o início de uma temporada com jogos da anterior. Projeções com amostras pequenas são experimentais.
 
-* **Modelo de Projeção Ponderado**: Algoritmo customizado que calcula a expectativa de performance usando a fórmula:
-    $$Proj = (S \cdot 0.35) + (L10 \cdot 0.40) + (L5 \cdot 0.15) + (M_{adj} \cdot 0.10)$$
-    Onde $S$ é a média da temporada, $L$ são os recortes recentes e $M_{adj}$ é o ajuste de dificuldade do matchup.
-* **Identidade Visual Dinâmica**: O dashboard detecta o time selecionado e aplica automaticamente as cores oficiais e gradientes da franquia em toda a interface.
-* **Lupa de Lesões (PDF Scraper)**: Extração automatizada de dados do *Official NBA Injury Report* via raspagem de arquivos PDF em tempo real.
-* **Integração com Mercado (BetMGM)**: Comparação direta entre as projeções do modelo e as linhas ativas de apostas.
-* **Análise de Eficiência**: Gráficos de dispersão correlacionando minutos jogados vs. produção e histogramas de frequência para identificação de "piso e teto".
+## ✨ Funcionalidades
 
-## 🛠️ Tech Stack
+| Área | O que você encontra |
+| --- | --- |
+| **Confrontos** | Agenda por data, seleção de jogo e horários convertidos para **Brasília (BRT)**. |
+| **Jogadores** | Cards com foto, escudo do time, projeção contextual, média L10, linha ativa, Edge e odds decimais de **Over / Under**, quando disponíveis. |
+| **Métricas** | **PTS, REB, AST, PRA, 3PM, FGA e 3PA**, com troca rápida acima dos cards. |
+| **Jogador em foco** | Abas **Visão geral**, **Estatísticas**, **Raio-X** e **Mercado e H2H**, com detalhes expansíveis. |
+| **Estatísticas** | Cards de médias da temporada, L10 e L5, com comparações visuais e indicação de amostra insuficiente. |
+| **Matchup** | Contexto defensivo por equipe e posição, histórico individual contra o adversário (H2H) e classificação de dificuldade. |
+| **Minutos e rotação** | Estimativa automática de minutos, leitura dos jogos recentes, indicação de escalação projetada/confirmada e **ajuste manual pré-jogo** por jogador. |
+| **Mercado** | Linhas e odds de **BetMGM e FanDuel**, seleção da casa prioritária, alternativa por jogador e inclusão de **linhas manuais** quando necessário. |
+| **Lesões** | Consulta ao **NBA Official Injury Report** em PDF, com informações complementares da ESPN quando necessário. |
+| **Panorama** | Visão consolidada do confronto, rankings e destaques, separada dos cards individuais. |
 
-* **Linguagem**: Python 3.9+
-* **Interface**: Streamlit (com CSS customizado e Media Queries para mobile).
-* **Dados**: Pandas, NumPy, NBA API.
-* **Gráficos**: Plotly Interactive.
-* **Parsing**: PyPDF para processamento de relatórios médicos.
+Há dois modos de apresentação, **Renovado** e **Clássico**, para permitir comparação de interfaces sem mudar o motor de projeções. A disponibilidade de cada recurso depende dos dados retornados pelas fontes.
 
-## ⚙️ Instalação e Execução
+## 🧠 Como funcionam as projeções
 
-1. **Clone o repositório:**
-   ```bash
-   git clone https://github.com/Skollvr/nba-dashboard.git 
+A projeção contextual exibida nos cards utiliza o motor atual de **produção por minuto + Matchup V4**. A antiga fórmula de médias ponderadas permanece no projeto como cálculo auxiliar, mas **não representa sozinha a projeção contextual principal**.
 
-2. Instale as dependências:
-   ```bash
-   pip install -r requirements.txt
+1. **Minutos projetados:** a estimativa automática combina **40% da média de minutos da temporada**, **35% da mediana dos últimos 10 jogos** e **25% da mediana dos últimos 5**, com ajuste dos pesos quando faltam recortes válidos. O modelo não concede bônus automático por ser titular projetado.
+2. **Ritmo de produção:** a taxa por minuto combina **50% da temporada**, **30% de L10** e **20% de L5**, renormalizando os pesos disponíveis.
+3. **Projeção base:** minutos projetados × taxa estimada de produção por minuto.
+4. **Matchup V4:** avalia força defensiva relativa (**55%**), componente posicional (**15%**) e histórico H2H (**até 30%**, conforme a confiabilidade da amostra). O ajuste final sobre a projeção base é limitado a **±6%**.
 
-3. Execute:
-   ```bash
-   streamlit run app.py
+A projeção **PRA** é mantida consistente com a soma **PTS + REB + AST**. Os campos de arremessos (**FGA/3PA**) passam por verificações de disponibilidade e consistência dos dados.
 
+**Edge** é a diferença entre a projeção do modelo e a linha selecionada:
+
+```text
+Edge = Projeção contextual − Linha de mercado (ou manual)
+```
+
+Edge positivo ou negativo é uma **diferença estatística**, não uma garantia de resultado nem uma recomendação automática de aposta. Quando a projeção ou a linha não é válida, o aplicativo evita calcular Edge artificialmente.
+
+### ⏱️ Revisão pré-jogo de minutos
+
+No painel **Revisão pré-jogo de minutos** é possível consultar o histórico recente de rotação e informar uma estimativa manual para um atleta **antes de o jogo começar**. O sistema reaplica essa estimativa às projeções do jogador preservando as taxas do modelo; os demais jogadores continuam com minutos automáticos.
+
+Os ajustes são mantidos **na sessão do aplicativo**; não alteram permanentemente o código ou a base de dados.
+
+### 🏀 Titulares projetados x confirmados
+
+- A **ESPN Depth Chart** ajuda a identificar *titulares projetados*.
+- Uma escalação só recebe o rótulo **Titular confirmado** quando há evidência explícita de confirmação e titularidade no feed consultado.
+- A consulta ao feed diário da NBA é **opcional** e pode ficar indisponível. Nesse caso, o sistema mantém os status projetados em vez de inventar confirmações.
+- O status de titularidade **não modifica automaticamente os minutos projetados**.
+
+## 📡 Fontes de dados e atualização
+
+- **ESPN:** agenda e horários, elencos, game logs, rotação e contexto estatístico. É a principal fonte dos dados de jogadores usados no Streamlit Cloud.
+- **NBA / boletins oficiais:** relatórios de lesão em PDF; feed diário de escalações quando acessível.
+- **SportsGameOdds API:** cotações de Player Props das casas **BetMGM** e **FanDuel**, condicionadas à cobertura e disponibilidade da API.
+- **NBA API / recursos auxiliares:** utilitários e integrações de suporte, onde acessíveis.
+
+As consultas utilizam *cache* com prazos próprios e podem ser atualizadas pelas opções do painel. **Não se deve interpretar a interface como um feed garantido em tempo real**: fontes externas podem sofrer atrasos, limites de acesso ou indisponibilidade.
+
+As odds são mostradas em formato **decimal** e somente para a casa e a linha correspondentes. Linhas inseridas manualmente **não criam odds fictícias**.
+
+## 🚀 Executar localmente
+
+### Requisitos
+
+- **Python 3.11** (versão usada nos testes automatizados);
+- Acesso à internet para consultar as fontes externas;
+- Chave da **SportsGameOdds** apenas se desejar consultar linhas de mercado; o restante do painel pode ser usado sem ela, conforme disponibilidade das fontes.
+
+### 1. Clonar o repositório
+
+```bash
+git clone https://github.com/Skollvr/nba-dashboard.git
+cd nba-dashboard
+```
+
+### 2. Instalar as dependências
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+### 3. Configurar a API de odds (opcional)
+
+Defina a variável de ambiente `SPORTSGAMEODDS_API_KEY` ou configure-a como *secret* no Streamlit. Exemplo no **PowerShell**, antes de executar o app:
+
+```powershell
+$env:SPORTSGAMEODDS_API_KEY="SUA_CHAVE_AQUI"
+```
+
+No **Streamlit Community Cloud**, configure a mesma chave em **Secrets** nas configurações do aplicativo. **Nunca publique a chave no repositório.**
+
+### 4. Iniciar o dashboard
+
+```bash
+streamlit run app.py
+```
+
+Abra o endereço local informado pelo Streamlit.
+
+## 🎮 Fluxo de uso sugerido
+
+1. Escolha a **data em Brasília**, clique em **Buscar jogos** e depois carregue o confronto.
+2. Selecione um dos times pelo nome ou escudo e escolha a **métrica** acima dos cards.
+3. Analise projeção, médias recentes e linhas/odds existentes; alterne entre **BetMGM** e **FanDuel** quando habilitadas.
+4. Antes do jogo, confira **lesões, possíveis titulares e rotação**; ajuste manualmente os minutos se desejar.
+5. Em **Jogador em foco**, explore **Visão geral**, **Estatísticas**, **Raio-X** e **Mercado e H2H**.
+6. Abra o **Panorama do confronto** para comparar jogadores e rankings.
+
+## 🧰 Tecnologias e organização
+
+**Stack:** Python, Streamlit, Pandas, NumPy, Plotly, Requests, `nba_api`, PyPDF e CSS responsivo.
+
+| Arquivo / diretório | Responsabilidade |
+| --- | --- |
+| `app.py` | Interface principal, filtros e navegação. |
+| `processamento.py` | Contexto estatístico, projeções e Matchup V4. |
+| `api_espn.py`, `espn_context.py` | Integração dos elencos, históricos e estatísticas ESPN. |
+| `api_nba.py`, `api_lineups.py` | Recursos de agenda/NBA e informações de escalações. |
+| `api_odds.py` | Consulta, normalização e conversão das odds de mercado. |
+| `pdf_reader.py`, `injury_sources.py` | Consulta e leitura de relatórios oficiais de lesões. |
+| `assisted_minutes.py`, `lineup_rotation.py` | Minutos manuais e análise observacional da rotação. |
+| `ui_components.py`, `ui_refresh.py` | Cards, análises e apresentação das telas. |
+| `tests/` | Testes de regressão e validação de integrações/cálculos. |
+
+## ✅ Testes e qualidade
+
+O projeto possui verificações automatizadas pelo **GitHub Actions**, incluindo cenários de ESPN, integrações de odds, consistência de projeções, minutos manuais, escalações e interface.
+
+Para executar localmente:
+
+```bash
+python -m pip install pytest
+python -m pytest -q
+```
+
+Consulte [os workflows do GitHub Actions](https://github.com/Skollvr/nba-dashboard/actions) para acompanhar a validação da branch `main`.
+
+## ⚠️ Limitações e uso responsável
+
+- No início de cada temporada, as amostras de temporada/L5/L10 podem ser muito pequenas; resultados e projeções nesse período exigem cautela.
+- Escalações e boletins podem mudar até o início dos jogos. A confirmação depende da **fonte efetivamente disponível**.
+- Mercados podem não ter linha publicada para todos os jogadores e métricas; preços podem mudar após a consulta.
+- O aplicativo é uma **ferramenta de análise estatística**, não garante resultados esportivos, lucro ou retorno financeiro.
+
+## 📄 Licença
+
+Distribuído sob a **GNU General Public License v3.0 (GPL-3.0)**. Consulte o arquivo [LICENSE](LICENSE).
