@@ -508,78 +508,125 @@
   margin-top:5px; line-height:1.1;
 }
 
-/* Player focus: Statistics tab only. Compact, scannable seven-row grid. */
-.nova-stats-intro {
-  display:flex; align-items:center; justify-content:space-between;
-  gap:10px; flex-wrap:wrap; margin:8px 0 12px;
+/* Player focus: Statistics cards only. Each period uses a local scale
+   within its metric; selected metric is visually featured. */
+.nova-statcards-section { margin:7px 0 11px; }
+.nova-statcards-intro {
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;
+  gap:10px; margin-bottom:13px;
 }
-.nova-stats-title {
-  font-weight:850; font-size:1.06rem; color:#f1f7ff !important;
+.nova-statcards-intro strong {
+  font-size:1.06rem; color:#eff8ff !important; font-weight:830;
 }
-.nova-stats-description {
-  font-size:.76rem; color:#9bafc8 !important; margin-top:3px;
+.nova-statcards-intro p {
+  font-size:.76rem; color:#9aafc7 !important; margin:4px 0 0;
 }
-.nova-stats-sample {
-  color:#bdd8ea !important; background:#1b2b40;
-  border:1px solid #34495e; border-radius:8px;
-  padding:6px 10px; font-size:.73rem; font-weight:730;
+.nova-statcards-sample {
+  color:#c2dded !important; font-size:.72rem; font-weight:750;
+  padding:6px 10px; border-radius:8px; border:1px solid #354962;
+  background:#1a2d42; white-space:nowrap;
 }
-.nova-stats-scroll {
-  border:1px solid #34475b; border-radius:13px; overflow:hidden;
-  background:#111f30;
+.nova-statcards-grid {
+  display:grid; grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:12px; align-items:stretch;
 }
-.nova-stats-row {
-  display:grid;
-  grid-template-columns:minmax(115px,1.25fr) repeat(3,minmax(68px,.82fr)) minmax(95px,.85fr);
-  align-items:center; gap:9px; padding:11px 14px;
-  border-bottom:1px solid rgba(114,140,164,.15);
+.nova-statcard {
+  --stat-highlight:#6691bb;
+  position:relative; border:1px solid #334961; border-radius:14px;
+  padding:14px 15px 13px; min-width:0; overflow:hidden;
+  background:linear-gradient(137deg,#192b40,#111e2f);
+  display:flex; flex-direction:column; gap:12px;
 }
-.nova-stats-row:last-child { border-bottom:0; }
-.nova-stats-row > :not(:first-child) { text-align:right; }
-.nova-stats-header {
-  background:#1b2b40; color:#99b5cf !important;
-  font-size:.67rem; font-weight:760; letter-spacing:.035em;
-  text-transform:uppercase;
+.nova-statcard.featured {
+  --stat-highlight:#6cdbc2;
+  grid-column:1/-1; background:linear-gradient(120deg,#193b3f,#142438);
+  border-color:#3c9a85; box-shadow:inset 3px 0 0 #55d7b7;
+  padding:18px 19px;
 }
-.nova-stats-data {
-  color:#e9f1fc !important; font-size:.86rem; font-weight:790;
+.nova-statcard-head {
+  display:flex; justify-content:space-between; align-items:center;
+  gap:12px; min-width:0;
 }
-.nova-stats-data:nth-child(even) { background:rgba(170,203,229,.028); }
-.nova-stats-data.selected {
-  background:rgba(58,139,127,.20); box-shadow:inset 3px 0 #55c7b0;
+.nova-statcard-head > div {
+  display:flex; align-items:baseline; flex-wrap:wrap; gap:8px;
 }
-.nova-stats-metric {
-  display:flex; gap:9px; align-items:center; min-width:0;
+.nova-statcard-head strong { font-size:.94rem; font-weight:870; color:#f2f8ff !important; }
+.nova-statcard-head small { font-size:.7rem; font-weight:560; color:#95b0ca !important; }
+.nova-statcard-selected {
+  background:#1f5d57; border:1px solid #387c70;
+  color:#bff9e9 !important; padding:4px 8px; white-space:nowrap;
+  border-radius:7px; font-size:.65rem; font-weight:800;
 }
-.nova-stats-metric strong { font-size:.85rem; color:#eef6ff !important; }
-.nova-stats-metric small {
-  font-size:.59rem; color:#83dec9 !important; font-weight:690;
+.nova-statcard-values {
+  display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px;
 }
-.nova-stats-delta { color:#91aac5 !important; font-variant-numeric:tabular-nums; }
-.nova-stats-delta.up { color:#80dcc7 !important; }
-.nova-stats-delta.down { color:#c4b9ce !important; }
-.nova-stats-matchup {
-  display:flex; gap:8px 14px; align-items:center; flex-wrap:wrap;
-  margin-top:12px; padding:10px 13px;
-  background:#152738; border:1px solid #30485f; border-radius:10px;
+.nova-statcard-value {
+  display:flex; flex-direction:column; gap:5px; min-width:0;
+  padding:9px 10px; border-radius:9px; border:1px solid #30455c;
+  background:rgba(9,19,32,.40);
 }
-.nova-stats-matchup span {
-  color:#9ab6d2 !important; font-size:.73rem; font-weight:790;
+.nova-statcard-value.last5 {
+  background:rgba(42,65,86,.55); border-color:#3b5770;
 }
-.nova-stats-matchup strong { color:#f0f8ff !important; font-size:.88rem; }
-.nova-stats-matchup small { color:#92a9be !important; font-size:.7rem; }
-.nova-stats-note {
-  font-size:.72rem; line-height:1.4;
-  color:#91a9be !important; margin:9px 1px 8px;
+.nova-statcard.featured .nova-statcard-value.last5 {
+  background:rgba(31,92,85,.37); border-color:#4a8a80;
 }
-@media(max-width:640px) {
-  .nova-stats-row { grid-template-columns:64px repeat(3,minmax(0,1fr)); gap:5px; padding:11px 8px; }
-  .nova-stats-header { font-size:.58rem; letter-spacing:0; }
-  .nova-stats-data { font-size:.78rem; }
-  .nova-stats-metric small { display:none; }
-  .nova-stats-row .nova-stats-delta { display:none; }
-  .nova-stats-sample { font-size:.65rem; }
-  .nova-stats-matchup { gap:5px 10px; }
+.nova-statcard-value span {
+  font-size:.63rem; text-transform:uppercase; letter-spacing:.045em;
+  color:#91afc9 !important; font-weight:770; white-space:nowrap;
+}
+.nova-statcard-value strong {
+  font-size:1.21rem; font-weight:860; line-height:1.15;
+  color:#eff8ff !important; font-variant-numeric:tabular-nums;
+}
+.nova-statcard.featured .nova-statcard-value strong {
+  font-size:clamp(1.4rem,2.1vw,1.85rem);
+}
+.nova-statcard-bars {
+  display:grid; grid-template-columns:1fr; gap:4px;
+  padding:0 3px;
+}
+.nova-statcard-track {
+  background:rgba(141,166,194,.12); height:4px; border-radius:99px;
+  overflow:hidden;
+}
+.nova-statcard-track i {
+  display:block; height:100%; background:#6787a7; border-radius:99px;
+}
+.nova-statcard-track.last10 i { background:#8da4c8; }
+.nova-statcard-track.last5 i { background:var(--stat-highlight); }
+.nova-statcard-delta {
+  font-size:.7rem; font-weight:745; color:#9fb7cb !important;
+  margin-top:auto;
+}
+.nova-statcard-delta.up { color:#79e4c0 !important; }
+.nova-statcard-delta.down { color:#e0b3bd !important; }
+.nova-statcard-delta.insufficient { color:#a8acc1 !important; font-weight:600; }
+.nova-statcards-matchup {
+  display:flex; gap:8px 13px; align-items:center; flex-wrap:wrap;
+  margin-top:13px; background:#162a3c; padding:11px 14px;
+  border:1px solid #33485f; border-radius:11px;
+}
+.nova-statcards-matchup span { font-size:.72rem; font-weight:780; color:#9ab7d1 !important; }
+.nova-statcards-matchup strong { font-size:.87rem; color:#f1f8ff !important; }
+.nova-statcards-matchup small { font-size:.72rem; color:#99b2c8 !important; }
+.nova-statcards-note {
+  color:#91a8bc !important; font-size:.71rem; line-height:1.44; margin:9px 2px;
+}
+@media(max-width:760px) {
+  .nova-statcards-grid { gap:9px; }
+  .nova-statcard { padding:12px; }
+  .nova-statcard.featured { padding:14px; }
+  .nova-statcard-value { padding:8px 6px; }
+}
+@media(max-width:620px) {
+  .nova-statcards-grid { grid-template-columns:1fr; }
+  .nova-statcard.featured { grid-column:auto; }
+  .nova-statcard { gap:9px; padding:12px 13px; }
+  .nova-statcard-value strong { font-size:1.15rem; }
+  .nova-statcard.featured .nova-statcard-value strong { font-size:1.45rem; }
+  .nova-statcard-head small { font-size:.65rem; }
+  .nova-statcard-value span { font-size:.6rem; }
 }
 
 /* Nested tabs: clear active state and touch targets */
