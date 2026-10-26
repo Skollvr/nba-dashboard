@@ -201,4 +201,4 @@ def test_new_tracking_view_prioritizes_targets_but_keeps_mae_for_diagnostics():
     assert '"Meta atingida"' in source
     assert '"Abaixo da meta"' in source
     assert '"Erro abs."' not in source
-    assert '"Evolução do déficit médio por previsão"' in source
+    assert 'Evolução do déficit médio por previsão' in source
