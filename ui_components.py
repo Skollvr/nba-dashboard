@@ -94,7 +94,10 @@ def render_player_performance_chart(player_name: str, recent_values: list, line_
         return
 
     fig = go.Figure()
-    colors = ["#22c55e" if v >= line_value else "#ef4444" for v in recent_values]
+    colors = [
+        "#22c55e" if v > line_value else "#ef4444" if v < line_value
+        else "#94a3b8" for v in recent_values
+    ]
     
     fig.add_trace(go.Bar(
         x=[f"J{i+1}" for i in range(len(recent_values))],
@@ -740,7 +743,10 @@ def render_player_focus_panel(
                             mode="markers",
                             marker=dict(
                                 size=12,
-                                color=np.where(y >= active_line, "#10b981", "#ef4444"),
+                                color=np.where(
+                                    y > active_line, "#10b981",
+                                    np.where(y < active_line, "#ef4444", "#94a3b8")
+                                ),
                                 line=dict(width=1, color="#f8fafc"),
                                 opacity=0.8,
                             ),
