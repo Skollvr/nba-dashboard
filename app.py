@@ -882,6 +882,7 @@ def main():
             chart_mode, line_metric, line_value, use_market_line,
             cards_per_row, opp_abbr, season_scope=season_scope,
             show_today_lineups=(selected_date == today),
+            target_date=selected_date,
             preferred_bookmaker=bookmaker_priority,
             enabled_bookmakers=tuple(
                 book for book, enabled in (
