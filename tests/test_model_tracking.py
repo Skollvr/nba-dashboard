@@ -5,6 +5,7 @@ import pandas as pd
 
 from model_tracking import (
     append_unique_jsonl, load_jsonl, snapshot_game, result_game, tracking_frame,
+    projection_target,
 )
 from model_tracking_ui import model_performance_metrics
 
@@ -93,8 +94,9 @@ def test_settlement_requires_completed_espn_boxscore_and_skip_dnp():
     pts = next(item for item in results if item["key"].endswith(":PTS"))
     assert pts["actual"] == 24.0
     assert pts["absolute_error"] == 2.3  # Numeric MAE is still tracked.
+    assert pts["target_minimum"] == 21
     assert pts["target_reached"] is True
-    assert pts["shortfall"] == 0.0  # Above projection is a met target.
+    assert pts["shortfall"] == 0.0  # Above target floor: no shortfall.
     assert pts["market_outcome"] == "Over"
     assert pts["direction_hit"] is True
     assert results[0]["settled_utc"]
@@ -130,30 +132,43 @@ def test_dashboard_without_snapshots_does_not_render_made_up_metrics():
     assert "Nenhuma projeção pré-jogo registrada" in notice.call_args.args[0]
 
 
-def test_target_attainment_counts_overperformance_as_success_not_failure():
+def test_target_attainment_uses_integer_minimum_without_rounding_up():
     samples = pd.DataFrame([
-        {
-            "game_id": "a", "projection": 27.4, "actual": 31.0,
-            "direction_hit": None,
-        },
-        {
-            "game_id": "b", "projection": 27.4, "actual": 27.4,
-            "direction_hit": None,
-        },
-        {
-            "game_id": "c", "projection": 27.4, "actual": 24.0,
-            "direction_hit": None,
-        },
+        {"game_id": "a", "projection": 27.4, "actual": 27,
+         "direction_hit": None},
+        {"game_id": "b", "projection": 27.4, "actual": 28,
+         "direction_hit": None},
+        {"game_id": "c", "projection": 27.4, "actual": 26,
+         "direction_hit": None},
+        {"game_id": "d", "projection": 25.4, "actual": 25,
+         "direction_hit": None},
+        {"game_id": "e", "projection": 4.7, "actual": 4,
+         "direction_hit": None},
+        {"game_id": "f", "projection": 4.7, "actual": 3,
+         "direction_hit": None},
     ])
     metrics = model_performance_metrics(samples)
-    assert metrics["count"] == 3
-    assert metrics["target_count"] == 2
-    assert metrics["miss_count"] == 1
-    assert round(metrics["target_rate"], 6) == round(2 / 3, 6)
-    assert round(metrics["shortfall_avg"], 6) == round(3.4 / 3, 6)
-    assert round(metrics["shortfall_on_misses"], 6) == 3.4
-    # MAE stays a separate symmetrical technical diagnostic.
-    assert round(metrics["mae"], 6) == round((3.6 + 0 + 3.4) / 3, 6)
+    assert metrics["count"] == 6
+    assert metrics["target_count"] == 4
+    assert metrics["miss_count"] == 2
+    assert round(metrics["target_rate"], 6) == round(4 / 6, 6)
+    assert round(metrics["shortfall_avg"], 6) == round(2 / 6, 6)
+    assert metrics["shortfall_on_misses"] == 1.0
+    # Numerical MAE still measures all differences to decimal projections.
+    assert round(metrics["mae"], 6) == round(
+        (0.4 + 0.6 + 1.4 + 0.4 + 0.7 + 1.7) / 6, 6
+    )
+
+def test_target_minimum_is_floor_for_all_discrete_basketball_metrics():
+    assert projection_target(27.4) == 27
+    assert projection_target(25.4) == 25
+    assert projection_target(4.7) == 4
+    assert projection_target(4.9999) == 4
+    assert projection_target(27.0) == 27
+    assert projection_target(0.8) == 0
+    assert projection_target(float("nan")) is None
+    assert projection_target(None) is None
+    assert projection_target(-1) is None
 
 
 def test_target_outcomes_settled_below_projection_have_positive_shortfall():
@@ -164,14 +179,16 @@ def test_target_outcomes_settled_below_projection_have_positive_shortfall():
     ]}}
     with patch("api_espn._extract_summary_rows", return_value=[{
         "PLAYER_ID": 11, "TEAM_ID": 1610612738,
-        "PTS": 19.0, "REB": 6.3, "AST": 4.0,
+        "PTS": 19.0, "REB": 6.0, "AST": 4.0,
     }]):
         settled = result_game(records, completed)
     pts = next(item for item in settled if item["key"].endswith(":PTS"))
     assert pts["target_reached"] is False
-    assert pts["shortfall"] == 2.7
+    assert pts["target_minimum"] == 21
+    assert pts["shortfall"] == 2.0
     assert pts["absolute_error"] == 2.7
     reb = next(item for item in settled if item["key"].endswith(":REB"))
+    assert reb["target_minimum"] == 6
     assert reb["target_reached"] is True
     assert reb["shortfall"] == 0.0
 
@@ -199,6 +216,8 @@ def test_new_tracking_view_prioritizes_targets_but_keeps_mae_for_diagnostics():
     assert '"Déficit médio · ' in source
     assert 'with st.expander("Ver precisão estatística tradicional (MAE e viés)"' in source
     assert '"Meta atingida"' in source
+    assert '"Meta mínima"' in source
+    assert 'projection_target' in source
     assert '"Abaixo da meta"' in source
     assert '"Erro abs."' not in source
     assert 'Evolução do déficit médio por previsão' in source
