@@ -340,8 +340,12 @@ def test_monitor_audit_parses_capture_and_settlement_reported_counts(tmp_path):
     from monitor_audit import _reported_count
 
     captured = tmp_path / "capture.log"
-    captured.write_text("Captured game 1: 175 predictions\\nsnapshot: 175 new rows\\n",
-                        encoding="utf-8")
+    captured.write_text(
+        """Captured game 1: 175 predictions
+snapshot: 175 new rows
+""",
+        encoding="utf-8",
+    )
     assert _reported_count(captured, "snapshot") == 175
     assert _reported_count(captured, "settle") is None
     assert _reported_count(tmp_path / "missing.log", "snapshot") is None
