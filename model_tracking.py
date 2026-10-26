@@ -78,8 +78,9 @@ def snapshot_game(game: pd.Series, away: pd.DataFrame, home: pd.DataFrame,
             continue
         for _, player in df.iterrows():
             pid = finite_float(player.get("PLAYER_ID"))
+            team_id = finite_float(player.get("TEAM_ID"))
             gp = finite_float(player.get("SEASON_GP"))
-            if pid is None or gp is None or gp < 1:
+            if pid is None or team_id is None or team_id <= 0 or gp is None or gp < 1:
                 continue
             if str(player.get("INJ_STATUS") or "").casefold() in {"out", "doubtful"}:
                 continue
@@ -101,7 +102,7 @@ def snapshot_game(game: pd.Series, away: pd.DataFrame, home: pd.DataFrame,
                     "version": VERSION,
                     "player_id": int(pid),
                     "player": str(player.get("PLAYER") or ""),
-                    "team_id": int(player.get("TEAM_ID") or 0),
+                    "team_id": int(team_id),
                     "metric": metric,
                     "projection": round(pred, 4),
                     "minutes": finite_float(player.get("PROJ_MIN_V1")),
@@ -224,6 +225,11 @@ def capture(today=None, now=None):
                 roster_season=get_season_string(today),
                 target_date=today,
             )
+            # build_team_table does not retain TEAM_ID in its card schema.
+            # Add source-specific IDs only in the monitoring copy, without
+            # changing app projections, rosters or the Matchup V4 logic.
+            away = away.assign(TEAM_ID=int(game["VISITOR_TEAM_ID"]))
+            home = home.assign(TEAM_ID=int(game["HOME_TEAM_ID"]))
             rows = snapshot_game(game, away, home, now)
             # Never write a partial/unusable forecast group.
             if rows:
