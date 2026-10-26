@@ -684,3 +684,30 @@ def test_statistics_redesign_affects_modern_statistics_tab_only():
     assert ".nova-statcard.featured" in css
     assert "@media(max-width:620px)" in css
     assert ".nova-stats-row" not in css
+
+
+def test_player_over_under_chart_marks_push_as_neutral():
+    from ui_components import render_player_performance_chart
+
+    figures = []
+    with patch("ui_components.st.plotly_chart", side_effect=lambda fig, **kw: figures.append(fig)):
+        render_player_performance_chart(
+            "Jogador de teste", [4, 6, 8], 6.0, "REB"
+        )
+    assert len(figures) == 1
+    assert list(figures[0].data[0].marker.color) == [
+        "#ef4444", "#94a3b8", "#22c55e"
+    ]
+
+
+def test_h2h_uses_strict_outcome_and_labels_push_neutrally():
+    import inspect
+    from ui_components import render_player_focus_panel
+
+    source = inspect.getsource(render_player_focus_panel)
+    assert 'h2h_display["Resultado"]' in source
+    assert 'classify_line_result(value, active_line)' in source
+    assert 'if num > active_line:' in source
+    assert 'if num < active_line:' in source
+    assert 'push_count = int(values.eq(active_line).sum())' in source
+    assert 'get_player_log(' in source and 'season_scope=season_scope' in source
