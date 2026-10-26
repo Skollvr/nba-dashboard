@@ -204,3 +204,41 @@ def test_ui_has_no_old_backtest_or_pdf_diagnostic_controls():
     assert "Diagnosticar localização, download e leitura do PDF NBA" not in ui
     assert 'value=True,' in app  # BetMGM priority is enabled by default
     assert "Gerar linha manual" in app
+
+
+def test_integer_line_push_is_not_counted_as_over_or_under():
+    from processamento import classify_line_result
+
+    player = _player(
+        PROJ_REB_V1=6.8,
+        RECENT_REB_L10=[6, 8, 4, 6, 7],  # newest first
+        MANUAL_LINE_REB=6.0,
+    )
+    ctx = get_line_context(player, "REB", None, use_market_line=False)
+    assert classify_line_result(6.0, 6.0) == "Push"
+    assert classify_line_result(6.01, 6.0) == "Over"
+    assert classify_line_result(5.99, 6.0) == "Under"
+    assert ctx["hit_l10"] == "2/5"
+    assert ctx["under_l10"] == "1/5"
+    assert ctx["push_l10"] == "2/5"
+    assert ctx["hit_l5"] == "2/5"
+    assert ctx["under_l5"] == "1/5"
+    assert ctx["push_l5"] == "2/5"
+    assert ctx["hit_sequence"].count("✅") == 2
+    assert ctx["hit_sequence"].count("⏸️") == 2
+    assert ctx["under_sequence"].count("⏸️") == 2
+
+
+def test_half_point_lines_have_no_push_and_invalid_values_are_not_counted():
+    from processamento import classify_line_result
+
+    player = _player(
+        PROJ_PTS_V1=26.5,
+        RECENT_PTS_L10=[24, 25, 26, None, float("nan")],
+        MANUAL_LINE_PTS=25.5,
+    )
+    ctx = get_line_context(player, "PTS", None, use_market_line=False)
+    assert ctx["hit_l10"] == "1/3"
+    assert ctx["under_l10"] == "2/3"
+    assert ctx["push_l10"] == "0/3"
+    assert classify_line_result(None, 25.5) == "Indisponível"
