@@ -166,6 +166,10 @@ def result_game(snaps: list[dict], summary: dict) -> list[dict]:
             "actual": float(actual),
             "error": round(pred - actual, 4),
             "absolute_error": round(abs(pred - actual), 4),
+            # Target-attainment is asymmetric by design and distinct from MAE.
+            # Exceeding the forecast counts as a reached target, not a shortfall.
+            "target_reached": bool(actual >= pred),
+            "shortfall": round(max(pred - actual, 0.0), 4),
             "market_outcome": market_outcome,
             "direction_hit": direction_hit,
             "settled_utc": datetime.now(timezone.utc).isoformat(),
@@ -182,6 +186,7 @@ def tracking_frame(snapshots: list[dict], results: list[dict]) -> pd.DataFrame:
         resolved = pd.DataFrame(results).drop_duplicates("key", keep="first")
         frame = frame.merge(
             resolved[[col for col in ("key", "actual", "error", "absolute_error",
+                                        "target_reached", "shortfall",
                                         "market_outcome", "direction_hit") if col in resolved]],
             on="key", how="left", validate="one_to_one",
         )
@@ -189,6 +194,8 @@ def tracking_frame(snapshots: list[dict], results: list[dict]) -> pd.DataFrame:
         frame["actual"] = float("nan")
         frame["error"] = float("nan")
         frame["absolute_error"] = float("nan")
+        frame["target_reached"] = None
+        frame["shortfall"] = float("nan")
         frame["market_outcome"] = None
         frame["direction_hit"] = None
     return frame
