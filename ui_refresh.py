@@ -358,120 +358,139 @@ def render_focus_summary_refresh(
 
 
 def render_focus_statistics_refresh(row: pd.Series, selected_metric: str) -> None:
-    """Compact season/L10/L5 grid, without new forecasts or recomputation.
+    """Seven visual season/L10/L5 cards with the selected metric featured.
 
-    Keep all seven metrics, mark the chosen metric, show real sample counts
-    and leave ESPN shooting-quality failures unavailable rather than zero.
+    Presentation only: existing ESPN averages, sample counts and matchup
+    classifications are used unchanged. Incomplete shooting data remain blank,
+    and L5-L10 deltas are withheld while the windows overlap fully.
     """
     metrics = ("PRA", "PTS", "REB", "AST", "3PM", "FGA", "3PA")
     names = {
-        "PRA": "PRA", "PTS": "Pontos", "REB": "Rebotes",
-        "AST": "Assistências", "3PM": "Bolas de 3",
-        "FGA": "Arremessos", "3PA": "Tentativas de 3",
+        "PRA": "Pontos + rebotes + assistências",
+        "PTS": "Pontos", "REB": "Rebotes", "AST": "Assistências",
+        "3PM": "Cestas de 3 pontos", "FGA": "Tentativas de arremesso",
+        "3PA": "Tentativas de 3 pontos",
     }
-    gp_raw = pd.to_numeric(row.get("SEASON_GP"), errors="coerce")
-    season_gp = int(gp_raw) if pd.notna(gp_raw) and gp_raw >= 0 else 0
+    gp = pd.to_numeric(row.get("SEASON_GP"), errors="coerce")
+    season_gp = int(gp) if pd.notna(gp) and math.isfinite(float(gp)) and gp > 0 else 0
 
-    def _observed_sample(column: str, maximum: int) -> int:
-        raw = pd.to_numeric(row.get(column), errors="coerce")
-        if pd.notna(raw) and math.isfinite(float(raw)):
-            return max(0, min(maximum, int(raw)))
-        return min(maximum, season_gp)
+    def sample(column: str, maximum: int) -> int:
+        observed = pd.to_numeric(row.get(column), errors="coerce")
+        if pd.notna(observed) and math.isfinite(float(observed)):
+            return max(0, min(season_gp, maximum, int(observed)))
+        return min(season_gp, maximum)
 
-    l5_games = _observed_sample("L5_GP", 5)
-    l10_games = _observed_sample("L10_GP", 10)
-    # The L5 window is a subset of L10. Only offer a directional
-    # comparison when there are more than five actual recent games.
-    enough_for_trend = l5_games >= 5 and l10_games >= 6
-    sample_message = (
-        "Sem jogos nesta temporada; nenhuma média estimada."
-        if season_gp == 0 else
-        "Amostra inicial: L5 e L10 podem representar os mesmos jogos."
-        if not enough_for_trend else
-        "Variação = média L5 menos média L10; não é ajuste de projeção."
-    )
+    l5_gp = sample("L5_GP", 5)
+    l10_gp = sample("L10_GP", 10)
+    enough_for_delta = l5_gp == 5 and l10_gp >= 6
 
-    def _metric_num(metric: str, period: str, count: int) -> float | None:
+    def number(metric: str, period: str, count: int) -> float | None:
         if count == 0:
             return None
-        # ESPN quality flags are only relevant to shooting statistics.
         if metric in {"3PM", "FGA", "3PA"}:
-            quality = row.get(f"DATA_QUALITY_{metric}", True)
-            if pd.isna(quality) or str(quality).strip().lower() in {
+            flag = row.get(f"DATA_QUALITY_{metric}", True)
+            if pd.isna(flag) or str(flag).strip().casefold() in {
                 "false", "0", "none", "nan"
             }:
                 return None
-        val = pd.to_numeric(row.get(f"{period}_{metric}"), errors="coerce")
-        if pd.isna(val) or not math.isfinite(float(val)):
-            return None
-        return float(val)
+        raw = pd.to_numeric(row.get(f"{period}_{metric}"), errors="coerce")
+        return float(raw) if pd.notna(raw) and math.isfinite(float(raw)) else None
 
-    header = (
-        '<div class="nova-stats-intro">'
-        '<div><div class="nova-stats-title">Produção por período</div>'
-        '<div class="nova-stats-description">Compare as médias sem repetir cartões.</div></div>'
-        f'<span class="nova-stats-sample">{season_gp} jogo(s) na temporada</span>'
-        '</div>'
-        '<div class="nova-stats-scroll">'
-        '<div class="nova-stats-header nova-stats-row">'
-        '<span>Métrica</span><span>Temporada</span>'
-        f'<span>L10 · {l10_games}j</span>'
-        f'<span>L5 · {l5_games}j</span>'
-        '<span class="nova-stats-delta">Δ L5−L10</span>'
-        '</div>'
-    )
-    parts = [header]
-    for metric in metrics:
-        season = _metric_num(metric, "SEASON", season_gp)
-        l10 = _metric_num(metric, "L10", l10_games)
-        l5 = _metric_num(metric, "L5", l5_games)
-        delta = l5 - l10 if enough_for_trend and l5 is not None and l10 is not None else None
-        delta_class = (
+    chosen = selected_metric if selected_metric in metrics else "PRA"
+    ordered = (chosen, *(metric for metric in metrics if metric != chosen))
+    cards = [
+        '<section class="nova-statcards-section">',
+        '<div class="nova-statcards-intro">',
+        '<div><strong>Desempenho do jogador</strong>',
+        '<p>Temporada, últimos 10 e últimos 5 jogos em uma leitura visual.</p></div>',
+        f'<span class="nova-statcards-sample">{season_gp} jogo(s) nesta temporada</span>',
+        '</div>',
+        '<div class="nova-statcards-grid">',
+    ]
+    for metric in ordered:
+        values = (
+            number(metric, "SEASON", season_gp),
+            number(metric, "L10", l10_gp),
+            number(metric, "L5", l5_gp),
+        )
+        valid = [value for value in values if value is not None]
+        maximum = max(valid, default=0.0)
+        widths = [
+            min(100.0, max(0.0, (value / maximum) * 100))
+            if value is not None and maximum > 0 else 0.0
+            for value in values
+        ]
+        delta = (
+            values[2] - values[1]
+            if enough_for_delta and values[2] is not None and values[1] is not None
+            else None
+        )
+        tone = (
             "up" if delta is not None and delta > 0.049
             else "down" if delta is not None and delta < -0.049
-            else "flat"
+            else "steady" if delta is not None else "insufficient"
         )
-        delta_text = _signed(delta) if delta is not None else "—"
-        quality_failed = (
-            metric in {"3PM", "FGA", "3PA"}
-            and row.get(f"DATA_QUALITY_{metric}", True) is False
-        )
-        note = (
-            " · dados ESPN não validados" if quality_failed else ""
-        )
-        selected_class = " selected" if metric == selected_metric else ""
-        selected_text = '<small>Selecionada</small>' if metric == selected_metric else ""
-        parts.append(
-            f'<div class="nova-stats-row nova-stats-data{selected_class}">'
-            f'<div class="nova-stats-metric" title="{_e(names[metric] + note)}">'
-            f'<strong>{_e(metric)}</strong>{selected_text}</div>'
-            f'<span>{_number(season)}</span>'
-            f'<span>{_number(l10)}</span>'
-            f'<span>{_number(l5)}</span>'
-            f'<span class="nova-stats-delta {delta_class}">{_e(delta_text)}</span>'
-            '</div>'
-        )
-    parts.append('</div></div>')
+        if delta is not None:
+            delta_text = f"Δ L5 − L10  {_signed(delta)}"
+        elif season_gp == 0:
+            delta_text = "Sem jogos na temporada"
+        elif not enough_for_delta:
+            delta_text = "Amostra curta · sem tendência L5/L10"
+        else:
+            delta_text = "Dados insuficientes para variação"
+        featured = metric == chosen
+        selected_note = '<span class="nova-statcard-selected">Em análise</span>' if featured else ""
+        class_name = "nova-statcard featured" if featured else "nova-statcard"
+        cards.extend([
+            f'<article class="{class_name}">',
+            '<div class="nova-statcard-head">',
+            f'<div><strong>{_e(metric)}</strong><small>{_e(names[metric])}</small></div>',
+            selected_note,
+            '</div>',
+            '<div class="nova-statcard-values">',
+        ])
+        for period_name, count, value, period_class in (
+            ("Temporada", season_gp, values[0], "season"),
+            ("L10", l10_gp, values[1], "last10"),
+            ("L5", l5_gp, values[2], "last5"),
+        ):
+            label = period_name if period_name == "Temporada" else f"{period_name} · {count}j"
+            cards.extend([
+                f'<div class="nova-statcard-value {period_class}">',
+                f'<span>{_e(label)}</span>',
+                f'<strong>{_number(value)}</strong>',
+                '</div>',
+            ])
+        cards.append('</div>')
+        cards.append('<div class="nova-statcard-bars" aria-hidden="true">')
+        for period_class, width in zip(("season", "last10", "last5"), widths):
+            cards.append(
+                f'<div class="nova-statcard-track {period_class}">'
+                f'<i style="width:{width:.1f}%"></i></div>'
+            )
+        cards.extend([
+            '</div>',
+            f'<div class="nova-statcard-delta {tone}">{_e(delta_text)}</div>',
+            '</article>',
+        ])
+    cards.extend(['</div>'])
 
-    matchup = row.get(f"MATCHUP_LABEL_{selected_metric}_V1", "Sem avaliação")
-    matchup_text = str(matchup) if pd.notna(matchup) else "Sem avaliação"
-    match_score = pd.to_numeric(
-        row.get(f"MATCHUP_SCORE_{selected_metric}_V1"), errors="coerce"
-    )
-    if pd.notna(match_score) and math.isfinite(float(match_score)):
-        score_text = f" · Score {_signed(match_score, 2)}"
-    else:
-        score_text = ""
-    parts.append(
-        '<div class="nova-stats-matchup">'
-        f'<span>Matchup · {_e(selected_metric)}</span>'
-        f'<strong>{_e(matchup_text)}</strong>'
-        f'<small>{_e(score_text.lstrip(" ·")) if score_text else "Avaliação do modelo V4"}</small>'
-        '</div>'
-        f'<p class="nova-stats-note">{_e(sample_message)} '
-        '↑/↓ indicam apenas volume recente, não acerto em apostas.</p>'
-    )
-    st.markdown("".join(parts), unsafe_allow_html=True)
+    matchup = row.get(f"MATCHUP_LABEL_{chosen}_V1", "Sem avaliação")
+    label = str(matchup) if pd.notna(matchup) and str(matchup).strip() else "Sem avaliação"
+    score = pd.to_numeric(row.get(f"MATCHUP_SCORE_{chosen}_V1"), errors="coerce")
+    score_text = f"Score {_signed(score, 2)}" if pd.notna(score) and math.isfinite(float(score)) else ""
+    cards.extend([
+        '<div class="nova-statcards-matchup">',
+        f'<span>Matchup · {_e(chosen)}</span>',
+        f'<strong>{_e(label)}</strong>',
+        f'<small>{_e(score_text) if score_text else "Avaliação do Matchup V4"}</small>',
+        '</div>',
+        '<p class="nova-statcards-note">As barras comparam apenas períodos da mesma '
+        'métrica, sem comparar pontos com rebotes. Variação L5 − L10 indica '
+        'produção recente, não resultado previsto.</p>',
+        '</section>',
+    ])
+    st.markdown("".join(cards), unsafe_allow_html=True)
 
 
 def render_focus_comparison_refresh(row: pd.Series, metric: str) -> None:
