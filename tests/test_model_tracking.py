@@ -221,3 +221,35 @@ def test_new_tracking_view_prioritizes_targets_but_keeps_mae_for_diagnostics():
     assert '"Abaixo da meta"' in source
     assert '"Erro abs."' not in source
     assert 'Evolução do déficit médio por previsão' in source
+
+
+def test_legacy_results_are_reclassified_by_integer_target_without_rewriting_mae():
+    """Old JSONL target fields must not override the revised count-based rule."""
+    snapshots = [{
+        "key": "g1:p1:PTS", "game_id": "g1",
+        "projection": 27.4, "metric": "PTS", "player": "Exemplo",
+    }]
+    old_result = [{
+        "key": "g1:p1:PTS", "actual": 27.0,
+        "target_reached": False, "shortfall": 0.4,
+        "absolute_error": 0.4, "direction_hit": None,
+    }]
+    frame = tracking_frame(snapshots, old_result)
+    assert frame.loc[0, "target_minimum"] == 27
+    assert bool(frame.loc[0, "target_reached"]) is True
+    assert frame.loc[0, "shortfall"] == 0.0
+    assert frame.loc[0, "absolute_error"] == 0.4
+    assert old_result[0]["target_reached"] is False  # source immutable
+
+
+def test_unsettled_snapshots_do_not_count_as_attained_integer_targets():
+    rows = [{
+        "key": "g2:p1:AST", "game_id": "g2",
+        "projection": 4.7, "metric": "AST",
+    }]
+    frame = tracking_frame(rows, [])
+    assert frame.loc[0, "target_minimum"] == 4
+    assert pd.isna(frame.loc[0, "actual"])
+    assert frame.loc[0, "target_reached"] is None
+    assert pd.isna(frame.loc[0, "shortfall"])
+    assert model_performance_metrics(frame)["count"] == 0
