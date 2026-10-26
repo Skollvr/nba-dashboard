@@ -123,9 +123,16 @@ Abra o endereço local informado pelo Streamlit.
 
 Na navegação principal, **Desempenho do Modelo** permite acompanhar, por métrica,
 as projeções V4 **registradas antes** dos jogos e seus resultados posteriores da
-ESPN: quantidade de previsões, **MAE**, viés médio, evolução diária e registros
-conferidos. Quando houver linhas da mesma cotação capturada, também é possível
-verificar a direção do Edge, sem confundir essa taxa com retorno financeiro.
+ESPN. A avaliação principal verifica a **taxa de metas atingidas** (resultado real
+maior ou igual à projeção) e o **déficit médio** por previsão, calculado como
+`max(projeção − resultado, 0)`. Assim, superar a projeção equivale a **meta
+atingida** com déficit zero; apenas ficar abaixo gera déficit positivo.
+
+O **MAE tradicional** e o **viés** continuam disponíveis separadamente como
+diagnósticos da precisão numérica do modelo: eles consideram a diferença entre
+previsão e resultado nos dois sentidos. Quando houver uma linha de mercado
+capturada, a direção do Edge é calculada **independentemente** da meta
+da projeção. Nenhum desses indicadores equivale a retorno financeiro.
 
 O histórico é **prospectivo**, não retroativo: **nenhuma previsão de jogos já
 encerrados será fabricada**. No início a tela permanece vazia até a primeira
