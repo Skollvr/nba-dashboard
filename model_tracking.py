@@ -230,7 +230,10 @@ def capture(today=None, now=None):
             # changing app projections, rosters or the Matchup V4 logic.
             away = away.assign(TEAM_ID=int(game["VISITOR_TEAM_ID"]))
             home = home.assign(TEAM_ID=int(game["HOME_TEAM_ID"]))
-            rows = snapshot_game(game, away, home, now)
+            # Recheck the real clock AFTER network/model computation: a slow
+            # provider must never turn a post-tipoff value into a pregame capture.
+            captured_at = datetime.now(timezone.utc)
+            rows = snapshot_game(game, away, home, captured_at)
             # Never write a partial/unusable forecast group.
             if rows:
                 created += append_unique_jsonl(SNAPSHOTS, rows)
