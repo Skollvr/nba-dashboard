@@ -48,6 +48,12 @@ def test_snapshot_freezes_only_usable_pregame_metrics():
                          now - timedelta(hours=7)) == []
 
 
+def test_snapshot_requires_team_id_for_later_result_matching():
+    now, game = _sample_game()
+    roster = _sample_team().drop(columns=["TEAM_ID"])
+    assert snapshot_game(game, roster, pd.DataFrame(), now) == []
+
+
 def test_snapshot_never_labels_missing_sample_as_prediction():
     now, game = _sample_game()
     team = _sample_team()
