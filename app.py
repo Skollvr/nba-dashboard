@@ -245,14 +245,18 @@ def main():
             )
         season_scope_label = st.pills(
             "Recorte estatístico",
-            ["Temporada Regular", "Playoffs", "Play-In", "Tudo"],
+            ["Temporada Regular", "Playoffs", "Tudo"],
             default="Temporada Regular",
         )
 
+        st.caption(
+            "Play-In separado temporariamente indisponível: a ESPN não "
+            "identifica esse recorte com segurança nos endpoints utilizados. "
+            "A opção Tudo inclui os jogos disponíveis sem separar fases."
+        )
         season_scope_map = {
             "Temporada Regular": "Regular Season",
             "Playoffs": "Playoffs",
-            "Play-In": "PlayIn",
             "Tudo": "All",
         }
 
