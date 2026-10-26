@@ -110,8 +110,14 @@ def _scope_to_espn_type(season_scope: str) -> int | None:
         return 2
     if scope == "playoffs":
         return 3
-    # ESPN does not expose Play-In as consistently as stats.nba.com.
-    # During validation we keep All/PlayIn unfiltered and label the source.
+    if scope in {"playin", "play-in", "play in"}:
+        # Fail closed. Returning None previously mixed regular/playoff data,
+        # falsely labeling it as a standalone Play-In sample.
+        raise ValueError(
+            "Play-In isolado não validado na ESPN; selecione Temporada Regular, "
+            "Playoffs ou Tudo."
+        )
+    # All intentionally requests the full available season.
     return None
 
 
