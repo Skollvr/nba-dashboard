@@ -151,12 +151,25 @@ automaticamente pelo navegador; a captura roda no GitHub Actions.
 ### Como os registros são feitos
 
 - O workflow [Monitor V4](.github/workflows/model_tracking.yml) procura jogos
-  futuros várias vezes por dia (horário de Brasília), calcula a previsão
-  **pré-jogo**, congela os valores e grava em `data/model_snapshots.jsonl`.
-  Capturas são imutáveis e nunca sobrescritas após a partida.
-- Após a conclusão dos jogos, a ESPN fornece os box scores usados para
-  preencher `data/model_results.jsonl`. Jogadores sem estatística observada
-  utilizável não são contabilizados como erros de zero.
+  futuros nos horários **16h47, 19h17, 22h17 e 1h17 (Brasília)**, calcula
+  a previsão **pré-jogo**, congela os valores e grava em
+  `data/model_snapshots.jsonl`. Os horários foram deslocados do minuto zero
+  para reduzir a chance de atrasos do GitHub Actions. Capturas são imutáveis
+  e nunca sobrescritas após a partida.
+- Após a conclusão dos jogos, às **8h13 e 12h13 (Brasília)**, a ESPN
+  fornece os box scores usados para preencher `data/model_results.jsonl`.
+  Jogadores sem estatística observada utilizável não são contabilizados como
+  erros de zero.
+- Cada execução registra uma linha de base e compara a quantidade de
+  projeções e resultados antes e depois. O **resumo da execução no GitHub
+  Actions** exibe quantas projeções novas, confrontos novos e resultados
+  foram efetivamente salvos. Se uma captura terminar sem novos registros,
+  um aviso explícito aparecerá; isso pode ser normal se não houver jogos
+  elegíveis na janela ou se todos já estiverem armazenados. Um status
+  **Success**, isoladamente, não prova cobertura completa da rodada.
+- As conferências testam a contagem anunciada pelo monitor contra as linhas
+  realmente gravadas, bloqueando inconsistências e duplicações. A rotina
+  de verificação não altera as projeções do V4.
 - O monitor usa o **V4 automático**, sem ajustes manuais da sessão. Os pesos e
   o comportamento do motor de projeção não são alterados.
 - A rotina utiliza a permissão `contents: write` do `GITHUB_TOKEN` para
