@@ -216,6 +216,23 @@ def tracking_frame(snapshots: list[dict], results: list[dict]) -> pd.DataFrame:
         frame["shortfall"] = float("nan")
         frame["market_outcome"] = None
         frame["direction_hit"] = None
+
+    # Re-evaluate the attainment rule when reading historical records.
+    # Previously stored symmetric comparisons can be reinterpreted without
+    # altering immutable pregame snapshots or original ESPN box scores.
+    # Actual line outcomes and the original decimal MAE remain untouched.
+    actual = pd.to_numeric(frame["actual"], errors="coerce")
+    targets = frame["projection"].map(projection_target)
+    usable = actual.notna() & targets.notna()
+    frame["target_minimum"] = targets
+    frame["target_reached"] = pd.Series(None, index=frame.index, dtype=object)
+    frame["shortfall"] = float("nan")
+    frame.loc[usable, "target_reached"] = (
+        actual.loc[usable] >= targets.loc[usable]
+    ).astype(bool)
+    frame.loc[usable, "shortfall"] = (
+        targets.loc[usable] - actual.loc[usable]
+    ).clip(lower=0).astype(float)
     return frame
 
 
