@@ -693,7 +693,9 @@ def render_player_focus_panel(
                             gridcolor="rgba(148,163,184,0.1)"
                         )
 
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(
+                            fig, use_container_width=True, config=RAIOX_PLOTLY_CONFIG
+                        )
 
                         over_count = int((hist_data > active_line).sum())
                         under_count = int((hist_data < active_line).sum())
@@ -793,7 +795,10 @@ def render_player_focus_panel(
                         fig_scatter.update_xaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
                         fig_scatter.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.1)")
 
-                        st.plotly_chart(fig_scatter, use_container_width=True)
+                        st.plotly_chart(
+                            fig_scatter, use_container_width=True,
+                            config=RAIOX_PLOTLY_CONFIG,
+                        )
 
                         correl = x.corr(y)
                         if correl > 0.7:
@@ -2096,6 +2101,25 @@ def render_game_rankings(
         else:
             st.markdown(render_compact_ranking_html(consistency_df, mode="consistency"), unsafe_allow_html=True)
 
+# The Raio-X Plotly toolbar overlaps bar-value labels on narrow phones.
+# Disable only for the four charts in that tab; hover/touch details remain.
+RAIOX_PLOTLY_CONFIG = {
+    "displayModeBar": False,
+    "displaylogo": False,
+    "responsive": True,
+}
+
+
+def _protect_raiox_value_labels(fig: go.Figure, values: pd.Series) -> go.Figure:
+    """Leave vertical headroom for labels in compact and full recent-game charts."""
+    valid = pd.to_numeric(values, errors="coerce").dropna()
+    peak = max(0.0, float(valid.max())) if not valid.empty else 0.0
+    fig.update_yaxes(range=[0, max(1.0, peak * 1.22)])
+    fig.update_layout(margin=dict(l=20, r=20, t=48, b=26))
+    fig.update_traces(cliponaxis=False)
+    return fig
+
+
 def render_player_chart(
     player_name: str,
     player_id: int,
@@ -2187,7 +2211,10 @@ def render_player_chart(
             )
             fig.update_xaxes(showgrid=False, tickfont=dict(color="#b4c6d9"))
             fig.update_yaxes(showgrid=True, gridcolor="rgba(117,171,186,0.15)")
-        st.plotly_chart(fig, use_container_width=True)
+        fig = _protect_raiox_value_labels(fig, recent_view[visual_metric])
+        st.plotly_chart(
+            fig, use_container_width=True, config=RAIOX_PLOTLY_CONFIG
+        )
         st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L5: {recent_view[visual_metric].mean():.1f}")
     else:
         recent_view = recent.tail(10).copy()
@@ -2236,7 +2263,10 @@ def render_player_chart(
             )
             fig.update_xaxes(showgrid=False, tickfont=dict(color="#b4c6d9"))
             fig.update_yaxes(showgrid=True, gridcolor="rgba(117,171,186,0.15)")
-        st.plotly_chart(fig, use_container_width=True)
+        fig = _protect_raiox_value_labels(fig, recent_view[visual_metric])
+        st.plotly_chart(
+            fig, use_container_width=True, config=RAIOX_PLOTLY_CONFIG
+        )
         st.caption(f"{visual_metric} • Média na Temp: {recent[visual_metric].mean():.1f} | Média no L10: {recent_view[visual_metric].mean():.1f}")
 def render_badges(role: str, momentum: str, oscillation: str, matchup: str) -> None:
     starter_roles = {"Titular confirmado", "Titular projetado", "Estimativa por minutos"}
