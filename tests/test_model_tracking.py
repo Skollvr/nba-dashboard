@@ -351,26 +351,123 @@ snapshot: 175 new rows
     assert _reported_count(tmp_path / "missing.log", "snapshot") is None
 
 
-def test_monitor_schedule_uses_staggered_utc_crons_and_audit_steps():
+def test_monitor_schedule_uses_redundancy_and_real_clock_gating():
     from pathlib import Path
 
     workflow = (Path(__file__).resolve().parents[1] /
                 ".github/workflows/model_tracking.yml").read_text(encoding="utf-8")
-    assert 'cron: "47 19 * * *"' in workflow  # capture 16:47 BRT
-    assert 'cron: "17 1,22 * * *"' in workflow  # capture 22:17 & 19:17 BRT
-    assert 'cron: "17 4 * * *"' in workflow  # early settlement 01:17 BRT
-    assert 'cron: "13 11,15 * * *"' in workflow  # settle 08:13 & 12:13 BRT
-    assert 'cron: "17 1,4,22 * * *"' not in workflow
-    assert 'cron: "0 1,4,19,22 * * *"' not in workflow
-    # A 01:17 scheduled run must never collect forecasts after tipoff.
+    assert 'cron: "11,41 0-4,17-23 * * *"' in workflow
+    assert 'cron: "13 11,15 * * *"' in workflow
+    # Delayed GitHub cron runs must do both steps based on current real time,
+    # never skip capture because the trigger originated as a settlement slot.
+    assert workflow.count("github.event_name == 'schedule'") == 2
+    assert "github.event.schedule ==" not in workflow
     capture_condition = workflow.split("Capture immutable predictions before tipoff", 1)[1].split(
         "env:", 1
     )[0]
     settle_condition = workflow.split("Resolve finished ESPN games", 1)[1].split(
         "run:", 1
     )[0]
-    assert "github.event.schedule == '17 4 * * *'" not in capture_condition
-    assert "github.event.schedule == '17 4 * * *'" in settle_condition
+    assert "github.event_name == 'schedule'" in capture_condition
+    assert "github.event_name == 'schedule'" in settle_condition
+    assert "inputs.mode == 'snapshot'" in capture_condition
+    assert "inputs.mode == 'settle'" in settle_condition
     assert "python monitor_audit.py before" in workflow
     assert "python monitor_audit.py after" in workflow
     assert "set -o pipefail" in workflow
+
+
+def _tracking_schedule_game(gid, tipoff):
+    return {
+        "GAME_ID": gid,
+        "GAME_DATETIME_BRT": tipoff,
+        "VISITOR_TEAM_ID": 1610612738,
+        "HOME_TEAM_ID": 1610612744,
+        "away_team_name": "Team A",
+        "home_team_name": "Team B",
+    }
+
+
+def test_capture_retries_today_and_next_brt_day_without_duplicate_games(tmp_path):
+    from datetime import date
+    from model_tracking import capture
+
+    # Friday 20:00 BRT, with one current-day game and one after midnight.
+    now = datetime(2026, 11, 6, 23, 0, tzinfo=timezone.utc)
+    def schedule(day):
+        if day == date(2026, 11, 6):
+            return pd.DataFrame([
+                _tracking_schedule_game("already_started", "2026-11-06T22:00:00Z"),
+                _tracking_schedule_game("today", "2026-11-07T00:00:00Z"),
+            ])
+        assert day == date(2026, 11, 7)
+        return pd.DataFrame([
+            _tracking_schedule_game("today", "2026-11-07T00:00:00Z"),
+            _tracking_schedule_game("after_midnight", "2026-11-07T03:30:00Z"),
+            _tracking_schedule_game("too_far", "2026-11-07T08:00:00Z"),
+        ])
+
+    def frozen_forecast(game, away, home, capture_time):
+        return [{"key": f"{game['GAME_ID']}:1:PTS",
+                 "game_id": str(game["GAME_ID"]), "metric": "PTS"}]
+
+    destination = tmp_path / "snapshots.jsonl"
+    with (
+        patch("model_tracking.SNAPSHOTS", destination),
+        patch("api_nba.get_games_for_date", side_effect=schedule) as agenda,
+        patch("pdf_reader.get_season_string", return_value="2026-27"),
+        patch("processamento.get_matchup_context", return_value=(
+            pd.DataFrame(), pd.DataFrame()
+        )),
+        patch("model_tracking.snapshot_game", side_effect=frozen_forecast),
+    ):
+        assert capture(now=now) == 2
+        assert agenda.call_count == 2
+        assert {row["game_id"] for row in load_jsonl(destination)} == {
+            "today", "after_midnight"
+        }
+        # A second scheduled run must never recalculate a frozen forecast.
+        assert capture(now=now) == 0
+        assert agenda.call_count == 4
+        assert len(load_jsonl(destination)) == 2
+
+
+def test_capture_before_evening_scans_only_today(tmp_path):
+    from datetime import date
+    from model_tracking import capture
+
+    now = datetime(2026, 11, 6, 15, 0, tzinfo=timezone.utc)  # 12:00 BRT
+    with (
+        patch("model_tracking.SNAPSHOTS", tmp_path / "empty.jsonl"),
+        patch("api_nba.get_games_for_date", return_value=pd.DataFrame()) as agenda,
+    ):
+        assert capture(now=now) == 0
+        agenda.assert_called_once_with(date(2026, 11, 6))
+
+
+def test_capture_can_save_today_when_next_day_schedule_fails(tmp_path):
+    from datetime import date
+    from model_tracking import capture
+
+    now = datetime(2026, 11, 6, 23, 0, tzinfo=timezone.utc)
+    def schedule(day):
+        if day == date(2026, 11, 7):
+            raise TimeoutError("ESPN timeout")
+        return pd.DataFrame([
+            _tracking_schedule_game("today", "2026-11-07T00:00:00Z"),
+        ])
+
+    destination = tmp_path / "snapshots.jsonl"
+    with (
+        patch("model_tracking.SNAPSHOTS", destination),
+        patch("api_nba.get_games_for_date", side_effect=schedule),
+        patch("pdf_reader.get_season_string", return_value="2026-27"),
+        patch("processamento.get_matchup_context", return_value=(
+            pd.DataFrame(), pd.DataFrame()
+        )),
+        patch("model_tracking.snapshot_game", return_value=[
+            {"key": "today:1:PTS", "game_id": "today"}
+        ]),
+    ):
+        assert capture(now=now) == 1
+        assert [row["game_id"] for row in load_jsonl(destination)] == ["today"]
