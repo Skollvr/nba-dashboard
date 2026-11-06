@@ -123,15 +123,17 @@ Abra o endereço local informado pelo Streamlit.
 
 Na navegação principal, **Desempenho do Modelo** permite acompanhar, por métrica,
 as projeções V4 **registradas antes** dos jogos e seus resultados posteriores da
-ESPN. A avaliação principal considera a **parte inteira da projeção como
-meta mínima**, pois PTS, REB, AST, PRA, 3PM, FGA e 3PA são contagens inteiras.
-Por exemplo, **27,4 PTS exige 27 pontos**; **25,4 PTS exige 25 pontos**;
-**4,7 AST exige 4 assistências**. A regra é truncar a parte decimal
-(`floor`), **não arredondar para o inteiro mais próximo**.
+ESPN. A avaliação principal considera como **meta mínima o menor inteiro
+que alcança a projeção**, pois PTS, REB, AST, PRA, 3PM, FGA e 3PA são
+contagens inteiras. Por exemplo, **27,4 PTS exige 28 pontos**;
+**22,2 PTS exige 23 pontos**; **4,7 AST exige 5 assistências**;
+**22,0 PTS exige 22 pontos**. A regra usa o arredondamento **para cima**
+(`ceil`) quando existir fração, nunca para baixo ou para o inteiro mais próximo.
 
-A **taxa de metas atingidas** usa `resultado real >= floor(projeção)`.
-O **déficit médio** usa `max(floor(projeção) − resultado real, 0)`:
-atingir ou superar a meta inteira gera déficit zero.
+A **taxa de metas atingidas** usa `resultado real >= ceil(projeção)`.
+O **déficit médio** usa `max(ceil(projeção) − resultado real, 0)`:
+atingir ou superar a meta mínima gera déficit zero. Registros antigos
+são reclassificados na leitura, sem reescrever o histórico original.
 
 A projeção decimal **continua inalterada no modelo** e nas comparações
 com as linhas de mercado. O recorte inteiro serve apenas para avaliar
