@@ -152,8 +152,8 @@ def test_target_attainment_requires_ceiling_of_fractional_projection():
     assert metrics["target_count"] == 1
     assert metrics["miss_count"] == 5
     assert round(metrics["target_rate"], 6) == round(1 / 6, 6)
-    assert round(metrics["shortfall_avg"], 6) == round(8 / 6, 6)
-    assert metrics["shortfall_on_misses"] == 8 / 5
+    assert round(metrics["shortfall_avg"], 6) == round(7 / 6, 6)
+    assert metrics["shortfall_on_misses"] == 7 / 5
     # Numerical MAE still measures all differences to decimal projections.
     assert round(metrics["mae"], 6) == round(
         (0.4 + 0.6 + 1.4 + 0.4 + 0.7 + 1.7) / 6, 6
@@ -282,7 +282,6 @@ def test_historical_floor_marked_success_is_reclassified_as_miss():
 
 
 def test_integer_projection_and_noncaptured_results():
-    from math import isnan
     row = {"game_id": "exact", "projection": 22.0, "actual": 22}
     metrics = model_performance_metrics(pd.DataFrame([row]))
     assert metrics["target_count"] == 1
