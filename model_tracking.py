@@ -62,14 +62,15 @@ def finite_float(value):
 def projection_target(projection: float) -> int | None:
     """Minimum integer result accepted as reaching a V4 projection.
 
-    A projected 27.4 PTS requires 27 actual PTS, while 4.7 AST requires
-    4 AST. This is deliberate truncation/floor, NOT rounding to nearest.
-    It is used only for target attainment, not for MAE or betting lines.
+    A projected 27.4 PTS requires at least 28 actual PTS; 4.7 AST
+    requires at least 5 AST. Exact integers remain unchanged (22.0 -> 22).
+    Always round a fractional count UP, never to nearest or down.
+    This affects target attainment only, not MAE or betting lines.
     """
     number = finite_float(projection)
     if number is None or number < 0:
         return None
-    return math.floor(number)
+    return math.ceil(number)
 
 
 def snapshot_game(game: pd.Series, away: pd.DataFrame, home: pd.DataFrame,
@@ -184,7 +185,7 @@ def result_game(snaps: list[dict], summary: dict) -> list[dict]:
             "actual": float(actual),
             "error": round(pred - actual, 4),
             "absolute_error": round(abs(pred - actual), 4),
-            # Discrete basketball counts: 27.4 -> target >= 27; 4.7 -> >= 4.
+            # Discrete basketball counts: 27.4 -> target >= 28; 4.7 -> >= 5.
             # Preserve the original decimal projection for MAE and market Edge.
             "target_minimum": target_minimum,
             "target_reached": bool(actual >= target_minimum),
@@ -219,10 +220,10 @@ def tracking_frame(snapshots: list[dict], results: list[dict]) -> pd.DataFrame:
         frame["market_outcome"] = None
         frame["direction_hit"] = None
 
-    # Re-evaluate the attainment rule when reading historical records.
-    # Previously stored symmetric comparisons can be reinterpreted without
-    # altering immutable pregame snapshots or original ESPN box scores.
-    # Actual line outcomes and the original decimal MAE remain untouched.
+    # Apply the current ceil-based target rule to ALL historical records
+    # on read. Older results may contain obsolete floor-based target fields;
+    # never overwrite original frozen snapshots or ESPN box scores.
+    # Market outcomes, the original decimal MAE and Edge remain untouched.
     actual = pd.to_numeric(frame["actual"], errors="coerce")
     targets = frame["projection"].map(projection_target)
     usable = actual.notna() & targets.notna()
