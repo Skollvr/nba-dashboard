@@ -94,9 +94,9 @@ def test_settlement_requires_completed_espn_boxscore_and_skip_dnp():
     pts = next(item for item in results if item["key"].endswith(":PTS"))
     assert pts["actual"] == 24.0
     assert pts["absolute_error"] == 2.3  # Numeric MAE is still tracked.
-    assert pts["target_minimum"] == 21
+    assert pts["target_minimum"] == 22
     assert pts["target_reached"] is True
-    assert pts["shortfall"] == 0.0  # Above target floor: no shortfall.
+    assert pts["shortfall"] == 0.0  # Above the ceiling target: no shortfall.
     assert pts["market_outcome"] == "Over"
     assert pts["direction_hit"] is True
     assert results[0]["settled_utc"]
@@ -132,7 +132,7 @@ def test_dashboard_without_snapshots_does_not_render_made_up_metrics():
     assert "Nenhuma projeção pré-jogo registrada" in notice.call_args.args[0]
 
 
-def test_target_attainment_uses_integer_minimum_without_rounding_up():
+def test_target_attainment_requires_ceiling_of_fractional_projection():
     samples = pd.DataFrame([
         {"game_id": "a", "projection": 27.4, "actual": 27,
          "direction_hit": None},
@@ -149,23 +149,27 @@ def test_target_attainment_uses_integer_minimum_without_rounding_up():
     ])
     metrics = model_performance_metrics(samples)
     assert metrics["count"] == 6
-    assert metrics["target_count"] == 4
-    assert metrics["miss_count"] == 2
-    assert round(metrics["target_rate"], 6) == round(4 / 6, 6)
-    assert round(metrics["shortfall_avg"], 6) == round(2 / 6, 6)
-    assert metrics["shortfall_on_misses"] == 1.0
+    assert metrics["target_count"] == 1
+    assert metrics["miss_count"] == 5
+    assert round(metrics["target_rate"], 6) == round(1 / 6, 6)
+    assert round(metrics["shortfall_avg"], 6) == round(7 / 6, 6)
+    assert metrics["shortfall_on_misses"] == 7 / 5
     # Numerical MAE still measures all differences to decimal projections.
     assert round(metrics["mae"], 6) == round(
         (0.4 + 0.6 + 1.4 + 0.4 + 0.7 + 1.7) / 6, 6
     )
 
-def test_target_minimum_is_floor_for_all_discrete_basketball_metrics():
-    assert projection_target(27.4) == 27
-    assert projection_target(25.4) == 25
-    assert projection_target(4.7) == 4
-    assert projection_target(4.9999) == 4
+def test_target_minimum_always_ceil_fractional_basketball_metrics():
+    assert projection_target(27.4) == 28
+    assert projection_target(25.4) == 26
+    assert projection_target(4.7) == 5
+    assert projection_target(4.8) == 5
+    assert projection_target(4.9999) == 5
+    assert projection_target(22.2) == 23
+    assert projection_target(10.6) == 11
     assert projection_target(27.0) == 27
-    assert projection_target(0.8) == 0
+    assert projection_target(22.0) == 22
+    assert projection_target(0.8) == 1
     assert projection_target(float("nan")) is None
     assert projection_target(None) is None
     assert projection_target(-1) is None
@@ -184,13 +188,13 @@ def test_target_outcomes_settled_below_projection_have_positive_shortfall():
         settled = result_game(records, completed)
     pts = next(item for item in settled if item["key"].endswith(":PTS"))
     assert pts["target_reached"] is False
-    assert pts["target_minimum"] == 21
-    assert pts["shortfall"] == 2.0
+    assert pts["target_minimum"] == 22
+    assert pts["shortfall"] == 3.0
     assert pts["absolute_error"] == 2.7
     reb = next(item for item in settled if item["key"].endswith(":REB"))
-    assert reb["target_minimum"] == 6
-    assert reb["target_reached"] is True
-    assert reb["shortfall"] == 0.0
+    assert reb["target_minimum"] == 7
+    assert reb["target_reached"] is False
+    assert reb["shortfall"] == 1.0
 
 
 def test_unresolved_results_never_count_as_achieved_goals():
@@ -223,7 +227,7 @@ def test_new_tracking_view_prioritizes_targets_but_keeps_mae_for_diagnostics():
     assert 'Evolução do déficit médio por previsão' in source
 
 
-def test_legacy_results_are_reclassified_by_integer_target_without_rewriting_mae():
+def test_legacy_floor_results_are_reclassified_with_ceiling_without_rewriting_mae():
     """Old JSONL target fields must not override the revised count-based rule."""
     snapshots = [{
         "key": "g1:p1:PTS", "game_id": "g1",
@@ -235,11 +239,61 @@ def test_legacy_results_are_reclassified_by_integer_target_without_rewriting_mae
         "absolute_error": 0.4, "direction_hit": None,
     }]
     frame = tracking_frame(snapshots, old_result)
-    assert frame.loc[0, "target_minimum"] == 27
-    assert bool(frame.loc[0, "target_reached"]) is True
-    assert frame.loc[0, "shortfall"] == 0.0
+    assert frame.loc[0, "target_minimum"] == 28
+    assert bool(frame.loc[0, "target_reached"]) is False
+    assert frame.loc[0, "shortfall"] == 1.0
     assert frame.loc[0, "absolute_error"] == 0.4
     assert old_result[0]["target_reached"] is False  # source immutable
+
+
+
+
+def test_ceiling_rule_is_identical_for_every_monitored_stat():
+    for metric in ("PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA"):
+        row = {"game_id": "sample", "metric": metric, "projection": 4.8,
+               "actual": 4, "direction_hit": None}
+        metrics = model_performance_metrics(pd.DataFrame([row]))
+        assert metrics["target_count"] == 0, metric
+        assert metrics["shortfall_avg"] == 1, metric
+
+        row["actual"] = 5
+        metrics = model_performance_metrics(pd.DataFrame([row]))
+        assert metrics["target_count"] == 1, metric
+        assert metrics["shortfall_avg"] == 0, metric
+
+
+def test_historical_floor_marked_success_is_reclassified_as_miss():
+    snapshots = [{
+        "key": "old:77:AST", "game_id": "old", "metric": "AST",
+        "projection": 4.8,
+    }]
+    historical_results = [{
+        "key": "old:77:AST", "actual": 4.0,
+        "target_minimum": 4, "target_reached": True,
+        "shortfall": 0.0, "absolute_error": 0.8,
+    }]
+    frame = tracking_frame(snapshots, historical_results)
+    assert frame.loc[0, "target_minimum"] == 5
+    assert bool(frame.loc[0, "target_reached"]) is False
+    assert frame.loc[0, "shortfall"] == 1.0
+    assert frame.loc[0, "absolute_error"] == 0.8
+    assert historical_results[0]["target_reached"] is True
+    assert historical_results[0]["target_minimum"] == 4
+
+
+def test_integer_projection_and_noncaptured_results():
+    row = {"game_id": "exact", "projection": 22.0, "actual": 22}
+    metrics = model_performance_metrics(pd.DataFrame([row]))
+    assert metrics["target_count"] == 1
+    assert metrics["mae"] == 0
+
+    row = {"game_id": "fraction", "projection": 22.2, "actual": 22}
+    metrics = model_performance_metrics(pd.DataFrame([row]))
+    assert metrics["target_count"] == 0
+    assert metrics["shortfall_avg"] == 1
+
+    assert projection_target(float("inf")) is None
+    assert projection_target(float("-inf")) is None
 
 
 def test_unsettled_snapshots_do_not_count_as_attained_integer_targets():
@@ -248,7 +302,7 @@ def test_unsettled_snapshots_do_not_count_as_attained_integer_targets():
         "projection": 4.7, "metric": "AST",
     }]
     frame = tracking_frame(rows, [])
-    assert frame.loc[0, "target_minimum"] == 4
+    assert frame.loc[0, "target_minimum"] == 5
     assert pd.isna(frame.loc[0, "actual"])
     assert pd.isna(frame.loc[0, "target_reached"])
     assert pd.isna(frame.loc[0, "shortfall"])

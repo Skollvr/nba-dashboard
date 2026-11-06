@@ -32,8 +32,8 @@ def parse_tracking_dates(values: pd.Series) -> pd.Series:
 def model_performance_metrics(frame: pd.DataFrame) -> dict:
     """Assess target attainment separately from conventional forecast accuracy.
 
-    Target met: actual >= floor(projection), using whole-count NBA stats;
-    shortfall: max(floor(projection) - actual, 0).
+    Target met: actual >= ceil(projection), using whole-count NBA stats;
+    shortfall: max(ceil(projection) - actual, 0).
     MAE stays as a technical measure of numerical forecast accuracy.
     Unresolved and nonnumeric observations must never count as successes.
     """
@@ -143,8 +143,8 @@ def render_model_performance() -> None:
         "Metas atingidas",
         f'{summary["target_rate"]:.1%}' if summary["target_rate"] is not None else "—",
         help=(
-            "Resultado real igual ou superior à parte inteira da projeção V4: "
-            "27,4 exige 27; 4,7 exige 4. Não é o acerto de uma linha de aposta."
+            "Resultado real igual ou superior ao próximo inteiro da projeção V4: "
+            "27,4 exige 28; 4,7 exige 5; 22,0 exige 22. Não é o acerto de uma linha de aposta."
         ),
     )
     c4.metric(
@@ -152,8 +152,8 @@ def render_model_performance() -> None:
         f'{summary["shortfall_avg"]:.2f}'
         if summary["shortfall_avg"] is not None else "—",
         help=(
-            "Média de max(parte inteira da projeção − resultado real, 0). "
-            "Atingir ou superar a meta inteira gera déficit zero."
+            "Média de max(meta arredondada para cima − resultado real, 0). "
+            "Atingir ou superar a meta mínima gera déficit zero."
         ),
     )
     st.caption(
@@ -161,7 +161,7 @@ def render_model_performance() -> None:
         f"Abaixo da meta: {summary['miss_count']} · "
         f"Jogos avaliados: {summary['games']} · "
         f"Aguardando resultado: {len(frame) - summary['count']}. "
-        "Meta mínima = parte inteira da projeção (sem arredondar para cima). "
+        "Meta mínima = projeção arredondada para cima (se for inteira, mantém). "
         "Este critério mede alcance da meta, não precisão da previsão ou ganho em apostas."
     )
     with st.expander("Ver precisão estatística tradicional (MAE e viés)", expanded=False):
