@@ -239,53 +239,104 @@ def tracking_frame(snapshots: list[dict], results: list[dict]) -> pd.DataFrame:
 
 
 def capture(today=None, now=None):
+    """Collect missing forecasts on the actual run clock, not on the cron label.
+
+    Every scheduled execution can rescue a delayed/missed capture. Fetch the
+    following Brasilia day in the evening for games that start after midnight;
+    every candidate and the final persisted snapshot still require a verified
+    future tipoff. No postgame forecasts or rewrites are permitted.
+    """
     from api_nba import get_games_for_date
     from pdf_reader import get_season_string
     from processamento import get_matchup_context
 
     now = now or datetime.now(timezone.utc)
-    today = today or now.astimezone(BRT).date()
-    games = get_games_for_date(today)
-    if games is None or games.empty:
-        print("No games scheduled")
-        return 0
+    current_brt = now.astimezone(BRT)
+    today = today or current_brt.date()
+    dates_to_check = [today]
+    if today == current_brt.date() and current_brt.hour >= 18:
+        dates_to_check.append(today + timedelta(days=1))
+
     saved = {str(r.get("game_id")) for r in load_jsonl(SNAPSHOTS)}
+    scheduled_ids = set()
+    eligible = {}
+    schedule_errors = []
+
+    for target_date in dates_to_check:
+        try:
+            games = get_games_for_date(target_date)
+        except Exception as exc:
+            schedule_errors.append(target_date.isoformat())
+            print(f"Schedule unavailable {target_date}: {type(exc).__name__}: {exc}")
+            continue
+        if games is None or games.empty:
+            print(f"No games scheduled for {target_date}")
+            continue
+        for _, game in games.iterrows():
+            gid = str(game.get("GAME_ID") or "").strip()
+            if not gid:
+                continue
+            scheduled_ids.add(gid)
+            if gid in saved or gid in eligible:
+                continue
+            tipoff = pd.to_datetime(
+                game.get("GAME_DATETIME_BRT"), errors="coerce", utc=True
+            )
+            if pd.isna(tipoff):
+                continue
+            lead = (tipoff.to_pydatetime() - now.astimezone(timezone.utc)).total_seconds() / 60
+            if 20 <= lead <= 360:
+                eligible[gid] = (game, target_date)
+
     created = 0
-    for _, game in games.iterrows():
-        gid = str(game.get("GAME_ID") or "")
-        tipoff = pd.to_datetime(game.get("GAME_DATETIME_BRT"), errors="coerce", utc=True)
-        if not gid or gid in saved or pd.isna(tipoff):
-            continue
-        lead = (tipoff.to_pydatetime() - now.astimezone(timezone.utc)).total_seconds() / 60
-        if not 20 <= lead <= 360:
-            continue
+    recorded_games = 0
+    for gid, (game, target_date) in eligible.items():
         try:
             away, home = get_matchup_context(
                 int(game["VISITOR_TEAM_ID"]), int(game["HOME_TEAM_ID"]),
                 str(game["away_team_name"]), str(game["home_team_name"]),
-                get_season_string(today), True,
+                get_season_string(target_date), True,
                 season_scope="Regular Season",
                 include_fanduel=False,
-                roster_season=get_season_string(today),
-                target_date=today,
+                roster_season=get_season_string(target_date),
+                target_date=target_date,
             )
-            # build_team_table does not retain TEAM_ID in its card schema.
-            # Add source-specific IDs only in the monitoring copy, without
-            # changing app projections, rosters or the Matchup V4 logic.
+            # Only a monitoring copy receives these IDs; the app's V4
+            # projections, roster and matchup logic remain unchanged.
             away = away.assign(TEAM_ID=int(game["VISITOR_TEAM_ID"]))
             home = home.assign(TEAM_ID=int(game["HOME_TEAM_ID"]))
-            # Recheck the real clock AFTER network/model computation: a slow
-            # provider must never turn a post-tipoff value into a pregame capture.
+            # Recheck after network/model computation: delayed workflows or
+            # slow providers must never store a post-tipoff "prediction".
             captured_at = datetime.now(timezone.utc)
             rows = snapshot_game(game, away, home, captured_at)
-            # Never write a partial/unusable forecast group.
             if rows:
-                created += append_unique_jsonl(SNAPSHOTS, rows)
-                print(f"Captured {gid}: {len(rows)} predictions")
+                added = append_unique_jsonl(SNAPSHOTS, rows)
+                created += added
+                if added:
+                    recorded_games += 1
+                    saved.add(gid)
+                    print(f"Captured {gid}: {added} predictions")
+            else:
+                print(f"Skipped game {gid}: cutoff passed or no usable forecasts")
         except Exception as exc:
             print(f"Skipped game {gid}: {type(exc).__name__}: {exc}")
-    return created
 
+    missing = len(eligible) - recorded_games
+    print(
+        "Capture coverage: "
+        f"scheduled_games={len(scheduled_ids)} "
+        f"eligible_missing_at_start={len(eligible)} "
+        f"new_games={recorded_games} "
+        f"uncaptured_eligible={missing} "
+        f"schedule_errors={len(schedule_errors)}"
+    )
+    if missing or schedule_errors:
+        print(
+            f"::warning::V4 collection incomplete: {missing} eligible games "
+            f"uncaptured; {len(schedule_errors)} schedule lookups failed. "
+            "The next run will retry only while tipoff is still in the future."
+        )
+    return created
 
 def settle():
     from api_espn import get_espn_game_summary
