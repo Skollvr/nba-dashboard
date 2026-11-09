@@ -12,7 +12,10 @@ from model_tracking import (
     METRICS, RESULTS, SNAPSHOTS, load_jsonl, tracking_frame,
     projection_target,
 )
-from model_quality import coverage, performance_buckets, model_comparison, minutes_comparison, market_performance
+from model_quality import (
+    coverage, performance_buckets, model_comparison, baseline_comparison,
+    minutes_comparison, market_performance,
+)
 
 BRT = ZoneInfo("America/Sao_Paulo")
 
@@ -266,6 +269,12 @@ def render_model_performance() -> None:
             "Só compara previsões que foram congeladas antes da partida para "
             "o mesmo jogador e fundamento. Não se reconstrói previsão passada."
         )
+        baselines = baseline_comparison(frame)
+        if baselines.empty:
+            st.info("As comparações contra L5/L10 começam somente após capturar esses valores no pré-jogo.")
+        else:
+            st.markdown("**V4 versus médias de referência (mesmas observações)**")
+            st.dataframe(baselines[baselines["Métrica"] == metric], use_container_width=True, hide_index=True)
         paired = model_comparison(frame)
         if paired.empty:
             st.info("Ainda não há resultados de previsões V4.1 congeladas. As comparações começarão com a próxima coleta.")

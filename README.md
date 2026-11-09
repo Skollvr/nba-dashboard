@@ -283,3 +283,6 @@ O workflow GitHub Actions `visual_smoke.yml` inicia o Streamlit real,
 abre as seções principais no Chromium e produz screenshots para desktop
 (1440×900) e celular (390×844). As capturas ficam nos artefatos da execução
 para análise humana; CI automático **não substitui revisão visual manual**.
+
+- O laboratório também compara o V4 com médias de temporada, L5 e L10
+  congeladas no mesmo snapshot, nos mesmos jogadores e sem reconstrução futura.

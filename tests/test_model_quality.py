@@ -52,3 +52,18 @@ def test_minutes_error_not_multiplied_by_seven_metrics():
     ])
     result=minutes_comparison(data)
     assert result["N"]==1 and result["MAE minutos"]==5
+
+
+def test_frozen_baselines_compare_same_forward_games_only():
+    from model_quality import baseline_comparison
+    data=pd.DataFrame([
+        {"metric":"3PA","projection":5.3,"actual":5,"l10_avg":6,"l5_avg":7,"season_avg":5.7},
+        {"metric":"3PA","projection":5.3,"actual":6,"l10_avg":None,"l5_avg":None,"season_avg":5.5},
+    ])
+    table=baseline_comparison(data)
+    l10=table[table["Referência"]=="L10"].iloc[0]
+    assert l10["N"]==1 and l10["MAE V4"]==pytest.approx(.3)
+    assert l10["MAE referência"]==pytest.approx(1.0)
+    assert l10["Ganho V4"]==pytest.approx(.7)
+    season=table[table["Referência"]=="Temporada"].iloc[0]
+    assert season["N"]==2

@@ -837,6 +837,10 @@ def main():
                 'calculamos Edge nem exibimos recomendações artificiais.</div>',
                 unsafe_allow_html=True,
             )
+        st.caption(
+            "Os Destaques Forte/Muito Forte são rankings heurísticos de contexto e Edge, "
+            "não probabilidades calibradas nem apostas recomendadas."
+        )
         render_best_game_tips(
             away_df, home_df, min_games, min_minutes,
             line_metric, line_value, use_market_line,

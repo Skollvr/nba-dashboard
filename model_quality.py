@@ -157,3 +157,32 @@ def market_performance(frame):
             result["yield_n"] = int(ok.sum())
             result["yield_unit"] = float(stake_profit.mean())
     return result
+
+
+def baseline_comparison(frame):
+    """Paired, pregame L5/L10/season baseline vs original V4.
+
+    Each row compares the same settled prediction. Legacy snapshots without
+    frozen inputs are NOT retroactively reconstructed from today's game logs.
+    """
+    columns = ["Métrica", "Referência", "N", "MAE V4", "MAE referência", "Ganho V4"]
+    if frame is None or frame.empty or not {"actual", "projection", "metric"}.issubset(frame):
+        return pd.DataFrame(columns=columns)
+    out = []
+    for column, label in [("season_avg", "Temporada"), ("l10_avg", "L10"), ("l5_avg", "L5")]:
+        if column not in frame:
+            continue
+        work = frame[["metric", "actual", "projection", column]].copy()
+        for key in ("actual", "projection", column):
+            work[key] = _numeric(work[key])
+        work = work.dropna(subset=["actual", "projection", column])
+        for metric, part in work.groupby("metric"):
+            err_v4 = (part["projection"] - part["actual"]).abs().mean()
+            err_base = (part[column] - part["actual"]).abs().mean()
+            out.append({
+                "Métrica": metric, "Referência": label, "N": len(part),
+                "MAE V4": round(float(err_v4), 3),
+                "MAE referência": round(float(err_base), 3),
+                "Ganho V4": round(float(err_base - err_v4), 3),
+            })
+    return pd.DataFrame(out, columns=columns)
