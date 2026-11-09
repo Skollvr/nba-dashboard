@@ -12,6 +12,10 @@ from model_tracking import (
     METRICS, RESULTS, SNAPSHOTS, load_jsonl, tracking_frame,
     projection_target,
 )
+from model_quality import (
+    coverage, performance_buckets, model_comparison, baseline_comparison,
+    minutes_comparison, market_performance,
+)
 
 BRT = ZoneInfo("America/Sao_Paulo")
 
@@ -106,6 +110,22 @@ def render_model_performance() -> None:
         st.caption("Fonte do registro: GitHub Actions · rotina Monitor V4")
         return
 
+    audit = coverage(snapshots, results)
+    with st.expander("🩺 Saúde da coleta e cobertura", expanded=False):
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Partidas congeladas", audit["games"])
+        c2.metric("Projeções", audit["snapshots"])
+        c3.metric("Resultados avaliados", audit["results"])
+        c4.metric("Linhas reais", audit["market_quoted"])
+        st.caption(
+            f"Cobertura dos registros: resultados {audit['settlement_coverage']:.1%} · "
+            f"mercado {audit['market_coverage']:.1%} · "
+            f"V4.1 registrada {audit['shadow_forecasts']} · "
+            f"minutos reais {audit['actual_minutes']}. "
+            "O monitor depende da disponibilidade das fontes e da agenda do GitHub Actions."
+        )
+        if audit["market_quoted"] == 0:
+            st.warning("Nenhuma cotação real congelada ainda. Não é possível validar Edge ou rendimento de apostas.")
     frame = tracking_frame(snapshots, results)
     # ESPN schedules currently return DD/MM/YYYY while other sources and
     # tests use ISO dates. Both must remain readable without rewriting the
@@ -234,6 +254,59 @@ def render_model_performance() -> None:
     fig.update_yaxes(title_text="Déficit médio", rangemode="tozero", gridcolor="rgba(157,189,208,.12)")
     fig.update_xaxes(title_text="", tickformat="%d/%m")
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("#### Erro do V4 conforme a faixa da projeção")
+    st.caption(
+        "Somente previsões congeladas antes do jogo, com resultado observado. "
+        "Meta atingida usa sempre o próximo inteiro (ceil). Percentual não é probabilidade de aposta."
+    )
+    buckets = performance_buckets(confirmed, metric)
+    if not buckets.empty:
+        st.dataframe(buckets, use_container_width=True, hide_index=True)
+    with st.expander("🧪 Laboratório prospectivo V4 × V4.1 e minutos", expanded=False):
+        st.caption(
+            "V4.1 é uma alternativa experimental, não substitui o V4. "
+            "Só compara previsões que foram congeladas antes da partida para "
+            "o mesmo jogador e fundamento. Não se reconstrói previsão passada."
+        )
+        baselines = baseline_comparison(frame)
+        if baselines.empty:
+            st.info("As comparações contra L5/L10 começam somente após capturar esses valores no pré-jogo.")
+        else:
+            st.markdown("**V4 versus médias de referência (mesmas observações)**")
+            st.dataframe(baselines[baselines["Métrica"] == metric], use_container_width=True, hide_index=True)
+        paired = model_comparison(frame)
+        if paired.empty:
+            st.info("Ainda não há resultados de previsões V4.1 congeladas. As comparações começarão com a próxima coleta.")
+        else:
+            st.dataframe(paired, use_container_width=True, hide_index=True)
+            if int(paired["N"].min()) < 50:
+                st.warning("Amostra reduzida: ainda não há base suficiente para promover o V4.1.")
+        mins = minutes_comparison(frame)
+        if mins:
+            a, b, c = st.columns(3)
+            a.metric("Jogadores avaliados", mins["N"])
+            b.metric("MAE de minutos", f'{mins["MAE minutos"]:.2f}')
+            c.metric("Viés minutos", f'{mins["Viés minutos"]:+.2f}')
+        else:
+            st.info("Os minutos reais serão registrados nas novas avaliações; o histórico antigo permanecerá intacto.")
+    with st.expander("📉 Validação de linhas reais — Over/Under", expanded=False):
+        market = market_performance(frame)
+        if not market["n"]:
+            st.info("Ainda não existem linhas pré-jogo reais com resultados avaliados. Nenhuma vantagem de mercado pode ser inferida.")
+        else:
+            x, y, z = st.columns(3)
+            x.metric("Decisões avaliadas", market["n"])
+            y.metric("Direção correta", f'{market["rate"]:.1%}')
+            z.metric(
+                "Retorno teórico / unidade",
+                f'{market["yield_unit"]:+.1%}' if market["yield_unit"] is not None else "—",
+            )
+            st.caption(
+                f"Odds completas em {market['yield_n']} casos. "
+                "Cálculo ilustrativo de stakes unitárias, sem apostas executadas; "
+                "não é uma estimativa de retorno futuro nem probabilidade calibrada."
+            )
 
     st.markdown("#### Últimas projeções conferidas")
     table = confirmed.sort_values(["date", "game_id"], ascending=False).head(60)

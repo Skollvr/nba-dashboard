@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 
+from prediction_core import weighted_rate, rate_shadow_v41, minutes_shadow_v41, reliability_label
+
 # 1. Configurações Estáticas
 from config import (
     PROJECTION_WEIGHTS, ROLE_OPTIONS, TEAM_LOOKUP, TEAM_ABBR_LOOKUP,
@@ -275,22 +277,16 @@ def safe_rate(stat_value: float, minutes_value: float) -> float:
         return 0.0
 
 
-def blend_rate(season_pm: float, l10_pm: float, l5_pm: float) -> float:
-    """
-    Combina produção por minuto sem tratar ausência de amostra como produção zero.
-    Se L5/L10 não existirem, os pesos disponíveis são renormalizados.
-    """
-    values = [
-        (float(season_pm), 0.50),
-        (float(l10_pm), 0.30),
-        (float(l5_pm), 0.20),
-    ]
-    available = [(value, weight) for value, weight in values if value > 0]
-    if not available:
-        return 0.0
+def blend_rate(season_pm: float, l10_pm: float, l5_pm: float,
+               available: tuple[bool, bool, bool] = (True, True, True)) -> float:
+    """Combine V4 production rates while preserving legitimate zero games.
 
-    weight_sum = sum(weight for _, weight in available)
-    return sum(value * weight for value, weight in available) / weight_sum
+    Availability is supplied from actual game/minute counts; zero production
+    in an observed sample is not evidence that the sample is missing.
+    """
+    return weighted_rate(zip(
+        (season_pm, l10_pm, l5_pm), (0.50, 0.30, 0.20), available
+    ))
 
 
 def estimate_two_point_attempts(
@@ -304,6 +300,7 @@ def estimate_two_point_attempts(
     l10_min: float,
     l5_min: float,
     projected_min: float,
+    sample_available: tuple[bool, bool, bool] = (True, True, True),
 ) -> float:
     """Estimate 2PA directly, not by clipping total FGA up to projected 3PA.
 
@@ -326,7 +323,7 @@ def estimate_two_point_attempts(
         rates.append(safe_rate(fga - three_pa, minutes))
     if not np.isfinite(projected_min) or projected_min < 0:
         return float("nan")
-    return max(0.0, float(projected_min) * blend_rate(*rates))
+    return max(0.0, float(projected_min) * blend_rate(*rates, available=sample_available))
 
 
 def project_minutes_v1(
@@ -1287,6 +1284,26 @@ def enrich_team_with_context(
     enriched["PROJ_3PA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"], row["OPP_3PA_ALLOWED"], row["LEAGUE_3PA_BASELINE"]), axis=1)
     enriched["PROJ_PRA"] = enriched.apply(lambda row: calculate_projection(row["SEASON_PRA"], row["L10_PRA"], row["L5_PRA"], row["OPP_PRA_ALLOWED"], row["LEAGUE_PRA_BASELINE"]), axis=1)
 
+    # Shadow V4.1 is displayed only for prospective evaluation. It does not
+    # replace live V4 projections, bookmaker edges, or minute controls.
+    enriched["PROJ_MIN_V41"] = enriched.apply(
+        lambda row: minutes_shadow_v41(
+            row.get("SEASON_MIN", 0.0),
+            row.get("L10_MIN_MED", 0.0),
+            row.get("L5_MIN_MED", 0.0),
+            tuple(
+                float(row.get(f"{k}_GP", 0) or 0) > 0
+                for k in ("SEASON", "L10", "L5")
+            ),
+            row.get("INJ_STATUS", "Available"),
+        ), axis=1,
+    )
+    enriched["MINUTES_RELIABILITY"] = enriched.apply(
+        lambda row: reliability_label(
+            row.get("SEASON_GP", 0), row.get("MIN_STD_L10", 0)
+        ), axis=1,
+    )
+
     enriched["PROJ_MIN_INTERNAL"] = enriched.apply(
         lambda row: project_minutes_v1(
             row.get("SEASON_MIN", 0.0),
@@ -1315,6 +1332,12 @@ def enrich_team_with_context(
         axis=1,
     )
 
+    # External verified minutes are also applicable to the experimental model.
+    external_valid = enriched["PROJECTED_MINUTES_EXTERNAL"].gt(0)
+    enriched.loc[external_valid, "PROJ_MIN_V41"] = enriched.loc[
+        external_valid, "PROJECTED_MINUTES_EXTERNAL"
+    ]
+
     enriched["MINUTES_SOURCE"] = enriched.apply(
         lambda row: (
             str(row.get("LINEUP_SOURCE", "Fonte externa") or "Fonte externa")
@@ -1329,7 +1352,7 @@ def enrich_team_with_context(
     # Depth chart is a role indication, not proof a player will play.
     inactive = enriched.get("IS_UNAVAILABLE", pd.Series(False, index=enriched.index))
     inactive = inactive.fillna(False).astype(bool)
-    enriched.loc[inactive, ["PROJ_MIN_V1", "PROJ_MIN_INTERNAL"]] = 0.0
+    enriched.loc[inactive, ["PROJ_MIN_V1", "PROJ_MIN_INTERNAL", "PROJ_MIN_V41"]] = 0.0
     enriched.loc[inactive, "MINUTES_SOURCE"] = "Fora — relatório de lesões"
 
     # GP=0 cannot establish current-season production or minutes. Keep player
@@ -1344,7 +1367,7 @@ def enrich_team_with_context(
         )
     )
     enriched.loc[no_current_sample & ~inactive, [
-        "PROJ_MIN_V1", "PROJ_MIN_INTERNAL",
+        "PROJ_MIN_V1", "PROJ_MIN_INTERNAL", "PROJ_MIN_V41",
     ]] = np.nan
     enriched.loc[no_current_sample & ~inactive, "MINUTES_SOURCE"] = f"Sem amostra {season}"
 
@@ -1372,17 +1395,39 @@ def enrich_team_with_context(
             axis=1,
         )
 
+        def _valid_rate_samples(row):
+            gp = [pd.to_numeric(row.get(f"{x}_GP", 0), errors="coerce")
+                  for x in ("SEASON", "L10", "L5")]
+            mins = [pd.to_numeric(row.get(f"{x}_MIN", 0), errors="coerce")
+                    for x in ("SEASON", "L10", "L5")]
+            return tuple(
+                pd.notna(n) and n > 0 and pd.notna(m) and m > 0
+                for n, m in zip(gp, mins)
+            )
+
         enriched[f"RATE_{metric}_V1"] = enriched.apply(
             lambda row: blend_rate(
                 row.get(f"SEASON_PM_{metric}", 0.0),
                 row.get(f"L10_PM_{metric}", 0.0),
                 row.get(f"L5_PM_{metric}", 0.0),
-            ),
-            axis=1,
+                available=_valid_rate_samples(row),
+            ), axis=1,
+        )
+        enriched[f"RATE_{metric}_V41"] = enriched.apply(
+            lambda row: rate_shadow_v41(
+                row.get(f"SEASON_PM_{metric}", 0.0),
+                row.get(f"L10_PM_{metric}", 0.0),
+                row.get(f"L5_PM_{metric}", 0.0),
+                _valid_rate_samples(row),
+                row.get("SEASON_GP", 0),
+            ), axis=1,
         )
 
         enriched[f"BASE_{metric}_V1"] = (
             enriched["PROJ_MIN_V1"] * enriched[f"RATE_{metric}_V1"]
+        )
+        enriched[f"BASE_{metric}_V41"] = (
+            enriched["PROJ_MIN_V41"] * enriched[f"RATE_{metric}_V41"]
         )
 
     # Matchup V4 calibrado:
@@ -1477,6 +1522,10 @@ def enrich_team_with_context(
             enriched[f"BASE_{metric}_V1"]
             * (1 + enriched[f"MATCHUP_EFFECT_PCT_{metric}_V2"])
         ).clip(lower=0.0)
+        enriched[f"PROJ_{metric}_V41"] = (
+            enriched[f"BASE_{metric}_V41"]
+            * (1 + enriched[f"MATCHUP_EFFECT_PCT_{metric}_V2"])
+        ).clip(lower=0.0)
 
         enriched[f"MATCHUP_LABEL_{metric}_V1"] = enriched[
             f"MATCHUP_SCORE_{metric}_V1"
@@ -1493,6 +1542,13 @@ def enrich_team_with_context(
     enriched["PROJ_PRA_V1"] = (
         enriched["PROJ_PTS_V1"] + enriched["PROJ_REB_V1"] + enriched["PROJ_AST_V1"]
     )
+    enriched["PROJ_PRA_V41"] = (
+        enriched["PROJ_PTS_V41"] + enriched["PROJ_REB_V41"] + enriched["PROJ_AST_V41"]
+    )
+    enriched["BASE_PRA_V41"] = (
+        enriched["BASE_PTS_V41"] + enriched["BASE_REB_V41"] + enriched["BASE_AST_V41"]
+    )
+
     base_pra = enriched["BASE_PRA_V1"].replace(0.0, np.nan)
     enriched["MATCHUP_EFFECT_PCT_PRA_V2"] = (
         (enriched["PROJ_PRA_V1"] / base_pra) - 1.0
@@ -1511,7 +1567,7 @@ def enrich_team_with_context(
         invalid = (gp <= 0) | (valid_games < (gp * 0.80))
         enriched[f"DATA_QUALITY_{metric}"] = ~invalid
         enriched.loc[invalid, f"PROJ_{metric}"] = np.nan
-        enriched.loc[invalid, f"PROJ_{metric}_V1"] = np.nan
+        enriched.loc[invalid, [f"PROJ_{metric}_V1", f"PROJ_{metric}_V41"]] = np.nan
 
     # FGA must be based on observed 2PA PLUS projected 3PA, not on
     # max(FGA, 3PA), which previously fabricated equal values.
@@ -1521,6 +1577,11 @@ def enrich_team_with_context(
             row["SEASON_3PA"], row["L10_3PA"], row["L5_3PA"],
             row["SEASON_MIN"], row["L10_MIN"], row["L5_MIN"],
             row["PROJ_MIN_V1"],
+            sample_available=tuple(
+                pd.to_numeric(row.get(f"{k}_GP", 0), errors="coerce") > 0
+                and pd.to_numeric(row.get(f"{k}_MIN", 0), errors="coerce") > 0
+                for k in ("SEASON", "L10", "L5")
+            ),
         )
 
     enriched["BASE_2PA_V1"] = enriched.apply(_project_two_pa, axis=1)
@@ -1541,7 +1602,16 @@ def enrich_team_with_context(
     enriched["PROJ_FGA_V1"] = (
         enriched["PROJ_2PA_V1"] + enriched["PROJ_3PA_V1"]
     )
-    enriched.loc[~valid_fga, ["BASE_FGA_V1", "PROJ_FGA_V1"]] = np.nan
+    # V4.1 shooting totals preserve 2PA + 3PA using the same verified samples.
+    safe_min = enriched["PROJ_MIN_V1"].replace(0.0, np.nan)
+    ratio_v41 = (enriched["PROJ_MIN_V41"] / safe_min).replace(
+        [np.inf, -np.inf], np.nan
+    )
+    enriched["PROJ_2PA_V41"] = enriched["PROJ_2PA_V1"] * ratio_v41
+    enriched["PROJ_FGA_V41"] = (
+        enriched["PROJ_2PA_V41"] + enriched["PROJ_3PA_V41"]
+    )
+    enriched.loc[~valid_fga, ["BASE_FGA_V1", "PROJ_FGA_V1", "PROJ_FGA_V41"]] = np.nan
     enriched.loc[~valid_fga, "PROJ_FGA"] = np.nan
     enriched["MATCHUP_EFFECT_PCT_FGA_V2"] = (
         enriched["PROJ_FGA_V1"]
@@ -1554,6 +1624,10 @@ def enrich_team_with_context(
         enriched.loc[three_valid, "PROJ_3PM_V1"],
         enriched.loc[three_valid, "PROJ_3PA_V1"],
     )
+    enriched.loc[three_valid, "PROJ_3PM_V41"] = np.minimum(
+        enriched.loc[three_valid, "PROJ_3PM_V41"],
+        enriched.loc[three_valid, "PROJ_3PA_V41"],
+    )
 
     # GP=0 must never look like a genuine zero-prop prediction.
     # This is especially important at the beginning of a new season.
@@ -1561,7 +1635,7 @@ def enrich_team_with_context(
         enriched["SEASON_GP"], errors="coerce"
     ).fillna(0).le(0)
     for metric in ["PTS", "REB", "AST", "PRA", "3PM", "FGA", "3PA"]:
-        enriched.loc[no_sample, f"PROJ_{metric}_V1"] = np.nan
+        enriched.loc[no_sample, [f"PROJ_{metric}_V1", f"PROJ_{metric}_V41"]] = np.nan
         enriched.loc[no_sample, f"PROJ_{metric}"] = np.nan
         enriched.loc[no_sample, f"BASE_{metric}_V1"] = np.nan
 

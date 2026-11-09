@@ -107,6 +107,18 @@ def snapshot_game(game: pd.Series, away: pd.DataFrame, home: pd.DataFrame,
                     continue
                 line = finite_float(player.get(f"MARKET_{metric}_LINE"))
                 line = line if line is not None and line > 0 else None
+                # Market is real only when the source and a positive quote
+                # match; a missing quote must NEVER become a fabricated line.
+                source = str(player.get(f"MARKET_{metric}_SOURCE") or "").strip()
+                if source not in {"BetMGM", "FanDuel"}:
+                    line = None
+                    source = ""
+                over_decimal = finite_float(player.get(f"MARKET_{metric}_OVER_DEC"))
+                under_decimal = finite_float(player.get(f"MARKET_{metric}_UNDER_DEC"))
+                if line is None:
+                    over_decimal = under_decimal = None
+                over_decimal = over_decimal if over_decimal is not None and over_decimal > 1 else None
+                under_decimal = under_decimal if under_decimal is not None and under_decimal > 1 else None
                 records.append({
                     "key": f"{gid}:{int(pid)}:{metric}",
                     "game_id": gid,
@@ -123,8 +135,27 @@ def snapshot_game(game: pd.Series, away: pd.DataFrame, home: pd.DataFrame,
                     "projection": round(pred, 4),
                     "minutes": finite_float(player.get("PROJ_MIN_V1")),
                     "season_gp": int(gp),
+                    # Original V4 is preserved forever. Shadow values and
+                    # ingredients are captured at the SAME pregame moment,
+                    # never reconstructed with knowledge of the final score.
+                    "projection_v41": finite_float(player.get(f"PROJ_{metric}_V41")),
+                    "base_projection": finite_float(player.get(f"BASE_{metric}_V1")),
+                    "minutes_v41": finite_float(player.get("PROJ_MIN_V41")),
+                    "minutes_source": str(player.get("MINUTES_SOURCE") or ""),
+                    "minutes_reliability": str(player.get("MINUTES_RELIABILITY") or ""),
+                    "season_avg": finite_float(player.get(f"SEASON_{metric}")),
+                    "l10_avg": finite_float(player.get(f"L10_{metric}")),
+                    "l5_avg": finite_float(player.get(f"L5_{metric}")),
+                    "rate_season": finite_float(player.get(f"SEASON_PM_{metric}")),
+                    "rate_l10": finite_float(player.get(f"L10_PM_{metric}")),
+                    "rate_l5": finite_float(player.get(f"L5_PM_{metric}")),
+                    "matchup_effect_pct": finite_float(player.get(f"MATCHUP_EFFECT_PCT_{metric}_V2")),
+                    "injury_status": str(player.get("INJ_STATUS") or ""),
                     "line": line,
-                    "line_source": str(player.get(f"MARKET_{metric}_SOURCE") or ""),
+                    "line_source": source,
+                    "line_updated_at": str(player.get(f"MARKET_{metric}_UPDATED_AT") or "") if line is not None else "",
+                    "over_decimal": over_decimal,
+                    "under_decimal": under_decimal,
                 })
     return records
 
@@ -183,6 +214,7 @@ def result_game(snaps: list[dict], summary: dict) -> list[dict]:
         results.append({
             "key": str(snap["key"]),
             "actual": float(actual),
+            "actual_minutes": finite_float(box.get("MIN")),
             "error": round(pred - actual, 4),
             "absolute_error": round(abs(pred - actual), 4),
             # Discrete basketball counts: 27.4 -> target >= 28; 4.7 -> >= 5.
@@ -205,13 +237,14 @@ def tracking_frame(snapshots: list[dict], results: list[dict]) -> pd.DataFrame:
     if results:
         resolved = pd.DataFrame(results).drop_duplicates("key", keep="first")
         frame = frame.merge(
-            resolved[[col for col in ("key", "actual", "error", "absolute_error",
+            resolved[[col for col in ("key", "actual", "actual_minutes", "error", "absolute_error",
                                         "target_minimum", "target_reached", "shortfall",
                                         "market_outcome", "direction_hit") if col in resolved]],
             on="key", how="left", validate="one_to_one",
         )
     else:
         frame["actual"] = float("nan")
+        frame["actual_minutes"] = float("nan")
         frame["error"] = float("nan")
         frame["absolute_error"] = float("nan")
         frame["target_minimum"] = float("nan")
@@ -224,6 +257,8 @@ def tracking_frame(snapshots: list[dict], results: list[dict]) -> pd.DataFrame:
     # on read. Older results may contain obsolete floor-based target fields;
     # never overwrite original frozen snapshots or ESPN box scores.
     # Market outcomes, the original decimal MAE and Edge remain untouched.
+    if "actual_minutes" not in frame:
+        frame["actual_minutes"] = float("nan")
     actual = pd.to_numeric(frame["actual"], errors="coerce")
     targets = frame["projection"].map(projection_target)
     usable = actual.notna() & targets.notna()
@@ -250,7 +285,11 @@ def capture(today=None, now=None):
     from api_nba import get_games_for_date
     from pdf_reader import get_season_string
     from processamento import get_matchup_context
+    from api_odds import get_odds_api_key
 
+    market_configured = bool(get_odds_api_key())
+    if not market_configured:
+        print("Market: SportsGameOdds key unavailable; real lines cannot be captured")
     now = now or datetime.now(timezone.utc)
     current_brt = now.astimezone(BRT)
     today = today or current_brt.date()
@@ -296,9 +335,9 @@ def capture(today=None, now=None):
             away, home = get_matchup_context(
                 int(game["VISITOR_TEAM_ID"]), int(game["HOME_TEAM_ID"]),
                 str(game["away_team_name"]), str(game["home_team_name"]),
-                get_season_string(target_date), True,
+                get_season_string(target_date), market_configured,
                 season_scope="Regular Season",
-                include_fanduel=False,
+                include_fanduel=market_configured,
                 roster_season=get_season_string(target_date),
                 target_date=target_date,
             )
@@ -316,7 +355,10 @@ def capture(today=None, now=None):
                 if added:
                     recorded_games += 1
                     saved.add(gid)
-                    print(f"Captured {gid}: {added} predictions")
+                    quoted = sum(r["line"] is not None for r in rows)
+                    print(f"Captured {gid}: {added} predictions, {quoted} with real market lines")
+                    if not quoted:
+                        print(f"::warning::No supported bookmaker line for {gid}; market validation unavailable")
             else:
                 print(f"Skipped game {gid}: cutoff passed or no usable forecasts")
         except Exception as exc:

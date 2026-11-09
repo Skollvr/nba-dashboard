@@ -108,3 +108,19 @@ def test_backtest_with_real_attempts_produces_nontrivial_fga_error():
     assert not fga.empty
     assert fga.iloc[0]["Jogos avaliados"] > 0
     assert fga.iloc[0]["MAE modelo"] > 0
+
+
+def test_rate_blend_preserves_real_zero_in_recent_sample():
+    from processamento import blend_rate
+    assert blend_rate(0.10, 0.08, 0.0) == pytest.approx(.074)
+    assert blend_rate(0.10, 0.08, 0.0, available=(True, True, False)) == pytest.approx(.0925)
+    assert blend_rate(0.0, 0.0, 0.0) == 0
+
+
+def test_v41_shadow_no_data_leak_and_reliability():
+    from prediction_core import rate_shadow_v41, minutes_shadow_v41, reliability_label
+    assert rate_shadow_v41(.1, .08, 0, (True, True, True), 3) == pytest.approx(.086)
+    assert minutes_shadow_v41(30, 28, 26, (True, True, True), "Available") == pytest.approx(27.6)
+    assert minutes_shadow_v41(30, 28, 26, (True, True, True), "Out") == 0
+    assert reliability_label(3, 1) == "Amostra pequena"
+    assert reliability_label(15, 8) == "Minutos instáveis"

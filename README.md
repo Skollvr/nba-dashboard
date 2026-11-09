@@ -240,3 +240,52 @@ Consulte [os workflows do GitHub Actions](https://github.com/Skollvr/nba-dashboa
 ## 📄 Licença
 
 Distribuído sob a **GNU General Public License v3.0 (GPL-3.0)**. Consulte o arquivo [LICENSE](LICENSE).
+
+
+### Evolução experimental e segurança (novembro de 2026)
+
+- O modelo **V4 continua oficial**. A variante **V4.1 experimental** é calculada
+  em paralelo e somente poderá ser validada em previsões futuras congeladas antes
+  dos jogos. A interface não transforma uma alternativa não validada em aposta.
+- Taxas de produção zero realmente observadas agora contam nos recortes L5/L10;
+  ausência de jogos é detectada via contagem de partidas/minutos, não via valor zero.
+- O monitor salva insumos do cálculo, minutos previstos, minutos reais quando houver,
+  informações defensivas e linhas reais BetMGM/FanDuel *apenas quando a API as fornece*.
+  Nenhuma linha ou odd é inventada. Registros legados permanecem imutáveis.
+- **Radar da rodada** mostra jogos da agenda ESPN e projeções já congeladas, sem
+  recalcular partidas passadas. Jogos sem snapshot aparecem explicitamente.
+- **Desempenho V4** ganhou indicadores de cobertura, diagnóstico por faixas,
+  comparação prospectiva e conferência de mercado quando houver odds capturadas.
+- Caches de confrontos duram até 3 minutos, com limpeza manual explícita.
+  Recarregar estatísticas pré-jogo limpa também os caches ESPN mais longos.
+- Dependências diretas estão fixadas nas versões que passaram no GitHub CI.
+- O exportador `archive_model_data.py --output exports/model-history` cria
+  arquivos mensais e manifesto SHA-256 **sem alterar os JSONL originais**.
+  A migração do armazenamento de produção permanece para uma etapa futura,
+  pois mudar onde o monitor escreve exige uma transição separada e auditável.
+- As seções de qualidade e prognóstico não representam rentabilidade nem
+  probabilidades calibradas. Rankings como "destaque forte" são heurísticas.
+
+### Backup antes da evolução
+
+Backup do estado pré-melhorias:
+`backup/pre-improvements-2026-11-09` (commit `002af0a0656c939987e86dbf29dc336cb3b4ce26`).
+
+Para restaurar sem perder os dados novos, crie uma branch a partir
+da `main` atual e restaure os arquivos de código da versão de backup
+**excluindo a pasta `data`**. Teste e abra um PR de reversão. Não abra
+simplesmente um PR do backup antigo para `main`: por ser ancestral, ele
+pode não apresentar diferenças. **Não usar force push**: o monitor adiciona
+previsões/resultados novos continuamente. Todos os arquivos originais
+(incluindo `data/model_*.jsonl`) permanecem no backup. Veja
+`ROLLBACK.md` para o procedimento verificado de restauração.
+
+### Testes visuais
+
+O workflow GitHub Actions `visual_smoke.yml` inicia o Streamlit real,
+abre as seções principais no Chromium e produz screenshots para desktop
+(1440×900) e celular (390×844). As capturas ficam nos artefatos da execução
+para análise humana; CI automático **não substitui revisão visual manual**.
+
+- O laboratório também compara o V4 com médias de temporada, L5 e L10
+  congeladas no mesmo snapshot, nos mesmos jogadores e sem reconstrução futura.

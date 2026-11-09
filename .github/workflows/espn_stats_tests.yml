@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
       - name: Syntax check
-        run: python -m compileall -q api_espn.py api_odds.py espn_context.py processamento.py projection_validation.py assisted_minutes.py api_lineups.py lineup_rotation.py ui_components.py ui_refresh.py raiox_refresh.py model_tracking.py model_tracking_ui.py app.py pdf_reader.py injury_sources.py
+        run: python -m compileall -q api_espn.py api_odds.py espn_context.py processamento.py projection_validation.py assisted_minutes.py api_lineups.py lineup_rotation.py ui_components.py ui_refresh.py raiox_refresh.py model_tracking.py model_tracking_ui.py model_quality.py prediction_core.py round_overview_ui.py matchup_cache.py archive_model_data.py app.py pdf_reader.py injury_sources.py
       - name: ESPN and projection tests
         run: |
           python -m pytest -q \
@@ -41,6 +41,10 @@ jobs:
             tests/test_nba_pdf_recovery.py \
             tests/test_ui_refresh.py \
             tests/test_model_tracking.py \
+            tests/test_model_quality.py \
+            tests/test_round_overview.py \
+            tests/test_archive_model_data.py \
+            tests/test_matchup_cache.py \
             tests/test_raiox_refresh.py \
             tests/test_betmgm_odds.py \
             tests/test_fanduel_odds.py \

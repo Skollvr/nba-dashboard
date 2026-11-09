@@ -690,8 +690,25 @@ def get_espn_league_position_baseline(
 
 
 def clear_espn_pregame_cache() -> None:
-    for fn in [get_espn_team_rotation, get_espn_injuries_standard]:
+    """Refresh volatile lineups AND all cached statistical projection inputs.
+
+    Otherwise a refresh reuses ~15-hour ESPN player logs and ~12-hour defensive
+    data, so the pregame button could silently show obsolete projections.
+    Explicit manual refresh may be slower; normal reruns retain cache benefits.
+    """
+    from api_espn import (
+        get_espn_team_roster, get_espn_team_schedule, get_espn_player_log,
+        get_espn_game_summary,
+    )
+    from processamento import build_team_table, get_position_opponent_profile_v2
+    for fn in [
+        get_espn_team_rotation, get_espn_injuries_standard,
+        get_espn_roster_player_logs, build_espn_defense_context,
+        get_espn_team_roster, get_espn_team_schedule,
+        get_espn_player_log, get_espn_game_summary,
+        build_team_table, get_position_opponent_profile_v2,
+    ]:
         try:
             fn.clear()
-        except Exception:
+        except AttributeError:
             pass
