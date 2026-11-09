@@ -14,6 +14,7 @@ from pdf_reader import get_season_string, clear_injury_cache
 from processamento import get_matchup_context
 from assisted_minutes import apply_manual_minutes
 from model_tracking_ui import render_model_performance
+from round_overview_ui import render_round_overview
 
 # Importando as funções do ui_components.py
 from ui_components import (
@@ -158,11 +159,14 @@ def main():
         )
 
     section = st.segmented_control(
-        "Seção", ["🏀 Analisar jogos", "📈 Desempenho do Modelo"],
+        "Seção", ["🏀 Analisar jogos", "📅 Radar da rodada", "📈 Desempenho do Modelo"],
         default="🏀 Analisar jogos", key="main_section",
     )
     if section == "📈 Desempenho do Modelo":
         render_model_performance()
+        return
+    if section == "📅 Radar da rodada":
+        render_round_overview()
         return
 
     today = get_brasilia_today()
@@ -332,7 +336,10 @@ def main():
         )
         return
 
-    game_label = st.selectbox("Escolha o jogo", games["label"].tolist())
+    highlighted_id = str(st.session_state.get("day_board_selected_game_id") or "")
+    game_ids = games["GAME_ID"].astype(str).tolist()
+    highlighted_index = game_ids.index(highlighted_id) if highlighted_id in game_ids else 0
+    game_label = st.selectbox("Escolha o jogo", games["label"].tolist(), index=highlighted_index)
     selected_game = games.loc[games["label"] == game_label].iloc[0]
 
     selected_game_key = (
@@ -342,6 +349,11 @@ def main():
         f"{analysis_season}::"
         f"{int(enable_betmgm)}::{int(enable_fanduel)}::{bookmaker_priority}"
     )
+
+    # A Radar selection opens the chosen matchup directly, saving two clicks.
+    if str(st.session_state.get("day_board_selected_game_id") or "") == str(selected_game["GAME_ID"]):
+        st.session_state["loaded_matchup_key"] = selected_game_key
+        st.session_state.pop("day_board_selected_game_id", None)
 
     if st.session_state.get("loaded_matchup_key") != selected_game_key:
         st.info("Jogo selecionado. Clique abaixo para carregar estatísticas, projeções e matchup.")

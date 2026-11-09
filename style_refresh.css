@@ -851,3 +851,24 @@
   .xray-period strong {font-size:1.05rem}
   .xray-title strong {font-size:1.08rem}
 }
+
+
+/* 2026-11 UX pass: improve legibility without altering chart/model content. */
+.nova-brand-kicker, .nova-matchup-kicker, .nova-pred-label,
+.nova-stat-label, .nova-stat-small, .nova-card-footer,
+.nova-sample, .nova-quote-hint, .nova-small, .nova-matchup-meta {
+  font-size: max(.78rem, 12.5px);
+  line-height: 1.35;
+}
+.nova-chip { font-size: .78rem; line-height: 1.35; }
+.stApp [data-testid="stDataFrame"] { max-width: 100%; }
+.stApp [data-testid="stTabs"] [role="tab"] { min-height: 43px; }
+@media (max-width: 768px) {
+  .nova-player-name { line-height: 1.25; }
+  .nova-pred { gap: 12px; }
+  .nova-pred-label, .nova-quote-hint { font-size: .8rem; }
+  .nova-matchup-kicker { letter-spacing: .07em; }
+  .stApp [data-testid="stMetric"] [data-testid="stMetricLabel"] p {
+    font-size: .84rem !important;
+  }
+}
