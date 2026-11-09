@@ -291,6 +291,7 @@ def main():
             st.rerun()
 
         if st.button("🧹 Recarregar tudo", use_container_width=True):
+            clear_cached_matchup()
             st.cache_data.clear()
             st.session_state.pop("agenda_games", None)
             st.session_state.pop("agenda_date_key", None)
