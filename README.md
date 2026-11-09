@@ -276,3 +276,10 @@ ou criar uma nova branch a partir desse commit e testar. **Não usar force
 push** sobre dados novos sem antes salvá-los, pois o monitor adiciona
 resultados e previsões continuamente. Todos os arquivos da versão original
 (incluindo `data/model_*.jsonl`) estão no commit de backup.
+
+### Testes visuais
+
+O workflow GitHub Actions `visual_smoke.yml` inicia o Streamlit real,
+abre as seções principais no Chromium e produz screenshots para desktop
+(1440×900) e celular (390×844). As capturas ficam nos artefatos da execução
+para análise humana; CI automático **não substitui revisão visual manual**.
