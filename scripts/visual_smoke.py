@@ -7,12 +7,29 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import time
+from urllib.request import urlopen
+from urllib.error import URLError
 
 from playwright.sync_api import sync_playwright
 
 OUT = Path("visual_smoke")
 OUT.mkdir(parents=True, exist_ok=True)
 BASE = "http://127.0.0.1:8501"
+
+
+def _await_server():
+    """Wait for the local Streamlit endpoint, avoiding race with browser."""
+    last_error = None
+    for _ in range(60):
+        try:
+            with urlopen(BASE + "/_stcore/health", timeout=2) as response:
+                if response.status == 200:
+                    return
+        except (URLError, OSError, TimeoutError) as exc:
+            last_error = exc
+        time.sleep(1)
+    raise RuntimeError(f"Streamlit did not become ready: {type(last_error).__name__}")
 
 
 def _check(page, label: str):
@@ -37,6 +54,7 @@ def _open_section(page, section: str):
 
 
 def main():
+    _await_server()
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         desktop = browser.new_page(viewport={"width":1440,"height":900},device_scale_factor=1)
