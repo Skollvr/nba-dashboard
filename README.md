@@ -271,11 +271,14 @@ Distribuído sob a **GNU General Public License v3.0 (GPL-3.0)**. Consulte o arq
 Backup do estado pré-melhorias:
 `backup/pre-improvements-2026-11-09` (commit `002af0a0656c939987e86dbf29dc336cb3b4ce26`).
 
-Para restaurar: primeiro abrir um PR da branch de backup contra `main`
-ou criar uma nova branch a partir desse commit e testar. **Não usar force
-push** sobre dados novos sem antes salvá-los, pois o monitor adiciona
-resultados e previsões continuamente. Todos os arquivos da versão original
-(incluindo `data/model_*.jsonl`) estão no commit de backup.
+Para restaurar sem perder os dados novos, crie uma branch a partir
+da `main` atual e restaure os arquivos de código da versão de backup
+**excluindo a pasta `data`**. Teste e abra um PR de reversão. Não abra
+simplesmente um PR do backup antigo para `main`: por ser ancestral, ele
+pode não apresentar diferenças. **Não usar force push**: o monitor adiciona
+previsões/resultados novos continuamente. Todos os arquivos originais
+(incluindo `data/model_*.jsonl`) permanecem no backup. Veja
+`ROLLBACK.md` para o procedimento verificado de restauração.
 
 ### Testes visuais
 
