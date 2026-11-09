@@ -25,7 +25,13 @@ def coverage(snapshots, results):
         and x.get("line") > 0 and x.get("line_source") in {"BetMGM", "FanDuel"}
     )]
     shadow = [x for x in snapshots if x.get("projection_v41") is not None]
-    minutes = [x for x in results if x.get("actual_minutes") is not None]
+    # Each result file repeats a player's minutes for the seven metrics.
+    # Report distinct players, not seven copies of the same minutes.
+    minutes = {
+        str(x.get("key", "")).rsplit(":", 1)[0]
+        for x in results
+        if x.get("actual_minutes") is not None
+    }
     return {
         "snapshots": len(snapshots),
         "games": len(games),

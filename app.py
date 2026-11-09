@@ -11,7 +11,7 @@ from lineup_rotation import merge_nba_lineup_evidence, summarize_recent_rotation
 from espn_context import clear_espn_pregame_cache
 from api_odds import get_odds_api_key, clear_odds_cache
 from pdf_reader import get_season_string, clear_injury_cache
-from processamento import get_matchup_context
+from matchup_cache import cached_matchup_context, clear_cached_matchup
 from assisted_minutes import apply_manual_minutes
 from model_tracking_ui import render_model_performance
 from round_overview_ui import render_round_overview
@@ -276,13 +276,15 @@ def main():
         season_scope = season_scope_map.get(season_scope_label, "Regular Season")        
         st.divider()
         st.caption(
-            "A agenda só é consultada quando você clicar em Buscar jogos. "
-            "Use a atualização pré-jogo para renovar apenas dados voláteis."
+            "A agenda só é consultada ao clicar em Buscar jogos. "
+            "Atualizar dados pré-jogo limpa também médias ESPN e defesa; "
+            "pode demorar mais do que mudar de jogador ou fundamento."
         )
 
         if st.button("🔄 Atualizar dados pré-jogo", use_container_width=True):
             clear_lineup_cache()
             clear_espn_pregame_cache()
+            clear_cached_matchup()
             clear_injury_cache()
             clear_odds_cache()
             st.session_state.pop("loaded_matchup_key", None)
@@ -363,7 +365,7 @@ def main():
 
     try:
         with st.status("Carregando dados do confronto...", expanded=True) as load_status:
-            away_df, home_df = get_matchup_context(
+            away_df, home_df = cached_matchup_context(
                 int(selected_game["VISITOR_TEAM_ID"]),
                 int(selected_game["HOME_TEAM_ID"]),
                 selected_game["away_team_name"],
@@ -375,7 +377,7 @@ def main():
                 bookmaker_priority=bookmaker_priority,
                 roster_season=season,
                 target_date=selected_date,
-                progress_callback=load_status.write,
+                _progress_callback=load_status.write,
             )
             load_status.update(
                 label="Dados do confronto carregados.",

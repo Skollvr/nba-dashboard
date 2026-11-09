@@ -83,6 +83,15 @@ def recorded_players(snapshots: list[dict], day: date, metric: str) -> pd.DataFr
     ).reset_index(drop=True)
 
 
+def _open_selected_game(selected: date, schedule: pd.DataFrame, game_id: str) -> None:
+    """Widget callback runs before rerun and may safely switch main_section."""
+    st.session_state["selected_game_date"] = selected
+    st.session_state["agenda_games"] = schedule
+    st.session_state["agenda_date_key"] = selected.isoformat()
+    st.session_state["day_board_selected_game_id"] = game_id
+    st.session_state["main_section"] = "🏀 Analisar jogos"
+
+
 def render_round_overview() -> None:
     st.markdown("## 📅 Radar da rodada")
     st.caption(
@@ -128,13 +137,11 @@ def render_round_overview() -> None:
         format_func=lambda game_id: str(board.loc[board["game_id"] == game_id, "Jogo"].iloc[0]),
         key="radar_game_selection",
     )
-    if st.button("Analisar confronto selecionado", use_container_width=True):
-        st.session_state["selected_game_date"] = selected
-        st.session_state["agenda_games"] = schedule
-        st.session_state["agenda_date_key"] = selected.isoformat()
-        st.session_state["day_board_selected_game_id"] = selected_game
-        st.session_state["main_section"] = "🏀 Analisar jogos"
-        st.rerun()
+    st.button(
+        "Analisar confronto selecionado", use_container_width=True,
+        on_click=_open_selected_game,
+        args=(selected, schedule, selected_game),
+    )
 
     st.markdown("#### Jogadores com projeções realmente registradas")
     metric = st.pills(
